@@ -1,7 +1,7 @@
 import React from "react";
 import "./App.css";
 
-export default function Hero({ user, onAuthClick, onLogout }) {
+export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
   return (
     <div
       className="hero"
@@ -51,6 +51,29 @@ export default function Hero({ user, onAuthClick, onLogout }) {
           {user ? (
             <>
               <div className="nav-user-pill">👤 {user.name.split(" ")[0]}</div>
+              {user.role === "admin" && (
+                <button
+                  className="btn btn-white"
+                  style={{
+                    fontSize: "0.85rem",
+                    padding: "8px 18px",
+                    background: "var(--c-primary)",
+                    color: "#fff",
+                  }}
+                  onClick={onMyBookings}
+                >
+                  ⚙️ Admin Panel
+                </button>
+              )}
+              {user.role !== "admin" && (
+                <button
+                  className="btn btn-white"
+                  style={{ fontSize: "0.85rem", padding: "8px 18px" }}
+                  onClick={onMyBookings}
+                >
+                  🎫 My Bookings
+                </button>
+              )}
               <button
                 className="btn btn-white"
                 style={{ fontSize: "0.85rem", padding: "8px 18px" }}

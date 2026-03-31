@@ -24,7 +24,12 @@ function SkeletonCard() {
   );
 }
 
-export default function Rooms({ user, onBookClick, onAuthPrompt }) {
+export default function Rooms({
+  user,
+  onBookClick,
+  onCardClick,
+  onAuthPrompt,
+}) {
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -174,7 +179,12 @@ export default function Rooms({ user, onBookClick, onAuthPrompt }) {
           </div>
         ) : (
           rooms.map((room) => (
-            <div className="room-card" key={room.room_id}>
+            <div
+              className="room-card"
+              key={room.room_id}
+              onClick={() => onCardClick && onCardClick(room)}
+              style={{ cursor: "pointer" }}
+            >
               <div className="room-card-img">
                 <img
                   src={
@@ -204,7 +214,13 @@ export default function Rooms({ user, onBookClick, onAuthPrompt }) {
                     👤 {room.capacity || 2} guests
                   </div>
                 </div>
-                <button className="book-btn" onClick={() => handleBook(room)}>
+                <button
+                  className="book-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleBook(room);
+                  }}
+                >
                   Book Now
                 </button>
               </div>
