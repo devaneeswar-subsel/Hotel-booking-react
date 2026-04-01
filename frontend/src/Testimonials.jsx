@@ -1,59 +1,68 @@
 import React from "react";
 import "./App.css";
+import { StarIcon, MapPinIcon } from "./Icons";
 
 const testimonials = [
   {
     initials: "AK",
     name: "Arjun Kumar",
-    location: "Mumbai, India",
+    location: "Mumbai",
     rating: 5,
-    text: "Absolutely stunning hotel! The rooms were immaculate and the staff went above and beyond. Will definitely be coming back.",
+    text: "The most exquisite stay I've ever experienced. Every detail was carefully crafted — from the bedding to the breathtaking view. Truly five-star in every sense.",
   },
   {
     initials: "PS",
     name: "Priya Sharma",
-    location: "Bangalore, India",
+    location: "Bangalore",
     rating: 5,
-    text: "The spa experience alone was worth every rupee. Glamour Hotel truly lives up to its name — pure luxury at its finest.",
+    text: "The spa alone made the trip worth it. The staff remembered our preferences from day one. This is what luxury hospitality actually feels like.",
   },
   {
     initials: "RV",
     name: "Rahul Verma",
-    location: "Chennai, India",
+    location: "Chennai",
     rating: 5,
-    text: "From the moment we checked in to checkout, the experience was flawless. The rooftop view at sunset is breathtaking!",
+    text: "Celebrated our anniversary here. The rooftop dinner at sunset was unforgettable. Impeccable service, stunning rooms, and food that rivalled the finest restaurants.",
   },
   {
     initials: "SN",
     name: "Sneha Nair",
-    location: "Kochi, India",
+    location: "Kochi",
     rating: 5,
-    text: "Best hotel stay I've ever had. The Presidential Suite was beyond our expectations — a dream come true for our anniversary.",
+    text: "From check-in to checkout, everything was seamless. The Presidential Suite exceeded every expectation. We've stayed at many luxury hotels — this is the finest.",
   },
 ];
 
 export default function Testimonials() {
   return (
     <div className="section">
-      <div className="section-header">
-        <div>
-          <div className="section-label">Guest Reviews</div>
-          <h2>
-            Words from <span>Our Guests</span>
-          </h2>
-        </div>
+      <div className="section-eyebrow">
+        <span>Guest Reviews</span>
       </div>
+      <h2 className="section-title">
+        Words from <em>Our Guests</em>
+      </h2>
 
       <div className="testimonials-grid">
         {testimonials.map((t, i) => (
           <div className="testimonial-card" key={i}>
-            <div className="testimonial-stars">{"⭐".repeat(t.rating)}</div>
-            <p className="testimonial-text">"{t.text}"</p>
+            <div className="testimonial-quote">"</div>
+            <div className="testimonial-stars">
+              {Array(t.rating)
+                .fill(0)
+                .map((_, j) => (
+                  <StarIcon key={j} size={14} filled color="var(--gold)" />
+                ))}
+            </div>
+            <p className="testimonial-text">{t.text}</p>
             <div className="testimonial-author">
               <div className="author-avatar">{t.initials}</div>
               <div>
                 <div className="author-name">{t.name}</div>
-                <div className="author-location">{t.location}</div>
+                <div className="author-location">
+                  <MapPinIcon size={11} color="var(--gray-400)" />
+                  {t.location}, India
+                </div>
               </div>
             </div>
           </div>

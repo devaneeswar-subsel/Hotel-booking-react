@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2/promise");
+const Razorpay = require("razorpay");
+const crypto = require("crypto");
 
 const app = express();
 app.use(cors());
@@ -8,26 +10,29 @@ app.use(express.json());
 
 // ─── DB CONNECTION POOL ───────────────────────────────────────────────────────
 const db = mysql.createPool({
-  host: "localhost",
-  user: "root", // ← change to your MySQL user
-  password: "Deva@15032002", // ← change to your MySQL password
-  database: "hotel_db", // ← change to your database name
+  host: "127.0.0.1",
+  user: "root",
+  password: "Deva@15032002", // ← your MySQL password
+  database: "hotel_db",
   waitForConnections: true,
   connectionLimit: 10,
 });
 
+// ─── RAZORPAY INSTANCE ────────────────────────────────────────────────────────
+const razorpay = new Razorpay({
+  key_id: "rzp_test_SXon2zuA5nekOo",
+  key_secret: "NZEKP2AIBvxru16wzQW4UOcW",
+});
+
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
-  res.json({ message: "Hotel Booking API 🚀", status: "OK" });
+  res.json({ message: "VV Grand Park Residency API 🚀", status: "OK" });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  AUTH ROUTES
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Register a new user
-// POST /api/auth/register
-// Body: { name, email, password, phone }
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { name, email, password, phone } = req.body;
@@ -35,21 +40,16 @@ app.post("/api/auth/register", async (req, res) => {
       return res
         .status(400)
         .json({ error: "name, email and password are required" });
-
-    // Check if email already exists
     const [existing] = await db.query(
       "SELECT user_id FROM users WHERE email = ?",
       [email],
     );
     if (existing.length > 0)
       return res.status(409).json({ error: "Email already registered" });
-
-    // NOTE: In production, hash the password with bcrypt before saving
     const [result] = await db.query(
       "INSERT INTO users (name, email, password, phone, role) VALUES (?, ?, ?, ?, 'guest')",
       [name, email, password, phone || null],
     );
-
     res.status(201).json({
       message: "User registered successfully",
       user_id: result.insertId,
@@ -62,25 +62,17 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
-// Login
-// POST /api/auth/login
-// Body: { email, password }
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password)
       return res.status(400).json({ error: "email and password are required" });
-
-    // NOTE: In production, compare hashed password with bcrypt
     const [rows] = await db.query(
       "SELECT user_id, name, email, role FROM users WHERE email = ? AND password = ?",
       [email, password],
     );
-
     if (rows.length === 0)
       return res.status(401).json({ error: "Invalid credentials" });
-
-    // NOTE: In production, return a JWT token instead of raw user data
     res.json({ message: "Login successful", user: rows[0] });
   } catch (err) {
     console.error(err);
@@ -92,15 +84,11 @@ app.post("/api/auth/login", async (req, res) => {
 //  ROOMS ROUTES
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Get all rooms (with optional filters)
-// GET /api/rooms?type=Deluxe&min_price=1000&max_price=5000&check_in=2025-08-01&check_out=2025-08-05
 app.get("/api/rooms", async (req, res) => {
   try {
     const { type, min_price, max_price, check_in, check_out } = req.query;
-
     let query = "SELECT * FROM rooms WHERE is_available = 1";
     const params = [];
-
     if (type) {
       query += " AND room_type = ?";
       params.push(type);
@@ -113,20 +101,14 @@ app.get("/api/rooms", async (req, res) => {
       query += " AND price_per_night <= ?";
       params.push(Number(max_price));
     }
-
-    // Exclude rooms that are already booked in the given date range
     if (check_in && check_out) {
-      query += `
-        AND room_id NOT IN (
-          SELECT room_id FROM bookings
-          WHERE status != 'cancelled'
-            AND check_in_date  < ?
-            AND check_out_date > ?
-        )
-      `;
+      query += ` AND room_id NOT IN (
+        SELECT room_id FROM bookings
+        WHERE status NOT IN ('cancelled','pending')
+          AND check_in_date < ? AND check_out_date > ?
+      )`;
       params.push(check_out, check_in);
     }
-
     const [rooms] = await db.query(query, params);
     res.json(rooms);
   } catch (err) {
@@ -137,8 +119,6 @@ app.get("/api/rooms", async (req, res) => {
   }
 });
 
-// Get a single room by ID
-// GET /api/rooms/:id
 app.get("/api/rooms/:id", async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM rooms WHERE room_id = ?", [
@@ -156,13 +136,13 @@ app.get("/api/rooms/:id", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  BOOKINGS ROUTES
+//  PAYMENT ROUTES (Razorpay)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Create a booking
-// POST /api/bookings
+// STEP 1 — Create Razorpay order + save booking as PENDING
+// POST /api/payment/create-order
 // Body: { user_id, room_id, check_in_date, check_out_date, guest_count }
-app.post("/api/bookings", async (req, res) => {
+app.post("/api/payment/create-order", async (req, res) => {
   try {
     const { user_id, room_id, check_in_date, check_out_date, guest_count } =
       req.body;
@@ -171,20 +151,19 @@ app.post("/api/bookings", async (req, res) => {
         error: "user_id, room_id, check_in_date, check_out_date are required",
       });
 
-    // Check room exists and is available
+    // Get room details
     const [roomRows] = await db.query(
       "SELECT * FROM rooms WHERE room_id = ? AND is_available = 1",
       [room_id],
     );
     if (roomRows.length === 0)
       return res.status(404).json({ error: "Room not found or unavailable" });
-
     const room = roomRows[0];
 
-    // Check for date conflicts
+    // Check date conflicts — exclude pending & cancelled
     const [conflicts] = await db.query(
       `SELECT booking_id FROM bookings
-       WHERE room_id = ? AND status != 'cancelled'
+       WHERE room_id = ? AND status NOT IN ('cancelled', 'pending')
          AND check_in_date < ? AND check_out_date > ?`,
       [room_id, check_out_date, check_in_date],
     );
@@ -201,12 +180,12 @@ app.post("/api/bookings", async (req, res) => {
       return res
         .status(400)
         .json({ error: "check_out_date must be after check_in_date" });
-
     const total_price = nights * room.price_per_night;
 
+    // Save booking as PENDING (not confirmed yet — awaits payment)
     const [result] = await db.query(
       `INSERT INTO bookings (user_id, room_id, check_in_date, check_out_date, guest_count, total_price, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'confirmed')`,
+       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
       [
         user_id,
         room_id,
@@ -216,28 +195,125 @@ app.post("/api/bookings", async (req, res) => {
         total_price,
       ],
     );
+    const booking_id = result.insertId;
+
+    // Create Razorpay order (amount in paise = total_price * 100)
+    const razorpayOrder = await razorpay.orders.create({
+      amount: Math.round(total_price * 100),
+      currency: "INR",
+      receipt: `booking_${booking_id}`,
+      notes: {
+        booking_id: String(booking_id),
+        user_id: String(user_id),
+        room_id: String(room_id),
+      },
+    });
 
     res.status(201).json({
-      message: "Booking confirmed!",
-      booking_id: result.insertId,
+      booking_id,
       total_price,
       nights,
+      razorpay_order_id: razorpayOrder.id,
+      razorpay_key: "rzp_test_SXon2zuA5nekOo",
+      room_name: `${room.room_type} — Room ${room.room_number || room_id}`,
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Booking failed", details: err.message });
+    res
+      .status(500)
+      .json({ error: "Failed to create order", details: err.message });
   }
 });
 
-// Get all bookings for a user
-// GET /api/bookings/user/:user_id
+// STEP 2 — Verify Razorpay payment signature + confirm booking
+// POST /api/payment/verify
+// Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature, booking_id }
+app.post("/api/payment/verify", async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      booking_id,
+    } = req.body;
+
+    // Verify signature
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const expected = crypto
+      .createHmac("sha256", "NZEKP2AIBvxru16wzQW4UOcW")
+      .update(body)
+      .digest("hex");
+
+    if (expected !== razorpay_signature) {
+      // Payment signature mismatch — mark booking as cancelled
+      await db.query(
+        "UPDATE bookings SET status = 'cancelled' WHERE booking_id = ?",
+        [booking_id],
+      );
+      return res
+        .status(400)
+        .json({ error: "Payment verification failed. Booking cancelled." });
+    }
+
+    // Signature valid — confirm booking and save payment ID
+    await db.query(
+      "UPDATE bookings SET status = 'confirmed', payment_id = ? WHERE booking_id = ?",
+      [razorpay_payment_id, booking_id],
+    );
+
+    // Return full booking details for invoice
+    const [rows] = await db.query(
+      `SELECT b.*, u.name AS guest_name, u.email, u.phone,
+              r.room_type, r.room_number, r.price_per_night, r.image_url
+       FROM bookings b
+       JOIN users u ON b.user_id = u.user_id
+       JOIN rooms r ON b.room_id = r.room_id
+       WHERE b.booking_id = ?`,
+      [booking_id],
+    );
+
+    res.json({
+      success: true,
+      message: "Payment verified. Booking confirmed!",
+      booking: rows[0],
+    });
+  } catch (err) {
+    console.error(err);
+    res
+      .status(500)
+      .json({ error: "Verification failed", details: err.message });
+  }
+});
+
+// STEP 3 — Payment failed — cancel the pending booking
+// POST /api/payment/failed
+app.post("/api/payment/failed", async (req, res) => {
+  try {
+    const { booking_id } = req.body;
+    await db.query(
+      "UPDATE bookings SET status = 'cancelled' WHERE booking_id = ? AND status = 'pending'",
+      [booking_id],
+    );
+    res.json({ message: "Booking cancelled due to payment failure." });
+  } catch (err) {
+    console.error(err);
+    res
+      .status(500)
+      .json({ error: "Failed to cancel booking", details: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  BOOKINGS ROUTES
+// ══════════════════════════════════════════════════════════════════════════════
+
 app.get("/api/bookings/user/:user_id", async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT b.*, r.room_type, r.price_per_night, r.image_url
        FROM bookings b
        JOIN rooms r ON b.room_id = r.room_id
-       WHERE b.user_id = ?
+       WHERE b.user_id = ? AND b.status != 'pending'
        ORDER BY b.created_at DESC`,
       [req.params.user_id],
     );
@@ -250,8 +326,6 @@ app.get("/api/bookings/user/:user_id", async (req, res) => {
   }
 });
 
-// Cancel a booking
-// PATCH /api/bookings/:id/cancel
 app.patch("/api/bookings/:id/cancel", async (req, res) => {
   try {
     const [result] = await db.query(
@@ -273,15 +347,13 @@ app.patch("/api/bookings/:id/cancel", async (req, res) => {
 //  ADMIN ROUTES
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Get dashboard stats
-// GET /api/admin/stats
 app.get("/api/admin/stats", async (req, res) => {
   try {
     const [[{ total_rooms }]] = await db.query(
       "SELECT COUNT(*) AS total_rooms FROM rooms",
     );
     const [[{ total_bookings }]] = await db.query(
-      "SELECT COUNT(*) AS total_bookings FROM bookings",
+      "SELECT COUNT(*) AS total_bookings FROM bookings WHERE status != 'pending'",
     );
     const [[{ total_users }]] = await db.query(
       "SELECT COUNT(*) AS total_users FROM users",
@@ -295,8 +367,8 @@ app.get("/api/admin/stats", async (req, res) => {
        FROM bookings b
        JOIN users u ON b.user_id = u.user_id
        JOIN rooms r ON b.room_id = r.room_id
-       ORDER BY b.created_at DESC
-       LIMIT 5`,
+       WHERE b.status != 'pending'
+       ORDER BY b.created_at DESC LIMIT 5`,
     );
     res.json({
       total_rooms,
@@ -313,8 +385,6 @@ app.get("/api/admin/stats", async (req, res) => {
   }
 });
 
-// Get all users (admin view)
-// GET /api/admin/users
 app.get("/api/admin/users", async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -329,8 +399,6 @@ app.get("/api/admin/users", async (req, res) => {
   }
 });
 
-// Get all bookings (admin view)
-// GET /api/admin/bookings
 app.get("/api/admin/bookings", async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -338,6 +406,7 @@ app.get("/api/admin/bookings", async (req, res) => {
        FROM bookings b
        JOIN users u ON b.user_id = u.user_id
        JOIN rooms r ON b.room_id = r.room_id
+       WHERE b.status != 'pending'
        ORDER BY b.created_at DESC`,
     );
     res.json(rows);
@@ -349,9 +418,6 @@ app.get("/api/admin/bookings", async (req, res) => {
   }
 });
 
-// Add a new room (admin)
-// POST /api/admin/rooms
-// Body: { room_number, room_type, price_per_night, capacity, description, image_url }
 app.post("/api/admin/rooms", async (req, res) => {
   try {
     const {
@@ -366,7 +432,6 @@ app.post("/api/admin/rooms", async (req, res) => {
       return res.status(400).json({
         error: "room_number, room_type, price_per_night are required",
       });
-
     const [result] = await db.query(
       `INSERT INTO rooms (room_number, room_type, price_per_night, capacity, description, image_url, is_available)
        VALUES (?, ?, ?, ?, ?, ?, 1)`,
@@ -388,15 +453,11 @@ app.post("/api/admin/rooms", async (req, res) => {
   }
 });
 
-// Update room availability (admin)
-// PATCH /api/admin/rooms/:id
-// Body: { is_available }
 app.patch("/api/admin/rooms/:id", async (req, res) => {
   try {
     const { is_available, price_per_night, description } = req.body;
     const fields = [];
     const values = [];
-
     if (is_available !== undefined) {
       fields.push("is_available = ?");
       values.push(is_available);
@@ -409,10 +470,8 @@ app.patch("/api/admin/rooms/:id", async (req, res) => {
       fields.push("description = ?");
       values.push(description);
     }
-
     if (fields.length === 0)
       return res.status(400).json({ error: "No fields to update" });
-
     values.push(req.params.id);
     await db.query(
       `UPDATE rooms SET ${fields.join(", ")} WHERE room_id = ?`,
@@ -427,8 +486,6 @@ app.patch("/api/admin/rooms/:id", async (req, res) => {
   }
 });
 
-// Delete a room (admin)
-// DELETE /api/admin/rooms/:id
 app.delete("/api/admin/rooms/:id", async (req, res) => {
   try {
     const [result] = await db.query("DELETE FROM rooms WHERE room_id = ?", [
@@ -448,5 +505,5 @@ app.delete("/api/admin/rooms/:id", async (req, res) => {
 // ─── START SERVER ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Hotel API running on http://localhost:${PORT}`);
+  console.log(`🚀 VV Grand Park API running on http://localhost:${PORT}`);
 });

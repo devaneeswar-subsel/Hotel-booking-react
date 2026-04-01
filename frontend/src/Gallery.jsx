@@ -4,7 +4,7 @@ import "./App.css";
 const images = [
   {
     src: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=900",
-    label: "Luxury Pool Suite",
+    label: "Infinity Pool",
   },
   {
     src: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600",
@@ -16,7 +16,7 @@ const images = [
   },
   {
     src: "https://images.unsplash.com/photo-1590490360182-c33d57733427?w=600",
-    label: "Deluxe Room",
+    label: "Deluxe Suite",
   },
   {
     src: "https://images.unsplash.com/photo-1517840901100-8179e982acb7?w=600",
@@ -27,21 +27,19 @@ const images = [
 export default function Gallery() {
   return (
     <div className="section" id="gallery">
-      <div className="section-header">
-        <div>
-          <div className="section-label">Photo Tour</div>
-          <h2>
-            Experience the <span>Local Culture & Sights</span>
-          </h2>
-        </div>
+      <div className="section-eyebrow">
+        <span>Photo Tour</span>
       </div>
+      <h2 className="section-title">
+        Experience the <em>Glamour</em>
+      </h2>
 
       <div className="gallery-grid">
         {images.map((img, i) => (
           <div className="gallery-item" key={i}>
-            <img src={img.src} alt={img.label} />
+            <img src={img.src} alt={img.label} loading="lazy" />
             <div className="gallery-overlay">
-              <span>{img.label}</span>
+              <span className="gallery-label">{img.label}</span>
             </div>
           </div>
         ))}

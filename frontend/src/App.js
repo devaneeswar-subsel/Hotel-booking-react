@@ -9,18 +9,232 @@ import Gallery from "./Gallery";
 import Testimonials from "./Testimonials";
 import Footer from "./Footer";
 import RoomDetail from "./Roomdetail";
+import AdminDashboard from "./AdminDashboard";
+import {
+  XIcon,
+  CheckIcon,
+  BookingIcon,
+  DownloadIcon,
+  ArrowRightIcon,
+} from "./Icons";
+
 const API = "http://localhost:5000";
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 function Toast({ msg, type, onHide }) {
   useEffect(() => {
-    const t = setTimeout(onHide, 3200);
+    const t = setTimeout(onHide, 3500);
     return () => clearTimeout(t);
   }, [onHide]);
   return <div className={`toast ${type}`}>{msg}</div>;
 }
 
-// ─── BOOKING MODAL (used by both guests AND admin) ────────────────────────────
+// ─── PAYMENT SUCCESS SCREEN ───────────────────────────────────────────────────
+function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
+  const nights =
+    booking.check_in_date && booking.check_out_date
+      ? Math.ceil(
+          (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
+            86400000,
+        )
+      : 1;
+
+  return (
+    <div className="modal-bg">
+      <div className="modal" style={{ maxWidth: "460px" }}>
+        {/* Success Header */}
+        <div
+          style={{
+            background: "var(--navy)",
+            padding: "32px 28px 24px",
+            textAlign: "center",
+            borderRadius: "20px 20px 0 0",
+          }}
+        >
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: "50%",
+              background: "rgba(45,154,110,0.2)",
+              border: "2px solid #2D9A6E",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "0 auto 16px",
+            }}
+          >
+            <CheckIcon size={28} color="#2D9A6E" />
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "1.4rem",
+              fontWeight: 600,
+              color: "#fff",
+              marginBottom: 6,
+            }}
+          >
+            Booking Confirmed!
+          </div>
+          <div style={{ fontSize: "0.82rem", color: "rgba(255,255,255,0.5)" }}>
+            Payment successful — your room is reserved
+          </div>
+        </div>
+
+        {/* Booking Details */}
+        <div style={{ padding: "24px 28px" }}>
+          <div
+            style={{
+              background: "var(--gray-50)",
+              borderRadius: "var(--radius-md)",
+              padding: "16px 18px",
+              marginBottom: 20,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                  color: "var(--navy)",
+                }}
+              >
+                {booking.room_type}
+              </span>
+              <span
+                style={{
+                  background: "#E8F8F0",
+                  color: "#2D9A6E",
+                  padding: "3px 10px",
+                  borderRadius: 3,
+                  fontSize: "0.65rem",
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px",
+                }}
+              >
+                Confirmed
+              </span>
+            </div>
+            {[
+              { label: "Booking ID", val: `#${booking.booking_id}` },
+              { label: "Check-in", val: booking.check_in_date?.slice(0, 10) },
+              { label: "Check-out", val: booking.check_out_date?.slice(0, 10) },
+              { label: "Nights", val: nights },
+              { label: "Payment ID", val: booking.payment_id || "—" },
+            ].map(({ label, val }) => (
+              <div
+                key={label}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "0.82rem",
+                  padding: "5px 0",
+                  borderTop: "1px solid var(--gray-200)",
+                }}
+              >
+                <span style={{ color: "var(--gray-400)" }}>{label}</span>
+                <span style={{ fontWeight: 600, color: "var(--navy)" }}>
+                  {val}
+                </span>
+              </div>
+            ))}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "0.95rem",
+                padding: "10px 0 4px",
+                borderTop: "1.5px solid var(--navy)",
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontWeight: 600,
+                  color: "var(--navy)",
+                }}
+              >
+                Total Paid
+              </span>
+              <span
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontWeight: 700,
+                  color: "var(--navy)",
+                  fontSize: "1.1rem",
+                }}
+              >
+                Rs.{Number(booking.total_price).toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <button
+            onClick={onDownloadInvoice}
+            style={{
+              width: "100%",
+              padding: "13px",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--navy)",
+              color: "var(--white)",
+              border: "none",
+              fontFamily: "var(--font-body)",
+              fontWeight: 600,
+              fontSize: "0.9rem",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              marginBottom: 10,
+              transition: "all 0.22s",
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "var(--gold)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "var(--navy)")
+            }
+          >
+            <DownloadIcon size={15} color="currentColor" />
+            Download Invoice (PDF)
+          </button>
+
+          <button
+            onClick={onClose}
+            style={{
+              width: "100%",
+              padding: "11px",
+              borderRadius: "var(--radius-sm)",
+              background: "transparent",
+              color: "var(--gray-600)",
+              border: "1.5px solid var(--gray-200)",
+              fontFamily: "var(--font-body)",
+              fontWeight: 500,
+              fontSize: "0.875rem",
+              cursor: "pointer",
+            }}
+          >
+            Back to Site
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── BOOKING MODAL WITH RAZORPAY ──────────────────────────────────────────────
 function BookingModal({ room, user, onClose, showToast }) {
   const [form, setForm] = useState({
     check_in_date: "",
@@ -28,6 +242,7 @@ function BookingModal({ room, user, onClose, showToast }) {
     guest_count: 1,
   });
   const [loading, setLoading] = useState(false);
+  const [confirmedBooking, setConfirmedBooking] = useState(null);
 
   const nights =
     form.check_in_date && form.check_out_date
@@ -47,8 +262,10 @@ function BookingModal({ room, user, onClose, showToast }) {
       return;
     }
     setLoading(true);
+
     try {
-      const res = await fetch(`${API}/api/bookings`, {
+      // STEP 1 — Create Razorpay order + pending booking on backend
+      const orderRes = await fetch(`${API}/api/payment/create-order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -57,32 +274,269 @@ function BookingModal({ room, user, onClose, showToast }) {
           ...form,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      showToast(
-        `Booking confirmed! Total: Rs.${Number(data.total_price).toLocaleString()}`,
-        "success",
-      );
-      onClose();
+      const orderData = await orderRes.json();
+      if (!orderRes.ok) throw new Error(orderData.error);
+
+      const {
+        booking_id,
+        total_price,
+        razorpay_order_id,
+        razorpay_key,
+        room_name,
+      } = orderData;
+
+      // STEP 2 — Open Razorpay checkout
+      const options = {
+        key: razorpay_key,
+        amount: Math.round(total_price * 100),
+        currency: "INR",
+        name: "VV Grand Park Residency",
+        description: room_name,
+        order_id: razorpay_order_id,
+        prefill: {
+          name: user.name,
+          email: user.email,
+          contact: user.phone || "",
+        },
+        theme: { color: "#0F1923" },
+        modal: {
+          ondismiss: async () => {
+            // User closed the modal without paying — cancel pending booking
+            await fetch(`${API}/api/payment/failed`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ booking_id }),
+            });
+            showToast("Payment cancelled. Booking was not confirmed.", "error");
+            setLoading(false);
+          },
+        },
+        handler: async (response) => {
+          // STEP 3 — Verify payment on backend
+          try {
+            const verifyRes = await fetch(`${API}/api/payment/verify`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                booking_id,
+              }),
+            });
+            const verifyData = await verifyRes.json();
+            if (!verifyRes.ok) throw new Error(verifyData.error);
+            // STEP 4 — Show success screen with confirmed booking
+            setConfirmedBooking(verifyData.booking);
+          } catch (err) {
+            showToast(err.message, "error");
+          } finally {
+            setLoading(false);
+          }
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.on("payment.failed", async (resp) => {
+        await fetch(`${API}/api/payment/failed`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ booking_id }),
+        });
+        showToast(`Payment failed: ${resp.error.description}`, "error");
+        setLoading(false);
+      });
+      rzp.open();
     } catch (err) {
       showToast(err.message, "error");
-    } finally {
       setLoading(false);
     }
+  }
+
+  // Download invoice after successful payment
+  async function downloadInvoice() {
+    if (!confirmedBooking) return;
+    const b = confirmedBooking;
+    const ci = b.check_in_date?.slice(0, 10);
+    const co = b.check_out_date?.slice(0, 10);
+    const nights =
+      ci && co ? Math.ceil((new Date(co) - new Date(ci)) / 86400000) : 1;
+    const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
+    const today = new Date().toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    const pricePer = Math.round(Number(b.total_price) / nights);
+
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const W = 210;
+
+    doc.setFillColor(15, 25, 35);
+    doc.rect(0, 0, W, 42, "F");
+    doc.setFont("times", "bold");
+    doc.setFontSize(22);
+    doc.setTextColor(201, 168, 76);
+    doc.text("VV GRAND PARK", 18, 18);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(180, 160, 100);
+    doc.text("RESIDENCY", 18, 25);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.setTextColor(255, 255, 255);
+    doc.text("INVOICE", W - 18, 20, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(150, 140, 120);
+    doc.text(invNo, W - 18, 27, { align: "right" });
+    doc.text(`Date: ${today}`, W - 18, 33, { align: "right" });
+
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.5);
+    doc.line(18, 48, W - 18, 48);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(134, 142, 150);
+    doc.text("BILL TO", 18, 58);
+    doc.text("FROM", W / 2 + 10, 58);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(15, 25, 35);
+    doc.text(b.guest_name || user.name, 18, 66);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(73, 80, 87);
+    doc.text(b.email || user.email, 18, 72);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(15, 25, 35);
+    doc.text("VV Grand Park Residency", W / 2 + 10, 66);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(73, 80, 87);
+    doc.text("123 Palace Road, Chennai", W / 2 + 10, 72);
+    doc.text("hello@vvgrandpark.com", W / 2 + 10, 78);
+    doc.text("+91 12345 67890", W / 2 + 10, 84);
+
+    const tableTop = 98;
+    doc.setFillColor(15, 25, 35);
+    doc.rect(18, tableTop, W - 36, 10, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(201, 168, 76);
+    doc.text("DESCRIPTION", 24, tableTop + 7);
+    doc.text("DETAILS", 110, tableTop + 7);
+    doc.text("AMOUNT", W - 18, tableTop + 7, { align: "right" });
+
+    const rows = [
+      {
+        desc: `${b.room_type} — Room ${b.room_number || b.room_id}`,
+        detail: `${ci} → ${co}`,
+        amount: `Rs.${pricePer.toLocaleString()} × ${nights} night${nights > 1 ? "s" : ""}`,
+      },
+      {
+        desc: "Guest Count",
+        detail: `${b.guest_count || 1} guest${(b.guest_count || 1) > 1 ? "s" : ""}`,
+        amount: "—",
+      },
+      { desc: "Payment ID", detail: b.payment_id || "—", amount: "—" },
+      { desc: "Booking Reference", detail: invNo, amount: "—" },
+    ];
+
+    let y = tableTop + 18;
+    rows.forEach((row, i) => {
+      if (i % 2 === 0) {
+        doc.setFillColor(248, 249, 250);
+        doc.rect(18, y - 6, W - 36, 10, "F");
+      }
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(15, 25, 35);
+      doc.text(row.desc, 24, y);
+      doc.setTextColor(73, 80, 87);
+      doc.text(row.detail, 110, y);
+      doc.text(row.amount, W - 18, y, { align: "right" });
+      y += 12;
+    });
+
+    y += 4;
+    doc.setDrawColor(225, 225, 225);
+    doc.setLineWidth(0.3);
+    doc.line(18, y, W - 18, y);
+    y += 10;
+    doc.setFillColor(15, 25, 35);
+    doc.roundedRect(W - 80, y - 6, 62, 18, 3, 3, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(201, 168, 76);
+    doc.text("TOTAL PAID", W - 49, y + 1, { align: "center" });
+    doc.setFontSize(13);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`Rs.${Number(b.total_price).toLocaleString()}`, W - 49, y + 9, {
+      align: "center",
+    });
+
+    y += 28;
+    doc.setFillColor(45, 154, 110);
+    doc.roundedRect(18, y - 5, 36, 10, 2, 2, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text("CONFIRMED", 36, y + 2, { align: "center" });
+
+    const footerY = 272;
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.4);
+    doc.line(18, footerY, W - 18, footerY);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.setTextColor(134, 142, 150);
+    doc.text(
+      "Thank you for choosing VV Grand Park Residency. We look forward to welcoming you again.",
+      W / 2,
+      footerY + 7,
+      { align: "center" },
+    );
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(
+      "www.vvgrandpark.com  |  hello@vvgrandpark.com  |  +91 12345 67890",
+      W / 2,
+      footerY + 13,
+      { align: "center" },
+    );
+
+    doc.save(
+      `${invNo}-${(b.guest_name || user.name).replace(/\s+/g, "_")}.pdf`,
+    );
+  }
+
+  // Show success screen after payment
+  if (confirmedBooking) {
+    return (
+      <PaymentSuccess
+        booking={confirmedBooking}
+        onClose={onClose}
+        onDownloadInvoice={downloadInvoice}
+      />
+    );
   }
 
   return (
     <div
       className="modal-bg"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && !loading && onClose()}
     >
       <div className="modal">
         <div className="modal-header">
           <h2>
             Book {room.room_type} — Room {room.room_number || room.room_id}
           </h2>
-          <button className="modal-close" onClick={onClose}>
-            ×
+          <button className="modal-close" onClick={onClose} disabled={loading}>
+            <XIcon size={14} color="#495057" />
           </button>
         </div>
         <div className="modal-body">
@@ -127,6 +581,7 @@ function BookingModal({ room, user, onClose, showToast }) {
                 }
               />
             </div>
+
             {nights > 0 && (
               <div className="price-summary">
                 <span>
@@ -138,9 +593,58 @@ function BookingModal({ room, user, onClose, showToast }) {
                 </strong>
               </div>
             )}
-            <button className="submit-btn" type="submit" disabled={loading}>
-              {loading ? "Confirming..." : "Confirm Booking"}
+
+            {/* Pay with Razorpay */}
+            <button
+              className="submit-btn"
+              type="submit"
+              disabled={loading || nights <= 0}
+              style={{ opacity: nights <= 0 ? 0.5 : 1 }}
+            >
+              {loading ? (
+                "Opening Payment..."
+              ) : (
+                <>
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
+                  </svg>
+                  Pay Now — Rs.
+                  {nights > 0
+                    ? (room.price_per_night * nights).toLocaleString()
+                    : "0"}
+                </>
+              )}
             </button>
+
+            <p
+              style={{
+                textAlign: "center",
+                fontSize: "0.72rem",
+                color: "var(--gray-400)",
+                marginTop: "10px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+              }}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              Secured by Razorpay · UPI, Cards, Net Banking accepted
+            </p>
           </form>
         </div>
       </div>
@@ -179,7 +683,7 @@ function AuthModal({ onClose, onLogin }) {
         onClose();
       } else {
         setMode("login");
-        setError("Registered! Please login.");
+        setError("Registered successfully! Please login.");
       }
     } catch (err) {
       setError(err.message);
@@ -197,7 +701,7 @@ function AuthModal({ onClose, onLogin }) {
         <div className="modal-header">
           <h2>{mode === "login" ? "Welcome Back" : "Create Account"}</h2>
           <button className="modal-close" onClick={onClose}>
-            ×
+            <XIcon size={14} color="#495057" />
           </button>
         </div>
         <div className="modal-body">
@@ -248,8 +752,8 @@ function AuthModal({ onClose, onLogin }) {
               {loading
                 ? "Please wait..."
                 : mode === "login"
-                  ? "Login"
-                  : "Register"}
+                  ? "Sign In"
+                  : "Create Account"}
             </button>
           </form>
           <div className="auth-switch">
@@ -274,7 +778,7 @@ function AuthModal({ onClose, onLogin }) {
                     setError("");
                   }}
                 >
-                  Login
+                  Sign in
                 </button>
               </>
             )}
@@ -285,7 +789,7 @@ function AuthModal({ onClose, onLogin }) {
   );
 }
 
-// ─── MY BOOKINGS MODAL (guests) ───────────────────────────────────────────────
+// ─── MY BOOKINGS MODAL ────────────────────────────────────────────────────────
 function MyBookingsModal({ user, onClose, showToast }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -323,7 +827,7 @@ function MyBookingsModal({ user, onClose, showToast }) {
         <div className="modal-header">
           <h2>My Bookings</h2>
           <button className="modal-close" onClick={onClose}>
-            ×
+            <XIcon size={14} color="#495057" />
           </button>
         </div>
         <div
@@ -334,8 +838,10 @@ function MyBookingsModal({ user, onClose, showToast }) {
             <div className="loader">Loading bookings...</div>
           ) : bookings.length === 0 ? (
             <div className="empty">
-              <div className="empty-icon">📭</div>
-              <p>No bookings yet.</p>
+              <div className="empty-icon">
+                <BookingIcon size={22} />
+              </div>
+              <p>No confirmed bookings yet.</p>
             </div>
           ) : (
             bookings.map((b) => (
@@ -353,11 +859,20 @@ function MyBookingsModal({ user, onClose, showToast }) {
                     {b.check_in_date?.slice(0, 10)} →{" "}
                     {b.check_out_date?.slice(0, 10)}
                   </p>
-                  <p style={{ marginTop: "4px" }}>
-                    <strong>Rs.{Number(b.total_price).toLocaleString()}</strong>
-                    &nbsp;&nbsp;
-                    <span className={`badge badge-${b.status}`}>
-                      {b.status}
+                  <p style={{ marginTop: "6px" }}>
+                    <strong
+                      style={{
+                        color: "var(--navy)",
+                        fontFamily: "var(--font-display)",
+                        fontSize: "0.95rem",
+                      }}
+                    >
+                      Rs.{Number(b.total_price).toLocaleString()}
+                    </strong>
+                    <span style={{ marginLeft: "10px" }}>
+                      <span className={`badge badge-${b.status}`}>
+                        {b.status}
+                      </span>
                     </span>
                   </p>
                 </div>
@@ -374,610 +889,6 @@ function MyBookingsModal({ user, onClose, showToast }) {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  ADMIN DASHBOARD
-// ═══════════════════════════════════════════════════════════════════════════════
-function AdminDashboard({ adminUser, onClose, showToast, fullPage = false }) {
-  const [tab, setTab] = useState("stats");
-  const [stats, setStats] = useState(null);
-  const [bookings, setBookings] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [rooms, setRooms] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [bookingRoom, setBookingRoom] = useState(null); // admin books a room
-
-  // Load all data on mount
-  useEffect(() => {
-    Promise.all([
-      fetch(`${API}/api/admin/stats`).then((r) => r.json()),
-      fetch(`${API}/api/admin/bookings`).then((r) => r.json()),
-      fetch(`${API}/api/rooms`).then((r) => r.json()),
-      fetch(`${API}/api/admin/users`)
-        .then((r) => r.json())
-        .catch(() => []),
-    ])
-      .then(([s, b, r, u]) => {
-        setStats(s);
-        setBookings(Array.isArray(b) ? b : []);
-        setRooms(Array.isArray(r) ? r : []);
-        setUsers(Array.isArray(u) ? u : []);
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  async function cancelBooking(id) {
-    try {
-      const res = await fetch(`${API}/api/bookings/${id}/cancel`, {
-        method: "PATCH",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setBookings((b) =>
-        b.map((x) => (x.booking_id === id ? { ...x, status: "cancelled" } : x)),
-      );
-      showToast("Booking cancelled", "success");
-    } catch (err) {
-      showToast(err.message, "error");
-    }
-  }
-
-  async function toggleRoom(roomId, currentStatus) {
-    try {
-      const res = await fetch(`${API}/api/admin/rooms/${roomId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_available: currentStatus ? 0 : 1 }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      setRooms((r) =>
-        r.map((x) =>
-          x.room_id === roomId
-            ? { ...x, is_available: currentStatus ? 0 : 1 }
-            : x,
-        ),
-      );
-      showToast(`Room ${currentStatus ? "disabled" : "enabled"}`, "success");
-    } catch (err) {
-      showToast(err.message, "error");
-    }
-  }
-
-  function downloadInvoice(b) {
-    const checkIn = b.check_in_date?.slice(0, 10);
-    const checkOut = b.check_out_date?.slice(0, 10);
-    const nights =
-      checkIn && checkOut
-        ? Math.ceil((new Date(checkOut) - new Date(checkIn)) / 86400000)
-        : 1;
-    const lines = [
-      "================================================",
-      "          GLAMOUR HOTEL — INVOICE               ",
-      "================================================",
-      `Invoice No   : INV-${String(b.booking_id).padStart(5, "0")}`,
-      `Date         : ${new Date().toLocaleDateString("en-IN")}`,
-      "------------------------------------------------",
-      "GUEST DETAILS",
-      `Name         : ${b.guest_name}`,
-      `Email        : ${b.email}`,
-      "------------------------------------------------",
-      "BOOKING DETAILS",
-      `Room Type    : ${b.room_type}`,
-      `Check-in     : ${checkIn}`,
-      `Check-out    : ${checkOut}`,
-      `Nights       : ${nights}`,
-      `Guests       : ${b.guest_count}`,
-      `Status       : ${b.status?.toUpperCase()}`,
-      "------------------------------------------------",
-      "PAYMENT SUMMARY",
-      `Price/Night  : Rs.${Math.round(Number(b.total_price) / nights).toLocaleString()}`,
-      `Nights       : ${nights}`,
-      `Total Amount : Rs.${Number(b.total_price).toLocaleString()}`,
-      "================================================",
-      "     Thank you for choosing GLAMOUR HOTEL!      ",
-      "================================================",
-    ].join("\n");
-    const blob = new Blob([lines], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Invoice-INV${String(b.booking_id).padStart(5, "0")}-${(b.guest_name || "guest").replace(/\s+/g, "_")}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  const tabs = ["stats", "bookings", "rooms", "users", "book a room"];
-
-  const content = (
-    <>
-      {/* TAB NAV */}
-      <div className="tab-nav" style={{ marginBottom: "28px" }}>
-        {tabs.map((t) => (
-          <button
-            key={t}
-            className={`tab-btn ${tab === t ? "active" : ""}`}
-            onClick={() => setTab(t)}
-            style={{ textTransform: "capitalize" }}
-          >
-            {t === "stats" && "📊 "}
-            {t === "bookings" && "🎫 "}
-            {t === "rooms" && "🏨 "}
-            {t === "users" && "👥 "}
-            {t === "book a room" && "➕ "}
-            {t}
-          </button>
-        ))}
-      </div>
-
-      <div>
-        {loading ? (
-          <div className="loader">Loading dashboard...</div>
-        ) : (
-          <>
-            {/* ── STATS TAB ── */}
-            {tab === "stats" && stats && (
-              <div>
-                <div className="stats-grid">
-                  <div className="stat-card">
-                    <div className="label">Total Rooms</div>
-                    <div className="value">{stats.total_rooms}</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="label">Total Bookings</div>
-                    <div className="value">{stats.total_bookings}</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="label">Total Users</div>
-                    <div className="value">{stats.total_users}</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="label">Total Revenue</div>
-                    <div className="value" style={{ fontSize: "1.3rem" }}>
-                      Rs.{Number(stats.total_revenue).toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-
-                <h3
-                  style={{
-                    fontFamily: "var(--font-display)",
-                    fontSize: "1rem",
-                    marginBottom: "16px",
-                    marginTop: "8px",
-                  }}
-                >
-                  Recent Bookings
-                </h3>
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Guest</th>
-                        <th>Room</th>
-                        <th>Check-in</th>
-                        <th>Check-out</th>
-                        <th>Amount</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(stats.recent_bookings || []).map((b) => (
-                        <tr key={b.booking_id}>
-                          <td>#{b.booking_id}</td>
-                          <td>{b.guest_name}</td>
-                          <td>{b.room_type}</td>
-                          <td>{b.check_in_date?.slice(0, 10)}</td>
-                          <td>{b.check_out_date?.slice(0, 10)}</td>
-                          <td>Rs.{Number(b.total_price).toLocaleString()}</td>
-                          <td>
-                            <span className={`badge badge-${b.status}`}>
-                              {b.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* ── ALL BOOKINGS TAB ── */}
-            {tab === "bookings" && (
-              <div>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "16px",
-                  }}
-                >
-                  <span
-                    style={{ fontSize: "0.875rem", color: "var(--c-muted)" }}
-                  >
-                    {bookings.length} total bookings
-                  </span>
-                </div>
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Guest</th>
-                        <th>Email</th>
-                        <th>Room</th>
-                        <th>Check-in</th>
-                        <th>Check-out</th>
-                        <th>Guests</th>
-                        <th>Total</th>
-                        <th>Status</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bookings.map((b) => (
-                        <tr key={b.booking_id}>
-                          <td>#{b.booking_id}</td>
-                          <td style={{ fontWeight: 600 }}>{b.guest_name}</td>
-                          <td
-                            style={{
-                              color: "var(--c-muted)",
-                              fontSize: "0.8rem",
-                            }}
-                          >
-                            {b.email}
-                          </td>
-                          <td>{b.room_type}</td>
-                          <td>{b.check_in_date?.slice(0, 10)}</td>
-                          <td>{b.check_out_date?.slice(0, 10)}</td>
-                          <td>{b.guest_count}</td>
-                          <td style={{ fontWeight: 600 }}>
-                            Rs.{Number(b.total_price).toLocaleString()}
-                          </td>
-                          <td>
-                            <span className={`badge badge-${b.status}`}>
-                              {b.status}
-                            </span>
-                          </td>
-                          <td
-                            style={{
-                              display: "flex",
-                              gap: "6px",
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            {b.status === "confirmed" && (
-                              <button
-                                className="cancel-btn"
-                                style={{
-                                  fontSize: "0.72rem",
-                                  padding: "4px 10px",
-                                }}
-                                onClick={() => cancelBooking(b.booking_id)}
-                              >
-                                Cancel
-                              </button>
-                            )}
-                            <button
-                              onClick={() => downloadInvoice(b)}
-                              style={{
-                                fontSize: "0.72rem",
-                                padding: "4px 10px",
-                                borderRadius: "8px",
-                                border: "1.5px solid var(--c-teal)",
-                                color: "var(--c-teal)",
-                                background: "none",
-                                cursor: "pointer",
-                                fontFamily: "var(--font-body)",
-                                fontWeight: 600,
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              ⬇ Invoice
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* ── ROOMS TAB ── */}
-            {tab === "rooms" && (
-              <div>
-                <div
-                  style={{
-                    marginBottom: "16px",
-                    fontSize: "0.875rem",
-                    color: "var(--c-muted)",
-                  }}
-                >
-                  {rooms.length} rooms total — toggle availability below
-                </div>
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Room No.</th>
-                        <th>Type</th>
-                        <th>Price/Night</th>
-                        <th>Capacity</th>
-                        <th>Available</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rooms.map((r) => (
-                        <tr key={r.room_id}>
-                          <td style={{ fontWeight: 600 }}>
-                            #{r.room_number || r.room_id}
-                          </td>
-                          <td>
-                            <span
-                              className="badge"
-                              style={{
-                                background: "#EEF0FF",
-                                color: "var(--c-primary)",
-                              }}
-                            >
-                              {r.room_type}
-                            </span>
-                          </td>
-                          <td style={{ fontWeight: 600 }}>
-                            Rs.{Number(r.price_per_night).toLocaleString()}
-                          </td>
-                          <td>👤 {r.capacity || 2}</td>
-                          <td>
-                            <span
-                              className={`badge ${r.is_available ? "badge-confirmed" : "badge-cancelled"}`}
-                            >
-                              {r.is_available ? "Available" : "Disabled"}
-                            </span>
-                          </td>
-                          <td style={{ display: "flex", gap: "8px" }}>
-                            <button
-                              className="cancel-btn"
-                              style={{
-                                fontSize: "0.75rem",
-                                padding: "4px 10px",
-                                borderColor: r.is_available
-                                  ? "var(--c-accent)"
-                                  : "var(--c-teal)",
-                                color: r.is_available
-                                  ? "var(--c-accent)"
-                                  : "var(--c-teal)",
-                              }}
-                              onClick={() =>
-                                toggleRoom(r.room_id, r.is_available)
-                              }
-                            >
-                              {r.is_available ? "Disable" : "Enable"}
-                            </button>
-                            <button
-                              className="book-btn"
-                              style={{
-                                width: "auto",
-                                padding: "4px 14px",
-                                fontSize: "0.75rem",
-                                marginTop: 0,
-                              }}
-                              onClick={() => setBookingRoom(r)}
-                            >
-                              Book
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* ── USERS TAB ── */}
-            {tab === "users" && (
-              <div>
-                <div
-                  style={{
-                    marginBottom: "16px",
-                    fontSize: "0.875rem",
-                    color: "var(--c-muted)",
-                  }}
-                >
-                  {users.length} registered users
-                </div>
-                {users.length === 0 ? (
-                  <div className="empty">
-                    <div className="empty-icon">👥</div>
-                    <p>
-                      No users found. Add GET /api/admin/users to your server.js
-                    </p>
-                  </div>
-                ) : (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>ID</th>
-                          <th>Name</th>
-                          <th>Email</th>
-                          <th>Phone</th>
-                          <th>Role</th>
-                          <th>Joined</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {users.map((u) => (
-                          <tr key={u.user_id}>
-                            <td>#{u.user_id}</td>
-                            <td style={{ fontWeight: 600 }}>{u.name}</td>
-                            <td
-                              style={{
-                                color: "var(--c-muted)",
-                                fontSize: "0.8rem",
-                              }}
-                            >
-                              {u.email}
-                            </td>
-                            <td>{u.phone || "—"}</td>
-                            <td>
-                              <span
-                                className={`badge ${u.role === "admin" ? "badge-confirmed" : "badge-completed"}`}
-                              >
-                                {u.role}
-                              </span>
-                            </td>
-                            <td
-                              style={{
-                                color: "var(--c-muted)",
-                                fontSize: "0.8rem",
-                              }}
-                            >
-                              {u.created_at?.slice(0, 10)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── BOOK A ROOM TAB ── */}
-            {tab === "book a room" && (
-              <div>
-                <p
-                  style={{
-                    fontSize: "0.875rem",
-                    color: "var(--c-muted)",
-                    marginBottom: "20px",
-                  }}
-                >
-                  Admin booking — select any available room below and click
-                  Book.
-                </p>
-                <div className="rooms-grid">
-                  {rooms
-                    .filter((r) => r.is_available)
-                    .map((r) => (
-                      <div className="room-card" key={r.room_id}>
-                        <div className="room-card-img">
-                          <img
-                            src={
-                              r.image_url ||
-                              "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=600"
-                            }
-                            alt={r.room_type}
-                          />
-                          <div className="room-type-badge">{r.room_type}</div>
-                        </div>
-                        <div className="room-card-body">
-                          <h3>Room {r.room_number || r.room_id}</h3>
-                          <p>{r.description || "Premium hotel room."}</p>
-                          <div className="room-card-footer">
-                            <div className="room-price">
-                              Rs.{Number(r.price_per_night).toLocaleString()}{" "}
-                              <span>/night</span>
-                            </div>
-                            <div className="room-capacity">
-                              👤 {r.capacity || 2}
-                            </div>
-                          </div>
-                          <button
-                            className="book-btn"
-                            onClick={() => setBookingRoom(r)}
-                          >
-                            Book this Room
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </>
-  );
-
-  return fullPage ? (
-    <div>
-      {content}
-      {bookingRoom && (
-        <BookingModal
-          room={bookingRoom}
-          user={adminUser}
-          onClose={() => setBookingRoom(null)}
-          showToast={(msg, type) => {
-            showToast(msg, type);
-            setBookingRoom(null);
-            fetch(`${API}/api/admin/bookings`)
-              .then((r) => r.json())
-              .then(setBookings);
-            fetch(`${API}/api/admin/stats`)
-              .then((r) => r.json())
-              .then(setStats);
-          }}
-        />
-      )}
-    </div>
-  ) : (
-    <div
-      className="modal-bg"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div
-        className="modal"
-        style={{
-          maxWidth: "900px",
-          width: "95vw",
-          maxHeight: "90vh",
-          overflowY: "auto",
-        }}
-      >
-        <div
-          className="modal-header"
-          style={{ background: "var(--c-dark)", borderRadius: "16px 16px 0 0" }}
-        >
-          <h2 style={{ color: "#fff", fontFamily: "var(--font-display)" }}>
-            Admin Dashboard
-          </h2>
-          <button
-            className="modal-close"
-            onClick={onClose}
-            style={{ color: "#fff" }}
-          >
-            ×
-          </button>
-        </div>
-        <div style={{ padding: "24px" }}>{content}</div>
-      </div>
-      {bookingRoom && (
-        <BookingModal
-          room={bookingRoom}
-          user={adminUser}
-          onClose={() => setBookingRoom(null)}
-          showToast={(msg, type) => {
-            showToast(msg, type);
-            setBookingRoom(null);
-            fetch(`${API}/api/admin/bookings`)
-              .then((r) => r.json())
-              .then(setBookings);
-            fetch(`${API}/api/admin/stats`)
-              .then((r) => r.json())
-              .then(setStats);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -999,10 +910,7 @@ export default function App() {
   function handleLogin(u) {
     setUser(u);
     showToast(`Welcome, ${u.name.split(" ")[0]}!`, "success");
-    // Auto-open admin dashboard if admin logs in
-    if (u.role === "admin") {
-      setTimeout(() => setShowAdmin(true), 600);
-    }
+    if (u.role === "admin") setTimeout(() => setShowAdmin(true), 500);
   }
 
   function handleLogout() {
@@ -1012,7 +920,7 @@ export default function App() {
     showToast("Logged out successfully", "success");
   }
 
-  // ── ROOM DETAIL PAGE ──────────────────────────────────────────────────────
+  // ── ROOM DETAIL PAGE ────────────────────────────────────────────────────────
   if (selectedRoom) {
     return (
       <>
@@ -1045,90 +953,16 @@ export default function App() {
     );
   }
 
-  // ── ADMIN PAGE (full page) ──────────────────────────────────────────────────
+  // ── ADMIN PAGE ──────────────────────────────────────────────────────────────
   if (showAdmin && user?.role === "admin") {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "var(--c-bg)",
-          fontFamily: "var(--font-body)",
-        }}
-      >
-        {/* Admin Navbar */}
-        <div
-          style={{
-            background: "var(--c-dark)",
-            padding: "0 2rem",
-            height: "64px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            position: "sticky",
-            top: 0,
-            zIndex: 100,
-          }}
-        >
-          <div
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: "1.2rem",
-              fontWeight: 800,
-              color: "#fff",
-              letterSpacing: "-0.5px",
-            }}
-          >
-            ⚙️ GLAMOUR — Admin Panel
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <span
-              style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.85rem" }}
-            >
-              Logged in as {user.name}
-            </span>
-            <button
-              onClick={() => setShowAdmin(false)}
-              style={{
-                background: "rgba(255,255,255,0.1)",
-                border: "1px solid rgba(255,255,255,0.2)",
-                color: "#fff",
-                padding: "8px 18px",
-                borderRadius: "8px",
-                fontFamily: "var(--font-body)",
-                fontSize: "0.85rem",
-                cursor: "pointer",
-              }}
-            >
-              ← Back to Site
-            </button>
-            <button
-              onClick={handleLogout}
-              style={{
-                background: "var(--c-accent)",
-                border: "none",
-                color: "#fff",
-                padding: "8px 18px",
-                borderRadius: "8px",
-                fontFamily: "var(--font-body)",
-                fontSize: "0.85rem",
-                cursor: "pointer",
-              }}
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-
-        {/* Admin Content */}
-        <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "2rem" }}>
-          <AdminDashboard
-            adminUser={user}
-            onClose={() => setShowAdmin(false)}
-            showToast={showToast}
-            fullPage={true}
-          />
-        </div>
-
+      <>
+        <AdminDashboard
+          adminUser={user}
+          onClose={() => setShowAdmin(false)}
+          showToast={showToast}
+          fullPage={true}
+        />
         {toast && (
           <Toast
             msg={toast.msg}
@@ -1136,11 +970,11 @@ export default function App() {
             onHide={() => setToast(null)}
           />
         )}
-      </div>
+      </>
     );
   }
 
-  // ── MAIN SITE ──────────────────────────────────────────────────────────────
+  // ── MAIN SITE ───────────────────────────────────────────────────────────────
   return (
     <div>
       <Hero
@@ -1151,14 +985,12 @@ export default function App() {
           user?.role === "admin" ? setShowAdmin(true) : setShowBookings(true)
         }
       />
-
       <Rooms
         user={user}
         onBookClick={(room) => setBookingRoom(room)}
         onCardClick={(room) => setSelectedRoom(room)}
         onAuthPrompt={() => setShowAuth(true)}
       />
-
       <CalendarSection />
       <Facilities />
       <Gallery />
@@ -1168,7 +1000,6 @@ export default function App() {
       {showAuth && (
         <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
       )}
-
       {bookingRoom && user && (
         <BookingModal
           room={bookingRoom}
@@ -1177,7 +1008,6 @@ export default function App() {
           showToast={showToast}
         />
       )}
-
       {showBookings && user && user.role !== "admin" && (
         <MyBookingsModal
           user={user}
@@ -1185,7 +1015,6 @@ export default function App() {
           showToast={showToast}
         />
       )}
-
       {toast && (
         <Toast
           msg={toast.msg}
@@ -1199,22 +1028,26 @@ export default function App() {
           onClick={() => setShowBookings(true)}
           style={{
             position: "fixed",
-            bottom: "24px",
-            left: "24px",
+            bottom: "28px",
+            left: "28px",
             zIndex: 300,
-            background: "var(--c-primary)",
-            color: "#fff",
+            background: "var(--navy)",
+            color: "var(--white)",
             border: "none",
-            borderRadius: "30px",
-            padding: "12px 20px",
+            borderRadius: "50px",
+            padding: "12px 22px",
             fontFamily: "var(--font-body)",
             fontWeight: 600,
-            fontSize: "0.875rem",
+            fontSize: "0.82rem",
             cursor: "pointer",
-            boxShadow: "0 6px 20px rgba(108,99,255,0.4)",
+            boxShadow: "0 6px 24px rgba(15,25,35,0.3)",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
           }}
         >
-          🎫 My Bookings
+          <BookingIcon size={15} color="var(--gold-light)" />
+          My Bookings
         </button>
       )}
     </div>

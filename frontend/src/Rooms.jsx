@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
+import { SearchIcon, UserIcon, ArrowRightIcon } from "./Icons";
 
 const API = "http://localhost:5000";
 
-// Fallback images by room type
-const FALLBACK_IMGS = {
+const FALLBACK = {
   Standard:
-    "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=600",
-  Deluxe: "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=600",
-  Suite: "https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?w=600",
-  Luxury: "https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=600",
+    "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=700",
+  Deluxe: "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=700",
+  Suite: "https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?w=700",
+  Luxury: "https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=700",
   Presidential:
-    "https://images.unsplash.com/photo-1631049552057-403cdb8f0658?w=600",
+    "https://images.unsplash.com/photo-1631049552057-403cdb8f0658?w=700",
 };
 
 function SkeletonCard() {
@@ -47,23 +47,23 @@ export default function Rooms({
     setLoading(true);
     setError("");
     try {
-      const params = new URLSearchParams();
-      if (filters.type) params.set("type", filters.type);
-      if (filters.minPrice) params.set("min_price", filters.minPrice);
-      if (filters.maxPrice) params.set("max_price", filters.maxPrice);
-
-      const res = await fetch(`${API}/api/rooms?${params}`);
+      const p = new URLSearchParams();
+      if (filters.type) p.set("type", filters.type);
+      if (filters.minPrice) p.set("min_price", filters.minPrice);
+      if (filters.maxPrice) p.set("max_price", filters.maxPrice);
+      const res = await fetch(`${API}/api/rooms?${p}`);
       if (!res.ok) throw new Error("Server error");
       const data = await res.json();
       setRooms(Array.isArray(data) ? data : []);
-    } catch (err) {
+    } catch {
       setError("Could not load rooms. Is the backend running?");
     } finally {
       setLoading(false);
     }
   }
 
-  function handleBook(room) {
+  function handleBook(e, room) {
+    e.stopPropagation();
     if (!user) {
       onAuthPrompt();
       return;
@@ -73,96 +73,79 @@ export default function Rooms({
 
   return (
     <div className="section" id="rooms">
-      <div className="section-header">
-        <div>
-          <div className="section-label">Our Rooms</div>
-          <h2>
-            Choose the <span>Perfect Room</span>
-          </h2>
-        </div>
+      <div className="section-eyebrow">
+        <span>Accommodations</span>
       </div>
+      <h2 className="section-title">
+        Choose Your <em>Perfect Room</em>
+      </h2>
 
       {/* FILTERS */}
-      <div
-        style={{
-          display: "flex",
-          gap: "12px",
-          marginBottom: "28px",
-          flexWrap: "wrap",
-        }}
-      >
+      <div className="rooms-filter-bar">
         <select
+          className="filter-select"
           value={filters.type}
           onChange={(e) => setFilters({ ...filters, type: e.target.value })}
-          style={{
-            padding: "9px 14px",
-            borderRadius: "10px",
-            border: "1.5px solid var(--c-border)",
-            fontFamily: "var(--font-body)",
-            fontSize: "0.875rem",
-            color: "var(--c-dark)",
-            cursor: "pointer",
-          }}
         >
-          <option value="">All Types</option>
+          <option value="">All Room Types</option>
           <option>Standard</option>
           <option>Deluxe</option>
           <option>Suite</option>
           <option>Luxury</option>
           <option>Presidential</option>
         </select>
-
         <input
+          className="filter-input"
           type="number"
           placeholder="Min price ₹"
           value={filters.minPrice}
           onChange={(e) => setFilters({ ...filters, minPrice: e.target.value })}
-          style={{
-            padding: "9px 14px",
-            borderRadius: "10px",
-            border: "1.5px solid var(--c-border)",
-            fontFamily: "var(--font-body)",
-            fontSize: "0.875rem",
-            width: "140px",
-          }}
         />
         <input
+          className="filter-input"
           type="number"
           placeholder="Max price ₹"
           value={filters.maxPrice}
           onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })}
-          style={{
-            padding: "9px 14px",
-            borderRadius: "10px",
-            border: "1.5px solid var(--c-border)",
-            fontFamily: "var(--font-body)",
-            fontSize: "0.875rem",
-            width: "140px",
-          }}
         />
-
         <button
           className="btn btn-primary"
           onClick={fetchRooms}
-          style={{ padding: "9px 22px" }}
+          style={{ padding: "10px 22px", fontSize: "0.85rem" }}
         >
+          <SearchIcon size={15} />
           Search
         </button>
+        {(filters.type || filters.minPrice || filters.maxPrice) && (
+          <button
+            className="btn btn-outline"
+            onClick={() => {
+              setFilters({ type: "", minPrice: "", maxPrice: "" });
+              setTimeout(fetchRooms, 0);
+            }}
+            style={{ padding: "10px 16px", fontSize: "0.85rem" }}
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* ERROR */}
       {error && (
-        <div
-          style={{
-            background: "#FEE2E2",
-            color: "#991B1B",
-            borderRadius: "10px",
-            padding: "12px 16px",
-            marginBottom: "20px",
-            fontSize: "0.875rem",
-          }}
-        >
-          ⚠️ {error}
+        <div className="error-msg">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          {error}
         </div>
       )}
 
@@ -174,7 +157,9 @@ export default function Rooms({
             .map((_, i) => <SkeletonCard key={i} />)
         ) : rooms.length === 0 ? (
           <div className="empty" style={{ gridColumn: "1/-1" }}>
-            <div className="empty-icon">🔍</div>
+            <div className="empty-icon">
+              <SearchIcon size={22} />
+            </div>
             <p>No rooms found. Try adjusting your filters.</p>
           </div>
         ) : (
@@ -182,19 +167,19 @@ export default function Rooms({
             <div
               className="room-card"
               key={room.room_id}
-              onClick={() => onCardClick && onCardClick(room)}
-              style={{ cursor: "pointer" }}
+              onClick={() => onCardClick?.(room)}
             >
               <div className="room-card-img">
                 <img
                   src={
                     room.image_url ||
-                    FALLBACK_IMGS[room.room_type] ||
-                    FALLBACK_IMGS.Deluxe
+                    FALLBACK[room.room_type] ||
+                    FALLBACK.Deluxe
                   }
                   alt={room.room_type}
+                  loading="lazy"
                   onError={(e) => {
-                    e.target.src = FALLBACK_IMGS.Deluxe;
+                    e.target.src = FALLBACK.Deluxe;
                   }}
                 />
                 <div className="room-type-badge">{room.room_type}</div>
@@ -203,25 +188,24 @@ export default function Rooms({
                 <h3>Room {room.room_number || `#${room.room_id}`}</h3>
                 <p>
                   {room.description ||
-                    "A beautifully furnished room with modern amenities."}
+                    "A beautifully furnished room with modern amenities and premium comfort."}
                 </p>
                 <div className="room-card-footer">
                   <div className="room-price">
-                    ₹{Number(room.price_per_night).toLocaleString()}{" "}
-                    <span>/night</span>
+                    ₹{Number(room.price_per_night).toLocaleString()}
+                    <span> /night</span>
                   </div>
                   <div className="room-capacity">
-                    👤 {room.capacity || 2} guests
+                    <UserIcon size={13} color="var(--gray-400)" />
+                    {room.capacity || 2} guests
                   </div>
                 </div>
                 <button
                   className="book-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleBook(room);
-                  }}
+                  onClick={(e) => handleBook(e, room)}
                 >
                   Book Now
+                  <ArrowRightIcon size={15} />
                 </button>
               </div>
             </div>
