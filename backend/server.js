@@ -8,17 +8,27 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ─── DB (Railway env vars with local fallback) ────────────────────────────────
-const db = mysql.createPool({
-  host: process.env.MYSQLHOST || "127.0.0.1",
-  user: process.env.MYSQLUSER || "root",
-  password: process.env.MYSQLPASSWORD || "",
-  database: process.env.MYSQLDATABASE || "hotel_db",
-  port: Number(process.env.MYSQLPORT) || 3306,
-  waitForConnections: true,
-  connectionLimit: 10,
-  ssl: process.env.MYSQLHOST ? { rejectUnauthorized: false } : false,
-});
+// ─── DB (Railway URL or individual vars or local fallback) ───────────────────
+let db;
+if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
+  // Railway provides a full connection URL
+  db = mysql.createPool({
+    uri: process.env.MYSQL_URL || process.env.DATABASE_URL,
+    waitForConnections: true,
+    connectionLimit: 10,
+    ssl: { rejectUnauthorized: false },
+  });
+} else {
+  db = mysql.createPool({
+    host: process.env.MYSQLHOST || "127.0.0.1",
+    user: process.env.MYSQLUSER || "root",
+    password: process.env.MYSQLPASSWORD || "",
+    database: process.env.MYSQLDATABASE || "hotel_db",
+    port: Number(process.env.MYSQLPORT) || 3306,
+    waitForConnections: true,
+    connectionLimit: 10,
+  });
+}
 
 // ─── RAZORPAY (env vars with fallback) ───────────────────────────────────────
 const razorpay = new Razorpay({
