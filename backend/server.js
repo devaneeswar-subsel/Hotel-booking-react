@@ -10,10 +10,11 @@ app.use(express.json());
 
 // ─── DB CONNECTION POOL ───────────────────────────────────────────────────────
 const db = mysql.createPool({
-  host: "127.0.0.1",
-  user: "root",
-  password: "Deva@15032002", // ← your MySQL password
-  database: "hotel_db",
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT,
   waitForConnections: true,
   connectionLimit: 10,
 });
