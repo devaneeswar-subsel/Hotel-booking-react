@@ -5,7 +5,15 @@ const Razorpay = require("razorpay");
 const crypto = require("crypto");
 
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "https://hotel-booking-react-dusky.vercel.app",
+      "https://hotel-booking-react-lbet51wg6-devaneeswar-subels-projects.vercel.app",
+    ],
+  }),
+);
 app.use(express.json());
 
 // ─── DB (Railway URL or individual vars or local fallback) ───────────────────
