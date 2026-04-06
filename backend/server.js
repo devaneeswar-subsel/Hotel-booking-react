@@ -7,11 +7,17 @@ const crypto = require("crypto");
 const app = express();
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "https://hotel-booking-react-dusky.vercel.app",
-      "https://hotel-booking-react-lbet51wg6-devaneeswar-subels-projects.vercel.app",
-    ],
+    origin: function (origin, callback) {
+      if (
+        !origin ||
+        origin.includes("vercel.app") ||
+        origin === "http://localhost:3000"
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
   }),
 );
 app.use(express.json());
