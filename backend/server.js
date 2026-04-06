@@ -22,7 +22,7 @@ if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
   db = mysql.createPool({
     host: process.env.MYSQLHOST || "127.0.0.1",
     user: process.env.MYSQLUSER || "root",
-    password: process.env.MYSQLPASSWORD || "",
+    password: process.env.MYSQLPASSWORD || "Deva@15032002",
     database: process.env.MYSQLDATABASE || "hotel_db",
     port: Number(process.env.MYSQLPORT) || 3306,
     waitForConnections: true,
