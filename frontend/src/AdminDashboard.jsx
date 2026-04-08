@@ -15,8 +15,7 @@ import {
   GridIcon,
 } from "./Icons";
 
-const API = "http://localhost:5000";
-
+const API = process.env.REACT_APP_API_URL;
 /* ── MINI SVG CHART COMPONENTS ───────────────────────────────────── */
 
 function BarChart({ data, color = "#C9A84C", height = 64 }) {
