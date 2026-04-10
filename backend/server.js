@@ -374,6 +374,57 @@ app.patch("/api/bookings/:id/cancel", async (req, res) => {
   }
 });
 
+// ── ADMIN DIRECT BOOKING (no payment) ────────────────────────────────────────
+app.post("/api/bookings", async (req, res) => {
+  try {
+    const { user_id, room_id, check_in_date, check_out_date, guest_count } =
+      req.body;
+    if (!user_id || !room_id || !check_in_date || !check_out_date)
+      return res.status(400).json({
+        error: "user_id, room_id, check_in_date, check_out_date required",
+      });
+
+    const [roomRows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
+      room_id,
+    ]);
+    if (!roomRows.length)
+      return res.status(404).json({ error: "Room not found" });
+    const room = roomRows[0];
+
+    const nights = Math.ceil(
+      (new Date(check_out_date) - new Date(check_in_date)) / 86400000,
+    );
+    if (nights <= 0) return res.status(400).json({ error: "Invalid dates" });
+
+    const base_price = nights * room.price_per_night;
+    const gst_amount = Math.round(base_price * GST_RATE * 100) / 100;
+    const total_price = Math.round((base_price + gst_amount) * 100) / 100;
+
+    const [result] = await db.query(
+      `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,gst_amount,final_total,status)
+       VALUES (?,?,?,?,?,?,?,?,'confirmed')`,
+      [
+        user_id,
+        room_id,
+        check_in_date,
+        check_out_date,
+        guest_count || 1,
+        base_price,
+        gst_amount,
+        total_price,
+      ],
+    );
+    res.status(201).json({
+      message: "Booking confirmed",
+      booking_id: result.insertId,
+      total_price: total_price,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── CHECK-IN ──────────────────────────────────────────────────────────────────
 app.patch("/api/bookings/:id/checkin", async (req, res) => {
   try {
