@@ -11,6 +11,7 @@ app.use(
       if (
         !origin ||
         origin.includes("vercel.app") ||
+        origin.includes("railway.app") ||
         origin === "http://localhost:3000"
       ) {
         callback(null, true);
@@ -22,10 +23,9 @@ app.use(
 );
 app.use(express.json());
 
-// ─── DB (Railway URL or individual vars or local fallback) ───────────────────
+// ─── DB ───────────────────────────────────────────────────────────────────────
 let db;
 if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
-  // Railway provides a full connection URL
   db = mysql.createPool({
     uri: process.env.MYSQL_URL || process.env.DATABASE_URL,
     waitForConnections: true,
@@ -44,11 +44,54 @@ if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
   });
 }
 
-// ─── RAZORPAY (env vars with fallback) ───────────────────────────────────────
+// ─── AUTO MIGRATE ─────────────────────────────────────────────────────────────
+async function runMigrations() {
+  try {
+    await db.query(
+      `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS actual_checkin DATETIME DEFAULT NULL`,
+    );
+    await db.query(
+      `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS actual_checkout DATETIME DEFAULT NULL`,
+    );
+    await db.query(
+      `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS hours_spent DECIMAL(10,2) DEFAULT NULL`,
+    );
+    await db.query(
+      `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS addon_charges DECIMAL(10,2) DEFAULT 0`,
+    );
+    await db.query(
+      `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS gst_amount DECIMAL(10,2) DEFAULT 0`,
+    );
+    await db.query(
+      `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS final_total DECIMAL(10,2) DEFAULT NULL`,
+    );
+    await db.query(
+      `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT NULL`,
+    );
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS booking_addons (
+        addon_id INT AUTO_INCREMENT PRIMARY KEY,
+        booking_id INT NOT NULL,
+        label VARCHAR(100) NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE
+      )
+    `);
+    console.log("✅ Migrations done");
+  } catch (err) {
+    console.error("Migration error:", err.message);
+  }
+}
+runMigrations();
+
+// ─── RAZORPAY ─────────────────────────────────────────────────────────────────
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_SXon2zuA5nekOo",
   key_secret: process.env.RAZORPAY_KEY_SECRET || "NZEKP2AIBvxru16wzQW4UOcW",
 });
+
+const GST_RATE = 0.18;
 
 // ─── HEALTH ───────────────────────────────────────────────────────────────────
 app.get("/", (req, res) =>
@@ -58,7 +101,6 @@ app.get("/", (req, res) =>
 // ══════════════════════════════════════════════════════════════════════════════
 //  AUTH
 // ══════════════════════════════════════════════════════════════════════════════
-
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { name, email, password, phone } = req.body;
@@ -103,7 +145,6 @@ app.post("/api/auth/login", async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 //  ROOMS
 // ══════════════════════════════════════════════════════════════════════════════
-
 app.get("/api/rooms", async (req, res) => {
   try {
     const { type, min_price, max_price, check_in, check_out } = req.query;
@@ -150,10 +191,8 @@ app.get("/api/rooms/:id", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  PAYMENT (Razorpay)
+//  PAYMENT
 // ══════════════════════════════════════════════════════════════════════════════
-
-// STEP 1 — Create Razorpay order + save booking as PENDING
 app.post("/api/payment/create-order", async (req, res) => {
   try {
     const { user_id, room_id, check_in_date, check_out_date, guest_count } =
@@ -187,17 +226,21 @@ app.post("/api/payment/create-order", async (req, res) => {
     );
     if (nights <= 0) return res.status(400).json({ error: "Invalid dates" });
 
-    const total_price = nights * room.price_per_night;
+    const base_price = nights * room.price_per_night;
+    const gst_amount = Math.round(base_price * GST_RATE * 100) / 100;
+    const total_price = Math.round((base_price + gst_amount) * 100) / 100;
 
     const [result] = await db.query(
-      `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,status)
-       VALUES (?,?,?,?,?,?,'pending')`,
+      `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,gst_amount,final_total,status)
+       VALUES (?,?,?,?,?,?,?,?,'pending')`,
       [
         user_id,
         room_id,
         check_in_date,
         check_out_date,
         guest_count || 1,
+        base_price,
+        gst_amount,
         total_price,
       ],
     );
@@ -217,6 +260,8 @@ app.post("/api/payment/create-order", async (req, res) => {
     res.status(201).json({
       booking_id,
       total_price,
+      base_price,
+      gst_amount,
       nights,
       razorpay_order_id: razorpayOrder.id,
       razorpay_key: process.env.RAZORPAY_KEY_ID || "rzp_test_SXon2zuA5nekOo",
@@ -228,7 +273,6 @@ app.post("/api/payment/create-order", async (req, res) => {
   }
 });
 
-// STEP 2 — Verify payment signature + confirm booking
 app.post("/api/payment/verify", async (req, res) => {
   try {
     const {
@@ -237,7 +281,6 @@ app.post("/api/payment/verify", async (req, res) => {
       razorpay_signature,
       booking_id,
     } = req.body;
-
     const body = razorpay_order_id + "|" + razorpay_payment_id;
     const expected = crypto
       .createHmac(
@@ -271,7 +314,6 @@ app.post("/api/payment/verify", async (req, res) => {
        WHERE b.booking_id=?`,
       [booking_id],
     );
-
     res.json({
       success: true,
       message: "Payment verified. Booking confirmed!",
@@ -283,7 +325,6 @@ app.post("/api/payment/verify", async (req, res) => {
   }
 });
 
-// STEP 3 — Payment failed — cancel pending booking
 app.post("/api/payment/failed", async (req, res) => {
   try {
     const { booking_id } = req.body;
@@ -301,7 +342,6 @@ app.post("/api/payment/failed", async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 //  BOOKINGS
 // ══════════════════════════════════════════════════════════════════════════════
-
 app.get("/api/bookings/user/:user_id", async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -334,10 +374,174 @@ app.patch("/api/bookings/:id/cancel", async (req, res) => {
   }
 });
 
+// ── CHECK-IN ──────────────────────────────────────────────────────────────────
+app.patch("/api/bookings/:id/checkin", async (req, res) => {
+  try {
+    const now = new Date();
+    await db.query(
+      "UPDATE bookings SET actual_checkin=?, status='confirmed' WHERE booking_id=?",
+      [now, req.params.id],
+    );
+    res.json({ message: "Checked in successfully", actual_checkin: now });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── CHECK-OUT ─────────────────────────────────────────────────────────────────
+app.patch("/api/bookings/:id/checkout", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
+      req.params.id,
+    ]);
+    if (!rows.length)
+      return res.status(404).json({ error: "Booking not found" });
+    const booking = rows[0];
+
+    const now = new Date();
+    const checkinTime = booking.actual_checkin
+      ? new Date(booking.actual_checkin)
+      : new Date(booking.check_in_date);
+    const hoursSpent =
+      Math.round(((now - checkinTime) / (1000 * 60 * 60)) * 100) / 100;
+
+    // Get addons total
+    const [addons] = await db.query(
+      "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
+      [req.params.id],
+    );
+    const addonTotal = Number(addons[0]?.total || 0);
+
+    const basePrice = Number(booking.total_price);
+    const subtotal = basePrice + addonTotal;
+    const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
+    const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
+
+    await db.query(
+      `UPDATE bookings SET 
+        actual_checkout=?, hours_spent=?, addon_charges=?, 
+        gst_amount=?, final_total=?, status='completed'
+       WHERE booking_id=?`,
+      [now, hoursSpent, addonTotal, gstAmount, finalTotal, req.params.id],
+    );
+
+    res.json({
+      message: "Checked out successfully",
+      actual_checkout: now,
+      hours_spent: hoursSpent,
+      addon_charges: addonTotal,
+      gst_amount: gstAmount,
+      final_total: finalTotal,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ADD-ONS
+// ══════════════════════════════════════════════════════════════════════════════
+app.get("/api/bookings/:id/addons", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at DESC",
+      [req.params.id],
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/bookings/:id/addons", async (req, res) => {
+  try {
+    const { label, amount } = req.body;
+    if (!label || !amount)
+      return res.status(400).json({ error: "label and amount required" });
+
+    const [r] = await db.query(
+      "INSERT INTO booking_addons (booking_id, label, amount) VALUES (?,?,?)",
+      [req.params.id, label, amount],
+    );
+
+    // Update addon_charges total on booking
+    const [addons] = await db.query(
+      "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
+      [req.params.id],
+    );
+    const addonTotal = Number(addons[0]?.total || 0);
+
+    const [bookingRows] = await db.query(
+      "SELECT * FROM bookings WHERE booking_id=?",
+      [req.params.id],
+    );
+    const booking = bookingRows[0];
+    const subtotal = Number(booking.total_price) + addonTotal;
+    const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
+    const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
+
+    await db.query(
+      "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
+      [addonTotal, gstAmount, finalTotal, req.params.id],
+    );
+
+    res.status(201).json({
+      addon_id: r.insertId,
+      label,
+      amount,
+      new_addon_total: addonTotal,
+      new_gst: gstAmount,
+      new_final_total: finalTotal,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/bookings/:id/addons/:addon_id", async (req, res) => {
+  try {
+    await db.query(
+      "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=?",
+      [req.params.addon_id, req.params.id],
+    );
+
+    const [addons] = await db.query(
+      "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
+      [req.params.id],
+    );
+    const addonTotal = Number(addons[0]?.total || 0);
+    const [bookingRows] = await db.query(
+      "SELECT * FROM bookings WHERE booking_id=?",
+      [req.params.id],
+    );
+    const booking = bookingRows[0];
+    const subtotal = Number(booking.total_price) + addonTotal;
+    const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
+    const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
+
+    await db.query(
+      "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
+      [addonTotal, gstAmount, finalTotal, req.params.id],
+    );
+
+    res.json({
+      message: "Addon removed",
+      new_addon_total: addonTotal,
+      new_final_total: finalTotal,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  ADMIN
 // ══════════════════════════════════════════════════════════════════════════════
-
 app.get("/api/admin/stats", async (req, res) => {
   try {
     const [[{ total_rooms }]] = await db.query(
@@ -350,11 +554,12 @@ app.get("/api/admin/stats", async (req, res) => {
       "SELECT COUNT(*) AS total_users FROM users",
     );
     const [[{ total_revenue }]] = await db.query(
-      "SELECT COALESCE(SUM(total_price),0) AS total_revenue FROM bookings WHERE status='confirmed'",
+      "SELECT COALESCE(SUM(COALESCE(final_total, total_price)),0) AS total_revenue FROM bookings WHERE status='confirmed' OR status='completed'",
     );
     const [recent_bookings] = await db.query(
       `SELECT b.booking_id, u.name AS guest_name, r.room_type,
-              b.check_in_date, b.check_out_date, b.total_price, b.status
+              b.check_in_date, b.check_out_date, b.total_price, b.final_total, b.status,
+              b.actual_checkin, b.actual_checkout
        FROM bookings b
        JOIN users u ON b.user_id=u.user_id
        JOIN rooms r ON b.room_id=r.room_id
@@ -386,10 +591,42 @@ app.get("/api/admin/users", async (req, res) => {
   }
 });
 
+// User detail with all bookings
+app.get("/api/admin/users/:id", async (req, res) => {
+  try {
+    const [userRows] = await db.query(
+      "SELECT user_id,name,email,phone,role,created_at FROM users WHERE user_id=?",
+      [req.params.id],
+    );
+    if (!userRows.length)
+      return res.status(404).json({ error: "User not found" });
+
+    const [bookings] = await db.query(
+      `SELECT b.*, r.room_type, r.room_number, r.price_per_night, r.image_url
+       FROM bookings b
+       JOIN rooms r ON b.room_id=r.room_id
+       WHERE b.user_id=? AND b.status != 'pending'
+       ORDER BY b.created_at DESC`,
+      [req.params.id],
+    );
+
+    const [[{ total_spent }]] = await db.query(
+      "SELECT COALESCE(SUM(COALESCE(final_total, total_price)),0) AS total_spent FROM bookings WHERE user_id=? AND status IN ('confirmed','completed')",
+      [req.params.id],
+    );
+
+    res.json({ ...userRows[0], bookings, total_spent });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/admin/bookings", async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT b.*, u.name AS guest_name, u.email, r.room_type, r.room_number
+      `SELECT b.*, u.name AS guest_name, u.email, u.phone,
+              r.room_type, r.room_number
        FROM bookings b
        JOIN users u ON b.user_id=u.user_id
        JOIN rooms r ON b.room_id=r.room_id
@@ -403,6 +640,34 @@ app.get("/api/admin/bookings", async (req, res) => {
   }
 });
 
+// Booking detail with addons
+app.get("/api/admin/bookings/:id", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT b.*, u.name AS guest_name, u.email, u.phone,
+              r.room_type, r.room_number, r.price_per_night, r.image_url
+       FROM bookings b
+       JOIN users u ON b.user_id=u.user_id
+       JOIN rooms r ON b.room_id=r.room_id
+       WHERE b.booking_id=?`,
+      [req.params.id],
+    );
+    if (!rows.length)
+      return res.status(404).json({ error: "Booking not found" });
+
+    const [addons] = await db.query(
+      "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at ASC",
+      [req.params.id],
+    );
+
+    res.json({ ...rows[0], addons });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ROOMS CRUD ────────────────────────────────────────────────────────────────
 app.post("/api/admin/rooms", async (req, res) => {
   try {
     const {
@@ -444,6 +709,7 @@ app.patch("/api/admin/rooms/:id", async (req, res) => {
       room_type,
       room_number,
       capacity,
+      image_url,
     } = req.body;
     const fields = [];
     const values = [];
@@ -451,25 +717,29 @@ app.patch("/api/admin/rooms/:id", async (req, res) => {
       fields.push("is_available=?");
       values.push(is_available);
     }
-    if (price_per_night) {
+    if (price_per_night !== undefined) {
       fields.push("price_per_night=?");
       values.push(price_per_night);
     }
-    if (description) {
+    if (description !== undefined) {
       fields.push("description=?");
       values.push(description);
     }
-    if (room_type) {
+    if (room_type !== undefined) {
       fields.push("room_type=?");
       values.push(room_type);
     }
-    if (room_number) {
+    if (room_number !== undefined) {
       fields.push("room_number=?");
       values.push(room_number);
     }
-    if (capacity) {
+    if (capacity !== undefined) {
       fields.push("capacity=?");
       values.push(capacity);
+    }
+    if (image_url !== undefined) {
+      fields.push("image_url=?");
+      values.push(image_url);
     }
     if (!fields.length)
       return res.status(400).json({ error: "No fields to update" });
