@@ -609,7 +609,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
 
   useEffect(() => {
     fetchBooking();
-  }, [bookingId]);
+  }, [bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleCheckin() {
     const res = await fetch(`${API}/api/bookings/${bookingId}/checkin`, {
@@ -759,7 +759,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.text("DETAILS", 110, tableTop + 7);
     doc.text("AMOUNT", W - 18, tableTop + 7, { align: "right" });
 
-    const pricePerNight = Math.round(basePrice / nights);
     const rows = [
       {
         desc: `${b.room_type} — Room ${b.room_number || b.room_id}`,
