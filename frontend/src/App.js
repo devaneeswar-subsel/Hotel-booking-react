@@ -662,7 +662,6 @@ function BookingModal({ room, user, onClose, showToast }) {
   }
 
   return (
-    // ✅ FIX: removed onClick outside close — only X button closes
     <div className="modal-bg">
       <div className="modal">
         <div className="modal-header">
@@ -948,7 +947,6 @@ function AuthModal({ onClose, onLogin }) {
   };
 
   return (
-    // ✅ FIX: no outside click close
     <div className="modal-bg">
       <div className="modal">
         <div className="modal-header">
@@ -1188,7 +1186,6 @@ function MyBookingsModal({ user, onClose, showToast }) {
 
   return (
     <>
-      {/* ✅ FIX: no outside click close */}
       <div className="modal-bg">
         <div className="modal" style={{ maxWidth: "600px" }}>
           <div className="modal-header">
@@ -1258,7 +1255,6 @@ function MyBookingsModal({ user, onClose, showToast }) {
                       alignItems: "flex-end",
                     }}
                   >
-                    {/* ✅ FIX: user can't cancel — show contact info */}
                     {b.status === "confirmed" && (
                       <div
                         style={{
@@ -1334,7 +1330,16 @@ function MyBookingsModal({ user, onClose, showToast }) {
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [user, setUser] = useState(null);
+  // ✅ FIX: Load user from localStorage on startup — persists across refresh
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("vvgp_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [bookingRoom, setBookingRoom] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [showBookings, setShowBookings] = useState(false);
@@ -1346,14 +1351,18 @@ export default function App() {
     setToast({ msg, type });
   }, []);
 
+  // ✅ FIX: Save user to localStorage on login
   function handleLogin(u) {
     setUser(u);
+    localStorage.setItem("vvgp_user", JSON.stringify(u));
     showToast(`Welcome, ${u.name.split(" ")[0]}!`, "success");
     if (u.role === "admin") setTimeout(() => setShowAdmin(true), 500);
   }
 
+  // ✅ FIX: Remove user from localStorage on logout
   function handleLogout() {
     setUser(null);
+    localStorage.removeItem("vvgp_user");
     setShowBookings(false);
     setShowAdmin(false);
     showToast("Logged out successfully", "success");
