@@ -10,7 +10,7 @@ import Testimonials from "./Testimonials";
 import Footer from "./Footer";
 import RoomDetail from "./Roomdetail";
 import AdminDashboard from "./AdminDashboard";
-import { XIcon, CheckIcon, BookingIcon, DownloadIcon, StarIcon } from "./Icons";
+import { XIcon, CheckIcon, BookingIcon, DownloadIcon } from "./Icons";
 
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
@@ -494,8 +494,6 @@ function BookingModal({ room, user, onClose, showToast }) {
     const b = confirmedBooking;
     const ci = b.check_in_date?.slice(0, 10);
     const co = b.check_out_date?.slice(0, 10);
-    const n =
-      ci && co ? Math.ceil((new Date(co) - new Date(ci)) / 86400000) : 1;
     const base = Number(b.total_price || 0);
     const gstAmt = Number(
       b.gst_amount || Math.round(base * GST_RATE * 100) / 100,
@@ -840,7 +838,7 @@ function BookingModal({ room, user, onClose, showToast }) {
 
 // ─── AUTH MODAL (with Forgot Password + show/hide password) ──────────────────
 function AuthModal({ onClose, onLogin }) {
-  const [mode, setMode] = useState("login"); // login | register | forgot | verify | reset
+  const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -983,9 +981,7 @@ function AuthModal({ onClose, onLogin }) {
               {success}
             </p>
           )}
-
           <form onSubmit={handleSubmit}>
-            {/* REGISTER */}
             {mode === "register" && (
               <div className="form-group">
                 <label>Full Name</label>
@@ -997,33 +993,24 @@ function AuthModal({ onClose, onLogin }) {
                 />
               </div>
             )}
-
-            {/* EMAIL — shown for login, register, forgot, verify, reset */}
-            {["login", "register", "forgot", "verify", "reset"].includes(
-              mode,
-            ) &&
-              mode !== "reset" && (
-                <div className="form-group">
-                  <label>Email</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="you@email.com"
-                    value={form.email}
-                    onChange={(e) =>
-                      setForm({ ...form, email: e.target.value })
-                    }
-                    readOnly={mode === "verify"}
-                    style={
-                      mode === "verify"
-                        ? { background: "#f8f9fa", color: "#868E96" }
-                        : {}
-                    }
-                  />
-                </div>
-              )}
-
-            {/* PASSWORD — login & register */}
+            {["login", "register", "forgot", "verify"].includes(mode) && (
+              <div className="form-group">
+                <label>Email</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="you@email.com"
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  readOnly={mode === "verify"}
+                  style={
+                    mode === "verify"
+                      ? { background: "#f8f9fa", color: "#868E96" }
+                      : {}
+                  }
+                />
+              </div>
+            )}
             {(mode === "login" || mode === "register") && (
               <div className="form-group">
                 <label>Password</label>
@@ -1042,8 +1029,6 @@ function AuthModal({ onClose, onLogin }) {
                 </div>
               </div>
             )}
-
-            {/* PHONE — register */}
             {mode === "register" && (
               <div className="form-group">
                 <label>Phone (optional)</label>
@@ -1054,8 +1039,6 @@ function AuthModal({ onClose, onLogin }) {
                 />
               </div>
             )}
-
-            {/* OTP — verify */}
             {mode === "verify" && (
               <div className="form-group">
                 <label>Enter OTP (sent to your email)</label>
@@ -1083,8 +1066,6 @@ function AuthModal({ onClose, onLogin }) {
                 </div>
               </div>
             )}
-
-            {/* NEW PASSWORD — reset */}
             {mode === "reset" && (
               <div className="form-group">
                 <label>New Password</label>
@@ -1103,7 +1084,6 @@ function AuthModal({ onClose, onLogin }) {
                 </div>
               </div>
             )}
-
             <button className="submit-btn" type="submit" disabled={loading}>
               {loading
                 ? "Please wait..."
@@ -1119,7 +1099,6 @@ function AuthModal({ onClose, onLogin }) {
             </button>
           </form>
 
-          {/* Forgot password link */}
           {mode === "login" && (
             <div style={{ textAlign: "center", marginTop: 10 }}>
               <button
