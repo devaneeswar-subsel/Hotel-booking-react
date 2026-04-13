@@ -10,9 +10,10 @@ import Testimonials from "./Testimonials";
 import Footer from "./Footer";
 import RoomDetail from "./Roomdetail";
 import AdminDashboard from "./AdminDashboard";
-import { XIcon, CheckIcon, BookingIcon, DownloadIcon } from "./Icons";
+import { XIcon, CheckIcon, BookingIcon, DownloadIcon, StarIcon } from "./Icons";
 
 const API = process.env.REACT_APP_API_URL;
+const GST_RATE = 0.18;
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 function Toast({ msg, type, onHide }) {
@@ -21,6 +22,147 @@ function Toast({ msg, type, onHide }) {
     return () => clearTimeout(t);
   }, [onHide]);
   return <div className={`toast ${type}`}>{msg}</div>;
+}
+
+// ─── STAR RATING INPUT ────────────────────────────────────────────────────────
+function StarRating({ value, onChange }) {
+  const [hover, setHover] = useState(0);
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <span
+          key={star}
+          onClick={() => onChange(star)}
+          onMouseEnter={() => setHover(star)}
+          onMouseLeave={() => setHover(0)}
+          style={{
+            cursor: "pointer",
+            fontSize: "1.6rem",
+            color: (hover || value) >= star ? "#C9A84C" : "#DEE2E6",
+            transition: "color 0.15s",
+          }}
+        >
+          ★
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ─── WRITE REVIEW MODAL ───────────────────────────────────────────────────────
+function WriteReviewModal({
+  booking,
+  user,
+  onClose,
+  showToast,
+  onReviewSubmitted,
+}) {
+  const [rating, setRating] = useState(5);
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!text.trim()) return showToast("Please write a review", "error");
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.user_id,
+          booking_id: booking.booking_id,
+          room_id: booking.room_id,
+          rating,
+          review_text: text,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      showToast("Review submitted! Thank you 🙏", "success");
+      onReviewSubmitted();
+      onClose();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      className="modal-bg"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="modal" style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <h2>Write a Review</h2>
+          <button className="modal-close" onClick={onClose}>
+            <XIcon size={14} color="#495057" />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div
+            style={{
+              background: "var(--gray-50)",
+              borderRadius: 8,
+              padding: "12px 14px",
+              marginBottom: 18,
+            }}
+          >
+            <div
+              style={{
+                fontSize: "0.82rem",
+                fontWeight: 600,
+                color: "var(--navy)",
+              }}
+            >
+              {booking.room_type}
+            </div>
+            <div
+              style={{
+                fontSize: "0.75rem",
+                color: "var(--gray-400)",
+                marginTop: 2,
+              }}
+            >
+              {booking.check_in_date?.slice(0, 10)} →{" "}
+              {booking.check_out_date?.slice(0, 10)}
+            </div>
+          </div>
+          <form onSubmit={submit}>
+            <div className="form-group">
+              <label>Your Rating</label>
+              <StarRating value={rating} onChange={setRating} />
+            </div>
+            <div className="form-group">
+              <label>Your Review</label>
+              <textarea
+                required
+                placeholder="Share your experience at VV Grand Park Residency..."
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={4}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1.5px solid var(--gray-200)",
+                  fontFamily: "inherit",
+                  fontSize: "0.875rem",
+                  resize: "vertical",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+            <button className="submit-btn" type="submit" disabled={loading}>
+              {loading ? "Submitting..." : "Submit Review"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── PAYMENT SUCCESS SCREEN ───────────────────────────────────────────────────
@@ -32,11 +174,15 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
             86400000,
         )
       : 1;
+  const basePrice = Number(booking.total_price || 0);
+  const gst = Number(
+    booking.gst_amount || Math.round(basePrice * GST_RATE * 100) / 100,
+  );
+  const total = Number(booking.final_total || basePrice + gst);
 
   return (
     <div className="modal-bg">
       <div className="modal" style={{ maxWidth: "460px" }}>
-        {/* Success Header */}
         <div
           style={{
             background: "var(--navy)",
@@ -75,8 +221,6 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
             Payment successful — your room is reserved
           </div>
         </div>
-
-        {/* Booking Details */}
         <div style={{ padding: "24px 28px" }}>
           <div
             style={{
@@ -113,7 +257,6 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
                   fontSize: "0.65rem",
                   fontWeight: 700,
                   textTransform: "uppercase",
-                  letterSpacing: "0.5px",
                 }}
               >
                 Confirmed
@@ -124,6 +267,14 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
               { label: "Check-in", val: booking.check_in_date?.slice(0, 10) },
               { label: "Check-out", val: booking.check_out_date?.slice(0, 10) },
               { label: "Nights", val: nights },
+              {
+                label: "Room Charges",
+                val: `Rs.${basePrice.toLocaleString()}`,
+              },
+              {
+                label: "GST (18%)",
+                val: `Rs.${Math.round(gst).toLocaleString()}`,
+              },
               { label: "Payment ID", val: booking.payment_id || "—" },
             ].map(({ label, val }) => (
               <div
@@ -168,12 +319,10 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
                   fontSize: "1.1rem",
                 }}
               >
-                Rs.{Number(booking.total_price).toLocaleString()}
+                Rs.{Math.round(total).toLocaleString()}
               </span>
             </div>
           </div>
-
-          {/* Action Buttons */}
           <button
             onClick={onDownloadInvoice}
             style={{
@@ -192,7 +341,6 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
               justifyContent: "center",
               gap: 8,
               marginBottom: 10,
-              transition: "all 0.22s",
             }}
             onMouseEnter={(e) =>
               (e.currentTarget.style.background = "var(--gold)")
@@ -201,10 +349,9 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
               (e.currentTarget.style.background = "var(--navy)")
             }
           >
-            <DownloadIcon size={15} color="currentColor" />
-            Download Invoice (PDF)
+            <DownloadIcon size={15} color="currentColor" /> Download Invoice
+            (PDF)
           </button>
-
           <button
             onClick={onClose}
             style={{
@@ -248,6 +395,9 @@ function BookingModal({ room, user, onClose, showToast }) {
           ),
         )
       : 0;
+  const basePrice = room.price_per_night * nights;
+  const gst = Math.round(basePrice * GST_RATE * 100) / 100;
+  const total = basePrice + gst;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -256,9 +406,7 @@ function BookingModal({ room, user, onClose, showToast }) {
       return;
     }
     setLoading(true);
-
     try {
-      // STEP 1 — Create Razorpay order + pending booking on backend
       const orderRes = await fetch(`${API}/api/payment/create-order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -270,7 +418,6 @@ function BookingModal({ room, user, onClose, showToast }) {
       });
       const orderData = await orderRes.json();
       if (!orderRes.ok) throw new Error(orderData.error);
-
       const {
         booking_id,
         total_price,
@@ -279,7 +426,6 @@ function BookingModal({ room, user, onClose, showToast }) {
         room_name,
       } = orderData;
 
-      // STEP 2 — Open Razorpay checkout
       const options = {
         key: razorpay_key,
         amount: Math.round(total_price * 100),
@@ -295,7 +441,6 @@ function BookingModal({ room, user, onClose, showToast }) {
         theme: { color: "#0F1923" },
         modal: {
           ondismiss: async () => {
-            // User closed the modal without paying — cancel pending booking
             await fetch(`${API}/api/payment/failed`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -306,7 +451,6 @@ function BookingModal({ room, user, onClose, showToast }) {
           },
         },
         handler: async (response) => {
-          // STEP 3 — Verify payment on backend
           try {
             const verifyRes = await fetch(`${API}/api/payment/verify`, {
               method: "POST",
@@ -320,7 +464,6 @@ function BookingModal({ room, user, onClose, showToast }) {
             });
             const verifyData = await verifyRes.json();
             if (!verifyRes.ok) throw new Error(verifyData.error);
-            // STEP 4 — Show success screen with confirmed booking
             setConfirmedBooking(verifyData.booking);
           } catch (err) {
             showToast(err.message, "error");
@@ -329,7 +472,6 @@ function BookingModal({ room, user, onClose, showToast }) {
           }
         },
       };
-
       const rzp = new window.Razorpay(options);
       rzp.on("payment.failed", async (resp) => {
         await fetch(`${API}/api/payment/failed`, {
@@ -347,26 +489,27 @@ function BookingModal({ room, user, onClose, showToast }) {
     }
   }
 
-  // Download invoice after successful payment
   async function downloadInvoice() {
     if (!confirmedBooking) return;
     const b = confirmedBooking;
     const ci = b.check_in_date?.slice(0, 10);
     const co = b.check_out_date?.slice(0, 10);
-    const nights =
+    const n =
       ci && co ? Math.ceil((new Date(co) - new Date(ci)) / 86400000) : 1;
+    const base = Number(b.total_price || 0);
+    const gstAmt = Number(
+      b.gst_amount || Math.round(base * GST_RATE * 100) / 100,
+    );
+    const finalT = Number(b.final_total || base + gstAmt);
     const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
     const today = new Date().toLocaleDateString("en-IN", {
       day: "numeric",
       month: "long",
       year: "numeric",
     });
-    const pricePer = Math.round(Number(b.total_price) / nights);
-
     const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     const W = 210;
-
     doc.setFillColor(15, 25, 35);
     doc.rect(0, 0, W, 42, "F");
     doc.setFont("times", "bold");
@@ -386,11 +529,9 @@ function BookingModal({ room, user, onClose, showToast }) {
     doc.setTextColor(150, 140, 120);
     doc.text(invNo, W - 18, 27, { align: "right" });
     doc.text(`Date: ${today}`, W - 18, 33, { align: "right" });
-
     doc.setDrawColor(201, 168, 76);
     doc.setLineWidth(0.5);
     doc.line(18, 48, W - 18, 48);
-
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(134, 142, 150);
@@ -413,8 +554,7 @@ function BookingModal({ room, user, onClose, showToast }) {
     doc.setTextColor(73, 80, 87);
     doc.text("123 Palace Road, Chennai", W / 2 + 10, 72);
     doc.text("hello@vvgrandpark.com", W / 2 + 10, 78);
-    doc.text("+91 12345 67890", W / 2 + 10, 84);
-
+    doc.text("+91 12345 67890 | GSTIN: 33AAAAA0000A1Z5", W / 2 + 10, 84);
     const tableTop = 98;
     doc.setFillColor(15, 25, 35);
     doc.rect(18, tableTop, W - 36, 10, "F");
@@ -424,12 +564,11 @@ function BookingModal({ room, user, onClose, showToast }) {
     doc.text("DESCRIPTION", 24, tableTop + 7);
     doc.text("DETAILS", 110, tableTop + 7);
     doc.text("AMOUNT", W - 18, tableTop + 7, { align: "right" });
-
     const rows = [
       {
         desc: `${b.room_type} — Room ${b.room_number || b.room_id}`,
         detail: `${ci} → ${co}`,
-        amount: `Rs.${pricePer.toLocaleString()} × ${nights} night${nights > 1 ? "s" : ""}`,
+        amount: `Rs.${base.toLocaleString()}`,
       },
       {
         desc: "Guest Count",
@@ -439,7 +578,6 @@ function BookingModal({ room, user, onClose, showToast }) {
       { desc: "Payment ID", detail: b.payment_id || "—", amount: "—" },
       { desc: "Booking Reference", detail: invNo, amount: "—" },
     ];
-
     let y = tableTop + 18;
     rows.forEach((row, i) => {
       if (i % 2 === 0) {
@@ -455,12 +593,25 @@ function BookingModal({ room, user, onClose, showToast }) {
       doc.text(row.amount, W - 18, y, { align: "right" });
       y += 12;
     });
-
     y += 4;
     doc.setDrawColor(225, 225, 225);
     doc.setLineWidth(0.3);
     doc.line(18, y, W - 18, y);
-    y += 10;
+    y += 8;
+    [
+      { label: "Room Charges", val: `Rs.${base.toLocaleString()}` },
+      { label: "GST (18%)", val: `Rs.${Math.round(gstAmt).toLocaleString()}` },
+    ].forEach(({ label, val }) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(73, 80, 87);
+      doc.text(label, W - 90, y);
+      doc.setTextColor(15, 25, 35);
+      doc.setFont("helvetica", "bold");
+      doc.text(val, W - 18, y, { align: "right" });
+      y += 9;
+    });
+    y += 2;
     doc.setFillColor(15, 25, 35);
     doc.roundedRect(W - 80, y - 6, 62, 18, 3, 3, "F");
     doc.setFont("helvetica", "bold");
@@ -469,10 +620,9 @@ function BookingModal({ room, user, onClose, showToast }) {
     doc.text("TOTAL PAID", W - 49, y + 1, { align: "center" });
     doc.setFontSize(13);
     doc.setTextColor(255, 255, 255);
-    doc.text(`Rs.${Number(b.total_price).toLocaleString()}`, W - 49, y + 9, {
+    doc.text(`Rs.${Math.round(finalT).toLocaleString()}`, W - 49, y + 9, {
       align: "center",
     });
-
     y += 28;
     doc.setFillColor(45, 154, 110);
     doc.roundedRect(18, y - 5, 36, 10, 2, 2, "F");
@@ -480,7 +630,6 @@ function BookingModal({ room, user, onClose, showToast }) {
     doc.setFontSize(8);
     doc.setTextColor(255, 255, 255);
     doc.text("CONFIRMED", 36, y + 2, { align: "center" });
-
     const footerY = 272;
     doc.setDrawColor(201, 168, 76);
     doc.setLineWidth(0.4);
@@ -502,13 +651,11 @@ function BookingModal({ room, user, onClose, showToast }) {
       footerY + 13,
       { align: "center" },
     );
-
     doc.save(
       `${invNo}-${(b.guest_name || user.name).replace(/\s+/g, "_")}.pdf`,
     );
   }
 
-  // Show success screen after payment
   if (confirmedBooking) {
     return (
       <PaymentSuccess
@@ -575,20 +722,68 @@ function BookingModal({ room, user, onClose, showToast }) {
                 }
               />
             </div>
-
             {nights > 0 && (
-              <div className="price-summary">
-                <span>
-                  Rs.{Number(room.price_per_night).toLocaleString()} × {nights}{" "}
-                  night{nights > 1 ? "s" : ""}
-                </span>
-                <strong>
-                  Rs.{(room.price_per_night * nights).toLocaleString()}
-                </strong>
+              <div
+                style={{
+                  background: "var(--gray-50)",
+                  borderRadius: 8,
+                  padding: "12px 14px",
+                  marginBottom: 16,
+                }}
+              >
+                {[
+                  {
+                    label: `Rs.${Number(room.price_per_night).toLocaleString()} × ${nights} night${nights > 1 ? "s" : ""}`,
+                    val: `Rs.${basePrice.toLocaleString()}`,
+                  },
+                  {
+                    label: "GST (18%)",
+                    val: `Rs.${Math.round(gst).toLocaleString()}`,
+                  },
+                ].map(({ label, val }) => (
+                  <div
+                    key={label}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: "0.82rem",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <span style={{ color: "var(--gray-400)" }}>{label}</span>
+                    <span style={{ fontWeight: 600 }}>{val}</span>
+                  </div>
+                ))}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: "0.9rem",
+                    borderTop: "1px solid var(--gray-200)",
+                    paddingTop: 8,
+                    marginTop: 4,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-display)",
+                      fontWeight: 600,
+                      color: "var(--navy)",
+                    }}
+                  >
+                    Total
+                  </span>
+                  <strong
+                    style={{
+                      fontFamily: "var(--font-display)",
+                      color: "var(--navy)",
+                    }}
+                  >
+                    Rs.{Math.round(total).toLocaleString()}
+                  </strong>
+                </div>
               </div>
             )}
-
-            {/* Pay with Razorpay */}
             <button
               className="submit-btn"
               type="submit"
@@ -608,13 +803,10 @@ function BookingModal({ room, user, onClose, showToast }) {
                     <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
                   </svg>
                   Pay Now — Rs.
-                  {nights > 0
-                    ? (room.price_per_night * nights).toLocaleString()
-                    : "0"}
+                  {nights > 0 ? Math.round(total).toLocaleString() : "0"}
                 </>
               )}
             </button>
-
             <p
               style={{
                 textAlign: "center",
@@ -646,38 +838,106 @@ function BookingModal({ room, user, onClose, showToast }) {
   );
 }
 
-// ─── AUTH MODAL ───────────────────────────────────────────────────────────────
+// ─── AUTH MODAL (with Forgot Password + show/hide password) ──────────────────
 function AuthModal({ onClose, onLogin }) {
-  const [mode, setMode] = useState("login");
+  const [mode, setMode] = useState("login"); // login | register | forgot | verify | reset
   const [form, setForm] = useState({
     name: "",
     email: "",
     password: "",
     phone: "",
+    otp: "",
+    new_password: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+
+  const eyeBtn = (show, toggle) => (
+    <button
+      type="button"
+      onClick={toggle}
+      style={{
+        position: "absolute",
+        right: 12,
+        top: "50%",
+        transform: "translateY(-50%)",
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        color: "var(--gray-400)",
+        fontSize: "1rem",
+        padding: 0,
+      }}
+    >
+      {show ? "🙈" : "👁️"}
+    </button>
+  );
 
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setSuccess("");
     try {
-      const url =
-        mode === "login" ? `${API}/api/auth/login` : `${API}/api/auth/register`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
       if (mode === "login") {
+        const res = await fetch(`${API}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email, password: form.password }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
         onLogin(data.user);
         onClose();
-      } else {
+      } else if (mode === "register") {
+        const res = await fetch(`${API}/api/auth/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        setSuccess("Account created! Please sign in.");
         setMode("login");
-        setError("Registered successfully! Please login.");
+      } else if (mode === "forgot") {
+        const res = await fetch(`${API}/api/auth/forgot-password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        setSuccess("OTP sent to your email! Check inbox.");
+        setMode("verify");
+      } else if (mode === "verify") {
+        const res = await fetch(`${API}/api/auth/verify-otp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email, otp: form.otp }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        setSuccess("OTP verified! Set your new password.");
+        setMode("reset");
+      } else if (mode === "reset") {
+        if (form.new_password.length < 6)
+          throw new Error("Password must be at least 6 characters");
+        const res = await fetch(`${API}/api/auth/reset-password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: form.email,
+            otp: form.otp,
+            new_password: form.new_password,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        setSuccess("Password reset! Please sign in.");
+        setMode("login");
       }
     } catch (err) {
       setError(err.message);
@@ -686,6 +946,14 @@ function AuthModal({ onClose, onLogin }) {
     }
   }
 
+  const titles = {
+    login: "Welcome Back",
+    register: "Create Account",
+    forgot: "Forgot Password",
+    verify: "Enter OTP",
+    reset: "New Password",
+  };
+
   return (
     <div
       className="modal-bg"
@@ -693,14 +961,31 @@ function AuthModal({ onClose, onLogin }) {
     >
       <div className="modal">
         <div className="modal-header">
-          <h2>{mode === "login" ? "Welcome Back" : "Create Account"}</h2>
+          <h2>{titles[mode]}</h2>
           <button className="modal-close" onClick={onClose}>
             <XIcon size={14} color="#495057" />
           </button>
         </div>
         <div className="modal-body">
           {error && <p className="error-msg">{error}</p>}
+          {success && (
+            <p
+              style={{
+                background: "#E8F8F0",
+                color: "#2D9A6E",
+                padding: "10px 14px",
+                borderRadius: 8,
+                fontSize: "0.85rem",
+                marginBottom: 14,
+                fontWeight: 500,
+              }}
+            >
+              {success}
+            </p>
+          )}
+
           <form onSubmit={handleSubmit}>
+            {/* REGISTER */}
             {mode === "register" && (
               <div className="form-group">
                 <label>Full Name</label>
@@ -712,26 +997,53 @@ function AuthModal({ onClose, onLogin }) {
                 />
               </div>
             )}
-            <div className="form-group">
-              <label>Email</label>
-              <input
-                type="email"
-                required
-                placeholder="you@email.com"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-            </div>
-            <div className="form-group">
-              <label>Password</label>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-              />
-            </div>
+
+            {/* EMAIL — shown for login, register, forgot, verify, reset */}
+            {["login", "register", "forgot", "verify", "reset"].includes(
+              mode,
+            ) &&
+              mode !== "reset" && (
+                <div className="form-group">
+                  <label>Email</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="you@email.com"
+                    value={form.email}
+                    onChange={(e) =>
+                      setForm({ ...form, email: e.target.value })
+                    }
+                    readOnly={mode === "verify"}
+                    style={
+                      mode === "verify"
+                        ? { background: "#f8f9fa", color: "#868E96" }
+                        : {}
+                    }
+                  />
+                </div>
+              )}
+
+            {/* PASSWORD — login & register */}
+            {(mode === "login" || mode === "register") && (
+              <div className="form-group">
+                <label>Password</label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type={showPass ? "text" : "password"}
+                    required
+                    placeholder="••••••••"
+                    value={form.password}
+                    onChange={(e) =>
+                      setForm({ ...form, password: e.target.value })
+                    }
+                    style={{ paddingRight: 40 }}
+                  />
+                  {eyeBtn(showPass, () => setShowPass(!showPass))}
+                </div>
+              </div>
+            )}
+
+            {/* PHONE — register */}
             {mode === "register" && (
               <div className="form-group">
                 <label>Phone (optional)</label>
@@ -742,14 +1054,95 @@ function AuthModal({ onClose, onLogin }) {
                 />
               </div>
             )}
+
+            {/* OTP — verify */}
+            {mode === "verify" && (
+              <div className="form-group">
+                <label>Enter OTP (sent to your email)</label>
+                <input
+                  required
+                  placeholder="6-digit OTP"
+                  maxLength={6}
+                  value={form.otp}
+                  onChange={(e) => setForm({ ...form, otp: e.target.value })}
+                  style={{
+                    fontSize: "1.4rem",
+                    letterSpacing: "8px",
+                    textAlign: "center",
+                    fontWeight: 700,
+                  }}
+                />
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--gray-400)",
+                    marginTop: 6,
+                  }}
+                >
+                  OTP valid for 10 minutes
+                </div>
+              </div>
+            )}
+
+            {/* NEW PASSWORD — reset */}
+            {mode === "reset" && (
+              <div className="form-group">
+                <label>New Password</label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type={showNewPass ? "text" : "password"}
+                    required
+                    placeholder="Minimum 6 characters"
+                    value={form.new_password}
+                    onChange={(e) =>
+                      setForm({ ...form, new_password: e.target.value })
+                    }
+                    style={{ paddingRight: 40 }}
+                  />
+                  {eyeBtn(showNewPass, () => setShowNewPass(!showNewPass))}
+                </div>
+              </div>
+            )}
+
             <button className="submit-btn" type="submit" disabled={loading}>
               {loading
                 ? "Please wait..."
                 : mode === "login"
                   ? "Sign In"
-                  : "Create Account"}
+                  : mode === "register"
+                    ? "Create Account"
+                    : mode === "forgot"
+                      ? "Send OTP"
+                      : mode === "verify"
+                        ? "Verify OTP"
+                        : "Reset Password"}
             </button>
           </form>
+
+          {/* Forgot password link */}
+          {mode === "login" && (
+            <div style={{ textAlign: "center", marginTop: 10 }}>
+              <button
+                onClick={() => {
+                  setMode("forgot");
+                  setError("");
+                  setSuccess("");
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--gold)",
+                  fontSize: "0.82rem",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  textDecoration: "underline",
+                }}
+              >
+                Forgot password?
+              </button>
+            </div>
+          )}
+
           <div className="auth-switch">
             {mode === "login" ? (
               <>
@@ -758,23 +1151,35 @@ function AuthModal({ onClose, onLogin }) {
                   onClick={() => {
                     setMode("register");
                     setError("");
+                    setSuccess("");
                   }}
                 >
                   Register
                 </button>
               </>
-            ) : (
+            ) : mode === "register" ? (
               <>
                 Already have an account?{" "}
                 <button
                   onClick={() => {
                     setMode("login");
                     setError("");
+                    setSuccess("");
                   }}
                 >
                   Sign in
                 </button>
               </>
+            ) : (
+              <button
+                onClick={() => {
+                  setMode("login");
+                  setError("");
+                  setSuccess("");
+                }}
+              >
+                ← Back to Sign In
+              </button>
             )}
           </div>
         </div>
@@ -783,18 +1188,33 @@ function AuthModal({ onClose, onLogin }) {
   );
 }
 
-// ─── MY BOOKINGS MODAL ────────────────────────────────────────────────────────
+// ─── MY BOOKINGS MODAL (with Reviews) ────────────────────────────────────────
 function MyBookingsModal({ user, onClose, showToast }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [reviewedBookings, setReviewedBookings] = useState([]);
+  const [reviewBooking, setReviewBooking] = useState(null);
 
-  useEffect(() => {
-    fetch(`${API}/api/bookings/user/${user.user_id}`)
-      .then((r) => r.json())
-      .then(setBookings)
-      .catch(() => setBookings([]))
+  const fetchData = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      fetch(`${API}/api/bookings/user/${user.user_id}`)
+        .then((r) => r.json())
+        .catch(() => []),
+      fetch(`${API}/api/reviews/user/${user.user_id}`)
+        .then((r) => r.json())
+        .catch(() => []),
+    ])
+      .then(([b, r]) => {
+        setBookings(Array.isArray(b) ? b : []);
+        setReviewedBookings(Array.isArray(r) ? r.map((x) => x.booking_id) : []);
+      })
       .finally(() => setLoading(false));
   }, [user]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   async function cancelBooking(id) {
     try {
@@ -813,77 +1233,137 @@ function MyBookingsModal({ user, onClose, showToast }) {
   }
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="modal" style={{ maxWidth: "580px" }}>
-        <div className="modal-header">
-          <h2>My Bookings</h2>
-          <button className="modal-close" onClick={onClose}>
-            <XIcon size={14} color="#495057" />
-          </button>
-        </div>
-        <div
-          className="modal-body"
-          style={{ maxHeight: "70vh", overflowY: "auto" }}
-        >
-          {loading ? (
-            <div className="loader">Loading bookings...</div>
-          ) : bookings.length === 0 ? (
-            <div className="empty">
-              <div className="empty-icon">
-                <BookingIcon size={22} />
-              </div>
-              <p>No confirmed bookings yet.</p>
-            </div>
-          ) : (
-            bookings.map((b) => (
-              <div className="booking-card" key={b.booking_id}>
-                <img
-                  src={
-                    b.image_url ||
-                    "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=200"
-                  }
-                  alt={b.room_type}
-                />
-                <div className="booking-info">
-                  <h4>{b.room_type}</h4>
-                  <p>
-                    {b.check_in_date?.slice(0, 10)} →{" "}
-                    {b.check_out_date?.slice(0, 10)}
-                  </p>
-                  <p style={{ marginTop: "6px" }}>
-                    <strong
-                      style={{
-                        color: "var(--navy)",
-                        fontFamily: "var(--font-display)",
-                        fontSize: "0.95rem",
-                      }}
-                    >
-                      Rs.{Number(b.total_price).toLocaleString()}
-                    </strong>
-                    <span style={{ marginLeft: "10px" }}>
-                      <span className={`badge badge-${b.status}`}>
-                        {b.status}
-                      </span>
-                    </span>
-                  </p>
+    <>
+      <div
+        className="modal-bg"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+      >
+        <div className="modal" style={{ maxWidth: "600px" }}>
+          <div className="modal-header">
+            <h2>My Bookings</h2>
+            <button className="modal-close" onClick={onClose}>
+              <XIcon size={14} color="#495057" />
+            </button>
+          </div>
+          <div
+            className="modal-body"
+            style={{ maxHeight: "70vh", overflowY: "auto" }}
+          >
+            {loading ? (
+              <div className="loader">Loading bookings...</div>
+            ) : bookings.length === 0 ? (
+              <div className="empty">
+                <div className="empty-icon">
+                  <BookingIcon size={22} />
                 </div>
-                {b.status === "confirmed" && (
-                  <button
-                    className="cancel-btn"
-                    onClick={() => cancelBooking(b.booking_id)}
-                  >
-                    Cancel
-                  </button>
-                )}
+                <p>No confirmed bookings yet.</p>
               </div>
-            ))
-          )}
+            ) : (
+              bookings.map((b) => (
+                <div
+                  className="booking-card"
+                  key={b.booking_id}
+                  style={{ flexWrap: "wrap", gap: 8 }}
+                >
+                  <img
+                    src={
+                      b.image_url ||
+                      "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=200"
+                    }
+                    alt={b.room_type}
+                  />
+                  <div className="booking-info" style={{ flex: 1 }}>
+                    <h4>{b.room_type}</h4>
+                    <p>
+                      {b.check_in_date?.slice(0, 10)} →{" "}
+                      {b.check_out_date?.slice(0, 10)}
+                    </p>
+                    <p style={{ marginTop: "6px" }}>
+                      <strong
+                        style={{
+                          color: "var(--navy)",
+                          fontFamily: "var(--font-display)",
+                          fontSize: "0.95rem",
+                        }}
+                      >
+                        Rs.
+                        {Number(
+                          b.final_total || b.total_price,
+                        ).toLocaleString()}
+                      </strong>
+                      <span style={{ marginLeft: "10px" }}>
+                        <span className={`badge badge-${b.status}`}>
+                          {b.status}
+                        </span>
+                      </span>
+                    </p>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      alignItems: "flex-end",
+                    }}
+                  >
+                    {b.status === "confirmed" && (
+                      <button
+                        className="cancel-btn"
+                        onClick={() => cancelBooking(b.booking_id)}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    {(b.status === "confirmed" || b.status === "completed") &&
+                      !reviewedBookings.includes(b.booking_id) && (
+                        <button
+                          onClick={() => setReviewBooking(b)}
+                          style={{
+                            background: "#0F1923",
+                            color: "#E8D5A3",
+                            border: "none",
+                            borderRadius: 6,
+                            padding: "6px 14px",
+                            fontSize: "0.75rem",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                          }}
+                        >
+                          ★ Review
+                        </button>
+                      )}
+                    {reviewedBookings.includes(b.booking_id) && (
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          color: "#2D9A6E",
+                          fontWeight: 600,
+                        }}
+                      >
+                        ✅ Reviewed
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
-    </div>
+      {reviewBooking && (
+        <WriteReviewModal
+          booking={reviewBooking}
+          user={user}
+          onClose={() => setReviewBooking(null)}
+          showToast={showToast}
+          onReviewSubmitted={fetchData}
+        />
+      )}
+    </>
   );
 }
 
@@ -914,7 +1394,6 @@ export default function App() {
     showToast("Logged out successfully", "success");
   }
 
-  // ── ROOM DETAIL PAGE ────────────────────────────────────────────────────────
   if (selectedRoom) {
     return (
       <>
@@ -947,7 +1426,6 @@ export default function App() {
     );
   }
 
-  // ── ADMIN PAGE ──────────────────────────────────────────────────────────────
   if (showAdmin && user?.role === "admin") {
     return (
       <>
@@ -968,7 +1446,6 @@ export default function App() {
     );
   }
 
-  // ── MAIN SITE ───────────────────────────────────────────────────────────────
   return (
     <div>
       <Hero
@@ -1040,8 +1517,7 @@ export default function App() {
             gap: "8px",
           }}
         >
-          <BookingIcon size={15} color="var(--gold-light)" />
-          My Bookings
+          <BookingIcon size={15} color="var(--gold-light)" /> My Bookings
         </button>
       )}
     </div>
