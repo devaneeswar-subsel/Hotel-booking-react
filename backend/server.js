@@ -367,18 +367,16 @@ app.post("/api/payment/create-order", async (req, res) => {
       receipt: `booking_${booking_id}`,
       notes: { booking_id: String(booking_id) },
     });
-    res
-      .status(201)
-      .json({
-        booking_id,
-        total_price,
-        base_price,
-        gst_amount,
-        nights,
-        razorpay_order_id: razorpayOrder.id,
-        razorpay_key: process.env.RAZORPAY_KEY_ID || "rzp_test_SXon2zuA5nekOo",
-        room_name: `${room.room_type} — Room ${room.room_number || room_id}`,
-      });
+    res.status(201).json({
+      booking_id,
+      total_price,
+      base_price,
+      gst_amount,
+      nights,
+      razorpay_order_id: razorpayOrder.id,
+      razorpay_key: process.env.RAZORPAY_KEY_ID || "rzp_test_SXon2zuA5nekOo",
+      room_name: `${room.room_type} — Room ${room.room_number || room_id}`,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -498,13 +496,11 @@ app.post("/api/bookings", async (req, res) => {
         total_price,
       ],
     );
-    res
-      .status(201)
-      .json({
-        message: "Booking confirmed",
-        booking_id: result.insertId,
-        total_price,
-      });
+    res.status(201).json({
+      message: "Booking confirmed",
+      booking_id: result.insertId,
+      total_price,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -603,16 +599,14 @@ app.post("/api/bookings/:id/addons", async (req, res) => {
       "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
       [addonTotal, gstAmount, finalTotal, req.params.id],
     );
-    res
-      .status(201)
-      .json({
-        addon_id: r.insertId,
-        label,
-        amount,
-        new_addon_total: addonTotal,
-        new_gst: gstAmount,
-        new_final_total: finalTotal,
-      });
+    res.status(201).json({
+      addon_id: r.insertId,
+      label,
+      amount,
+      new_addon_total: addonTotal,
+      new_gst: gstAmount,
+      new_final_total: finalTotal,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -839,6 +833,39 @@ app.delete("/api/admin/rooms/:id", async (req, res) => {
   }
 });
 
+// ── GET ALL ROOMS INCLUDING BLOCKED (admin only) ──────────────────────────────
+app.get("/api/admin/rooms", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM rooms ORDER BY room_id ASC");
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE CANCELLED BOOKING ──────────────────────────────────────────────────
+app.delete("/api/admin/bookings/:id", async (req, res) => {
+  try {
+    const [booking] = await db.query(
+      "SELECT status FROM bookings WHERE booking_id=?",
+      [req.params.id],
+    );
+    if (!booking.length)
+      return res.status(404).json({ error: "Booking not found" });
+    if (booking[0].status !== "cancelled")
+      return res
+        .status(400)
+        .json({ error: "Only cancelled bookings can be deleted" });
+    await db.query("DELETE FROM bookings WHERE booking_id=?", [req.params.id]);
+    res.json({ message: "Booking deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── START ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () =>
   console.log(`🚀 VV Grand Park API running on http://localhost:${PORT}`),

@@ -90,10 +90,7 @@ function WriteReviewModal({
   }
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
+    <div className="modal-bg">
       <div className="modal" style={{ maxWidth: 460 }}>
         <div className="modal-header">
           <h2>Write a Review</h2>
@@ -665,10 +662,8 @@ function BookingModal({ room, user, onClose, showToast }) {
   }
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => e.target === e.currentTarget && !loading && onClose()}
-    >
+    // ✅ FIX: removed onClick outside close — only X button closes
+    <div className="modal-bg">
       <div className="modal">
         <div className="modal-header">
           <h2>
@@ -836,7 +831,7 @@ function BookingModal({ room, user, onClose, showToast }) {
   );
 }
 
-// ─── AUTH MODAL (with Forgot Password + show/hide password) ──────────────────
+// ─── AUTH MODAL ───────────────────────────────────────────────────────────────
 function AuthModal({ onClose, onLogin }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
@@ -953,10 +948,8 @@ function AuthModal({ onClose, onLogin }) {
   };
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
+    // ✅ FIX: no outside click close
+    <div className="modal-bg">
       <div className="modal">
         <div className="modal-header">
           <h2>{titles[mode]}</h2>
@@ -1098,7 +1091,6 @@ function AuthModal({ onClose, onLogin }) {
                         : "Reset Password"}
             </button>
           </form>
-
           {mode === "login" && (
             <div style={{ textAlign: "center", marginTop: 10 }}>
               <button
@@ -1121,7 +1113,6 @@ function AuthModal({ onClose, onLogin }) {
               </button>
             </div>
           )}
-
           <div className="auth-switch">
             {mode === "login" ? (
               <>
@@ -1167,7 +1158,7 @@ function AuthModal({ onClose, onLogin }) {
   );
 }
 
-// ─── MY BOOKINGS MODAL (with Reviews) ────────────────────────────────────────
+// ─── MY BOOKINGS MODAL ────────────────────────────────────────────────────────
 function MyBookingsModal({ user, onClose, showToast }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1195,28 +1186,10 @@ function MyBookingsModal({ user, onClose, showToast }) {
     fetchData();
   }, [fetchData]);
 
-  async function cancelBooking(id) {
-    try {
-      const res = await fetch(`${API}/api/bookings/${id}/cancel`, {
-        method: "PATCH",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setBookings((b) =>
-        b.map((x) => (x.booking_id === id ? { ...x, status: "cancelled" } : x)),
-      );
-      showToast("Booking cancelled", "success");
-    } catch (err) {
-      showToast(err.message, "error");
-    }
-  }
-
   return (
     <>
-      <div
-        className="modal-bg"
-        onClick={(e) => e.target === e.currentTarget && onClose()}
-      >
+      {/* ✅ FIX: no outside click close */}
+      <div className="modal-bg">
         <div className="modal" style={{ maxWidth: "600px" }}>
           <div className="modal-header">
             <h2>My Bookings</h2>
@@ -1285,13 +1258,26 @@ function MyBookingsModal({ user, onClose, showToast }) {
                       alignItems: "flex-end",
                     }}
                   >
+                    {/* ✅ FIX: user can't cancel — show contact info */}
                     {b.status === "confirmed" && (
-                      <button
-                        className="cancel-btn"
-                        onClick={() => cancelBooking(b.booking_id)}
+                      <div
+                        style={{
+                          background: "#FFF3CD",
+                          border: "1px solid #FFC107",
+                          borderRadius: 8,
+                          padding: "8px 12px",
+                          maxWidth: 200,
+                          fontSize: "0.72rem",
+                          color: "#856404",
+                          lineHeight: 1.5,
+                        }}
                       >
-                        Cancel
-                      </button>
+                        <div style={{ fontWeight: 700, marginBottom: 3 }}>
+                          Need to cancel?
+                        </div>
+                        <div>📞 +91 12345 67890</div>
+                        <div>✉️ hello@vvgrandpark.com</div>
+                      </div>
                     )}
                     {(b.status === "confirmed" || b.status === "completed") &&
                       !reviewedBookings.includes(b.booking_id) && (

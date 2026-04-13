@@ -251,6 +251,172 @@ function StatCard({
   );
 }
 
+/* ── CANCEL WARNING MODAL ── */
+function CancelWarningModal({ booking, onConfirm, onClose }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15,25,35,0.8)",
+        zIndex: 800,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1rem",
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 16,
+          width: "100%",
+          maxWidth: 420,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            background: "#C0392B",
+            padding: "20px 24px",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: "50%",
+              background: "rgba(255,255,255,0.2)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: "1.2rem" }}>⚠️</span>
+          </div>
+          <div>
+            <div
+              style={{
+                fontFamily: "'Playfair Display', serif",
+                fontSize: "1rem",
+                fontWeight: 600,
+                color: "#fff",
+              }}
+            >
+              Cancel Booking?
+            </div>
+            <div
+              style={{
+                fontSize: "0.75rem",
+                color: "rgba(255,255,255,0.7)",
+                marginTop: 2,
+              }}
+            >
+              This action cannot be undone
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: "24px" }}>
+          <div
+            style={{
+              background: "#F8F9FA",
+              borderRadius: 10,
+              padding: "14px 16px",
+              marginBottom: 20,
+            }}
+          >
+            <div
+              style={{
+                fontSize: "0.82rem",
+                fontWeight: 600,
+                color: "#0F1923",
+                marginBottom: 6,
+              }}
+            >
+              #{booking.booking_id} — {booking.guest_name}
+            </div>
+            {[
+              { label: "Room", val: booking.room_type },
+              { label: "Check-in", val: booking.check_in_date?.slice(0, 10) },
+              { label: "Check-out", val: booking.check_out_date?.slice(0, 10) },
+              {
+                label: "Total",
+                val: `Rs.${Number(booking.final_total || booking.total_price).toLocaleString()}`,
+              },
+            ].map(({ label, val }) => (
+              <div
+                key={label}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "0.78rem",
+                  padding: "3px 0",
+                  borderTop: "1px solid #E9ECEF",
+                }}
+              >
+                <span style={{ color: "#868E96" }}>{label}</span>
+                <span style={{ fontWeight: 600, color: "#0F1923" }}>{val}</span>
+              </div>
+            ))}
+          </div>
+          <p
+            style={{
+              fontSize: "0.82rem",
+              color: "#495057",
+              marginBottom: 20,
+              lineHeight: 1.5,
+            }}
+          >
+            Are you sure you want to cancel this booking? The guest will need to
+            be notified separately.
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={onClose}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: "transparent",
+                border: "1.5px solid #E9ECEF",
+                borderRadius: 8,
+                fontSize: "0.85rem",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontWeight: 500,
+              }}
+            >
+              Keep Booking
+            </button>
+            <button
+              onClick={onConfirm}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: "#C0392B",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Yes, Cancel It
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── USER DETAIL MODAL ── */
 function UserDetailModal({ userId, onClose, showToast }) {
   const [user, setUser] = useState(null);
@@ -288,7 +454,6 @@ function UserDetailModal({ userId, onClose, showToast }) {
         </div>
       </div>
     );
-
   if (!user) return null;
 
   return (
@@ -318,7 +483,6 @@ function UserDetailModal({ userId, onClose, showToast }) {
           boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
         }}
       >
-        {/* Header */}
         <div
           style={{
             background: "#0F1923",
@@ -391,8 +555,6 @@ function UserDetailModal({ userId, onClose, showToast }) {
             <XIcon size={14} color="#fff" />
           </button>
         </div>
-
-        {/* Info cards */}
         <div
           style={{
             padding: "20px 28px",
@@ -443,8 +605,6 @@ function UserDetailModal({ userId, onClose, showToast }) {
             </div>
           ))}
         </div>
-
-        {/* Bookings */}
         <div style={{ padding: "20px 28px", overflowY: "auto", flex: 1 }}>
           <div
             style={{
@@ -583,7 +743,7 @@ function UserDetailModal({ userId, onClose, showToast }) {
   );
 }
 
-/* ── BOOKING DETAIL MODAL (check-in/out + addons) ── */
+/* ── BOOKING DETAIL MODAL ── */
 function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -692,12 +852,9 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       month: "long",
       year: "numeric",
     });
-
     const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     const W = 210;
-
-    // Header
     doc.setFillColor(15, 25, 35);
     doc.rect(0, 0, W, 42, "F");
     doc.setFont("times", "bold");
@@ -717,12 +874,9 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.setTextColor(150, 140, 120);
     doc.text(invNo, W - 18, 27, { align: "right" });
     doc.text(`Date: ${today}`, W - 18, 33, { align: "right" });
-
     doc.setDrawColor(201, 168, 76);
     doc.setLineWidth(0.5);
     doc.line(18, 48, W - 18, 48);
-
-    // Bill to
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(134, 142, 150);
@@ -747,8 +901,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.text("123 Palace Road, Chennai", W / 2 + 10, 72);
     doc.text("hello@vvgrandpark.com", W / 2 + 10, 78);
     doc.text("+91 12345 67890 | GSTIN: 33AAAAA0000A1Z5", W / 2 + 10, 84);
-
-    // Stay details
     const tableTop = 98;
     doc.setFillColor(15, 25, 35);
     doc.rect(18, tableTop, W - 36, 10, "F");
@@ -758,7 +910,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.text("DESCRIPTION", 24, tableTop + 7);
     doc.text("DETAILS", 110, tableTop + 7);
     doc.text("AMOUNT", W - 18, tableTop + 7, { align: "right" });
-
     const rows = [
       {
         desc: `${b.room_type} — Room ${b.room_number || b.room_id}`,
@@ -778,7 +929,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
         : []),
       { desc: "Guests", detail: `${b.guest_count || 1}`, amount: "—" },
     ];
-
     let y = tableTop + 18;
     rows.forEach((row, i) => {
       if (i % 2 === 0) {
@@ -794,8 +944,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       doc.text(row.amount, W - 18, y, { align: "right" });
       y += 12;
     });
-
-    // Add-ons section
     if (b.addons && b.addons.length > 0) {
       y += 4;
       doc.setFillColor(240, 240, 240);
@@ -826,21 +974,17 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
         y += 12;
       });
     }
-
-    // Totals
     y += 4;
     doc.setDrawColor(225, 225, 225);
     doc.setLineWidth(0.3);
     doc.line(18, y, W - 18, y);
     y += 8;
-
-    const totalsData = [
+    [
       { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
       { label: "Add-on Charges", val: `Rs.${addonTotal.toLocaleString()}` },
       { label: "Subtotal", val: `Rs.${subtotal.toLocaleString()}` },
       { label: "GST (18%)", val: `Rs.${Math.round(gst).toLocaleString()}` },
-    ];
-    totalsData.forEach(({ label, val }) => {
+    ].forEach(({ label, val }) => {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       doc.setTextColor(73, 80, 87);
@@ -850,7 +994,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       doc.text(val, W - 18, y, { align: "right" });
       y += 9;
     });
-
     y += 2;
     doc.setFillColor(15, 25, 35);
     doc.roundedRect(W - 90, y - 6, 72, 18, 3, 3, "F");
@@ -863,8 +1006,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.text(`Rs.${Math.round(finalTotal).toLocaleString()}`, W - 54, y + 9, {
       align: "center",
     });
-
-    // Status + footer
     y += 28;
     const sc =
       b.status === "confirmed"
@@ -878,7 +1019,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.setFontSize(8);
     doc.setTextColor(255, 255, 255);
     doc.text(b.status?.toUpperCase(), 36, y + 2, { align: "center" });
-
     const footerY = 272;
     doc.setDrawColor(201, 168, 76);
     doc.setLineWidth(0.4);
@@ -900,7 +1040,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       footerY + 13,
       { align: "center" },
     );
-
     doc.save(`${invNo}-${(b.guest_name || "guest").replace(/\s+/g, "_")}.pdf`);
   }
 
@@ -964,7 +1103,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
           boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
         }}
       >
-        {/* Header */}
         <div
           style={{
             background: "#0F1923",
@@ -1013,9 +1151,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
             <XIcon size={14} color="#fff" />
           </button>
         </div>
-
         <div style={{ overflowY: "auto", flex: 1, padding: "22px 28px" }}>
-          {/* Check-in / Check-out actions */}
           <div
             style={{
               display: "grid",
@@ -1137,8 +1273,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               )}
             </div>
           </div>
-
-          {/* Add-ons */}
           <div
             style={{
               background: "#F8F9FA",
@@ -1158,8 +1292,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
             >
               Add-on Charges
             </div>
-
-            {/* Preset buttons */}
             <div
               style={{
                 display: "flex",
@@ -1188,8 +1320,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                 </button>
               ))}
             </div>
-
-            {/* Custom input */}
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
               <input
                 value={addonLabel}
@@ -1237,8 +1367,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                 + Add
               </button>
             </div>
-
-            {/* Existing addons */}
             {booking.addons && booking.addons.length > 0 ? (
               booking.addons.map((addon) => (
                 <div
@@ -1298,8 +1426,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               </div>
             )}
           </div>
-
-          {/* Bill summary */}
           <div
             style={{
               background: "#0F1923",
@@ -1378,8 +1504,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               </span>
             </div>
           </div>
-
-          {/* Download invoice */}
           <button
             onClick={downloadInvoice}
             style={{
@@ -1683,25 +1807,29 @@ export default function AdminDashboard({
   const [bookings, setBookings] = useState([]);
   const [users, setUsers] = useState([]);
   const [rooms, setRooms] = useState([]);
+  const [allRooms, setAllRooms] = useState([]); // ✅ includes blocked rooms
   const [loading, setLoading] = useState(true);
   const [bookingRoom, setBookingRoom] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [editRoom, setEditRoom] = useState(null);
+  const [cancelBookingData, setCancelBookingData] = useState(null); // ✅ for warning modal
 
   const fetchAll = () => {
     Promise.all([
       fetch(`${API}/api/admin/stats`).then((r) => r.json()),
       fetch(`${API}/api/admin/bookings`).then((r) => r.json()),
-      fetch(`${API}/api/rooms`).then((r) => r.json()),
+      fetch(`${API}/api/admin/rooms`).then((r) => r.json()), // ✅ all rooms including blocked
+      fetch(`${API}/api/rooms`).then((r) => r.json()), // available only for booking
       fetch(`${API}/api/admin/users`)
         .then((r) => r.json())
         .catch(() => []),
     ])
-      .then(([s, b, r, u]) => {
+      .then(([s, b, allR, r, u]) => {
         setStats(s);
         setBookings(Array.isArray(b) ? b : []);
+        setAllRooms(Array.isArray(allR) ? allR : []);
         setRooms(Array.isArray(r) ? r : []);
         setUsers(Array.isArray(u) ? u : []);
       })
@@ -1712,7 +1840,8 @@ export default function AdminDashboard({
     fetchAll();
   }, []);
 
-  async function cancelBooking(id) {
+  // ✅ Cancel with warning
+  async function confirmCancelBooking(id) {
     try {
       const res = await fetch(`${API}/api/bookings/${id}/cancel`, {
         method: "PATCH",
@@ -1723,6 +1852,24 @@ export default function AdminDashboard({
         b.map((x) => (x.booking_id === id ? { ...x, status: "cancelled" } : x)),
       );
       showToast("Booking cancelled", "success");
+      setCancelBookingData(null);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
+  // ✅ Delete cancelled booking
+  async function deleteBooking(id) {
+    if (!window.confirm("Permanently delete this cancelled booking record?"))
+      return;
+    try {
+      const res = await fetch(`${API}/api/admin/bookings/${id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setBookings((b) => b.filter((x) => x.booking_id !== id));
+      showToast("Booking deleted", "success");
     } catch (err) {
       showToast(err.message, "error");
     }
@@ -1735,18 +1882,17 @@ export default function AdminDashboard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_available: current ? 0 : 1 }),
       });
-      setRooms((r) =>
+      setAllRooms((r) =>
         r.map((x) =>
           x.room_id === roomId ? { ...x, is_available: current ? 0 : 1 } : x,
         ),
       );
-      showToast(`Room ${current ? "blocked" : "available"}`, "success");
+      showToast(`Room ${current ? "blocked" : "unblocked"}`, "success");
     } catch (err) {
       showToast(err.message, "error");
     }
   }
 
-  // Chart data
   const last7 = Array(7)
     .fill(0)
     .map((_, i) => {
@@ -1759,7 +1905,7 @@ export default function AdminDashboard({
         ).length,
       };
     });
-  const revenueByRoom = rooms
+  const revenueByRoom = allRooms
     .map((r) => ({
       label: r.room_type,
       value: bookings
@@ -2063,7 +2209,7 @@ export default function AdminDashboard({
               >
                 <StatCard
                   label="Total Rooms"
-                  value={stats.total_rooms}
+                  value={allRooms.length}
                   icon={BedIcon}
                   accent="#0F1923"
                 />
@@ -2302,7 +2448,6 @@ export default function AdminDashboard({
                   </div>
                 </div>
               </div>
-              {/* Recent bookings */}
               <div style={s.card}>
                 <div
                   style={{
@@ -2708,9 +2853,6 @@ export default function AdminDashboard({
                             <button
                               onClick={() => setSelectedBookingId(b.booking_id)}
                               style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 3,
                                 padding: "4px 10px",
                                 border: "1.5px solid #0F1923",
                                 color: "#0F1923",
@@ -2724,9 +2866,10 @@ export default function AdminDashboard({
                             >
                               Details
                             </button>
+                            {/* ✅ Cancel with warning modal */}
                             {b.status === "confirmed" && (
                               <button
-                                onClick={() => cancelBooking(b.booking_id)}
+                                onClick={() => setCancelBookingData(b)}
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
@@ -2745,6 +2888,25 @@ export default function AdminDashboard({
                                 <XIcon size={11} color="#C0392B" /> Cancel
                               </button>
                             )}
+                            {/* ✅ Delete cancelled bookings */}
+                            {b.status === "cancelled" && (
+                              <button
+                                onClick={() => deleteBooking(b.booking_id)}
+                                style={{
+                                  padding: "4px 10px",
+                                  border: "1.5px solid #868E96",
+                                  color: "#868E96",
+                                  background: "none",
+                                  borderRadius: 4,
+                                  fontSize: "0.72rem",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                🗑 Delete
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -2755,30 +2917,39 @@ export default function AdminDashboard({
             </div>
           )}
 
-          {/* ── ROOMS ── */}
+          {/* ── ROOMS ── ✅ Shows ALL rooms including blocked */}
           {tab === "rooms" && (
             <div style={s.card}>
               <div
                 style={{
-                  fontFamily: "'Playfair Display', serif",
-                  fontSize: "1rem",
-                  fontWeight: 600,
-                  color: "#0F1923",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
                   marginBottom: 20,
                 }}
               >
-                Room Management{" "}
-                <span
+                <div
                   style={{
-                    fontFamily: "inherit",
-                    fontSize: "0.78rem",
-                    fontWeight: 400,
-                    color: "#868E96",
-                    marginLeft: 8,
+                    fontFamily: "'Playfair Display', serif",
+                    fontSize: "1rem",
+                    fontWeight: 600,
+                    color: "#0F1923",
                   }}
                 >
-                  ({rooms.length} total)
-                </span>
+                  Room Management{" "}
+                  <span
+                    style={{
+                      fontFamily: "inherit",
+                      fontSize: "0.78rem",
+                      fontWeight: 400,
+                      color: "#868E96",
+                      marginLeft: 8,
+                    }}
+                  >
+                    ({allRooms.length} total ·{" "}
+                    {allRooms.filter((r) => !r.is_available).length} blocked)
+                  </span>
+                </div>
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -2813,10 +2984,15 @@ export default function AdminDashboard({
                     </tr>
                   </thead>
                   <tbody>
-                    {rooms.map((r) => (
+                    {allRooms.map((r) => (
                       <tr
                         key={r.room_id}
-                        style={{ borderTop: "1px solid #F1F3F5" }}
+                        style={{
+                          borderTop: "1px solid #F1F3F5",
+                          background: !r.is_available
+                            ? "#FFF8F8"
+                            : "transparent",
+                        }}
                       >
                         <td
                           style={{
@@ -2920,28 +3096,30 @@ export default function AdminDashboard({
                             >
                               {r.is_available ? "🚫 Block" : "✅ Unblock"}
                             </button>
-                            <button
-                              onClick={() => {
-                                setBookingRoom(r);
-                                setTab("book");
-                              }}
-                              style={{
-                                padding: "5px 12px",
-                                borderRadius: 4,
-                                background: "#0F1923",
-                                color: "#fff",
-                                border: "none",
-                                fontSize: "0.75rem",
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                fontFamily: "inherit",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 5,
-                              }}
-                            >
-                              <CalendarIcon size={12} color="#fff" /> Book
-                            </button>
+                            {r.is_available && (
+                              <button
+                                onClick={() => {
+                                  setBookingRoom(r);
+                                  setTab("book");
+                                }}
+                                style={{
+                                  padding: "5px 12px",
+                                  borderRadius: 4,
+                                  background: "#0F1923",
+                                  color: "#fff",
+                                  border: "none",
+                                  fontSize: "0.75rem",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  fontFamily: "inherit",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 5,
+                                }}
+                              >
+                                <CalendarIcon size={12} color="#fff" /> Book
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -3346,6 +3524,15 @@ export default function AdminDashboard({
             fetchAll();
             setEditRoom(null);
           }}
+        />
+      )}
+
+      {/* ✅ Cancel Warning Modal */}
+      {cancelBookingData && (
+        <CancelWarningModal
+          booking={cancelBookingData}
+          onConfirm={() => confirmCancelBooking(cancelBookingData.booking_id)}
+          onClose={() => setCancelBookingData(null)}
         />
       )}
 
