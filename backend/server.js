@@ -3,7 +3,7 @@ const cors = require("cors");
 const mysql = require("mysql2/promise");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
-const { Resend } = require("resend"); // ✅ Resend instead of nodemailer
+const { Resend } = require("resend"); 
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const bcrypt = require("bcryptjs");
@@ -54,7 +54,7 @@ if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
   db = mysql.createPool({
     host: process.env.MYSQLHOST || "127.0.0.1",
     user: process.env.MYSQLUSER || "root",
-    password: process.env.MYSQLPASSWORD || "Deva@15032002",
+    password: process.env.MYSQLPASSWORD,
     database: process.env.MYSQLDATABASE || "hotel_db",
     port: Number(process.env.MYSQLPORT) || 3306,
     waitForConnections: true,
@@ -99,8 +99,8 @@ async function runMigrations() {
 runMigrations();
 
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_SXon2zuA5nekOo",
-  key_secret: process.env.RAZORPAY_KEY_SECRET || "NZEKP2AIBvxru16wzQW4UOcW",
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 const GST_RATE = 0.18;
 
