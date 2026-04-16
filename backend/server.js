@@ -10,7 +10,7 @@ const bcrypt = require("bcryptjs");
 
 const app = express();
 
-// ─── CORS — must allow credentials for cookies ────────────────────────────────
+// ─── CORS ─────────────────────────────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
   "http://localhost:3000",
   process.env.FRONTEND_URL,
@@ -29,19 +29,19 @@ app.use(
         callback(new Error("Not allowed by CORS"));
       }
     },
-    credentials: true, // ✅ required for cookies
+    credentials: true,
   }),
 );
 
 app.use(express.json());
-app.use(cookieParser()); // ✅ parse cookies
+app.use(cookieParser());
 
-// ─── JWT SECRET ───────────────────────────────────────────────────────────────
+// ─── JWT ─────────────────────────────────────────────────────────────────────
 const JWT_SECRET =
   process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
-const JWT_EXPIRES = "7d"; // token valid 7 days
+const JWT_EXPIRES = "7d";
 
-// ─── DB ───────────────────────────────────────────────────────────────────────
+// ─── DB ──────────────────────────────────────────────────────────────────────
 let db;
 if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
   db = mysql.createPool({
@@ -62,16 +62,24 @@ if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
   });
 }
 
-// ─── NODEMAILER ───────────────────────────────────────────────────────────────
+// ─── NODEMAILER — port 465 SSL (works on Railway) ────────────────────────────
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true, // ✅ SSL — required for port 465
   auth: {
     user: process.env.GMAIL_USER || "vvgrandpark.hotel@gmail.com",
-    pass: process.env.GMAIL_PASS || "neufmfarbagr ybwf",
+    pass: process.env.GMAIL_PASS,
   },
+  tls: {
+    rejectUnauthorized: false, // ✅ allow self-signed certs on Railway
+  },
+  connectionTimeout: 30000, // 30 seconds timeout
+  greetingTimeout: 15000,
+  socketTimeout: 30000,
 });
 
-// ─── AUTO MIGRATE ─────────────────────────────────────────────────────────────
+// ─── AUTO MIGRATE ────────────────────────────────────────────────────────────
 async function runMigrations() {
   try {
     const cols = [
@@ -110,7 +118,7 @@ const razorpay = new Razorpay({
 });
 const GST_RATE = 0.18;
 
-// ─── HELPER: set secure JWT cookie ───────────────────────────────────────────
+// ─── AUTH COOKIE ─────────────────────────────────────────────────────────────
 function setAuthCookie(res, user) {
   const token = jwt.sign(
     { user_id: user.user_id, email: user.email, role: user.role },
@@ -118,16 +126,16 @@ function setAuthCookie(res, user) {
     { expiresIn: JWT_EXPIRES },
   );
   res.cookie("auth_token", token, {
-    httpOnly: true, // ✅ JS cannot read this cookie
-    secure: process.env.NODE_ENV === "production", // ✅ HTTPS only in production
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // ✅ cross-site for Vercel+Railway
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
     path: "/",
   });
   return token;
 }
 
-// ─── MIDDLEWARE: verify JWT from cookie ──────────────────────────────────────
+// ─── MIDDLEWARE ───────────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
   const token =
     req.cookies?.auth_token ||
@@ -156,7 +164,7 @@ app.get("/", (req, res) =>
   res.json({ message: "VV Grand Park Residency API", status: "OK" }),
 );
 
-// ── SESSION CHECK (frontend calls on load to restore session) ─────────────────
+// ─── SESSION CHECK ────────────────────────────────────────────────────────────
 app.get("/api/auth/me", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -185,16 +193,12 @@ app.post("/api/auth/register", async (req, res) => {
       return res
         .status(400)
         .json({ error: "Password must be at least 6 characters" });
-
     const [ex] = await db.query("SELECT user_id FROM users WHERE email=?", [
       email,
     ]);
     if (ex.length)
       return res.status(409).json({ error: "Email already registered" });
-
-    // ✅ Hash password before storing
     const hashedPassword = await bcrypt.hash(password, 12);
-
     const [r] = await db.query(
       "INSERT INTO users (name,email,password,phone,role) VALUES (?,?,?,?,'guest')",
       [name, email, hashedPassword, phone || null],
@@ -212,26 +216,19 @@ app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password)
       return res.status(400).json({ error: "email and password required" });
-
     const [rows] = await db.query(
       "SELECT user_id,name,email,role,phone,password FROM users WHERE email=?",
       [email],
     );
     if (!rows.length)
       return res.status(401).json({ error: "Invalid credentials" });
-
     const user = rows[0];
-
-    // ✅ Support both bcrypt hashed and plain text passwords (for migration)
     let passwordValid = false;
     if (user.password.startsWith("$2")) {
-      // bcrypt hashed
       passwordValid = await bcrypt.compare(password, user.password);
     } else {
-      // plain text (old users) — migrate them
       passwordValid = user.password === password;
       if (passwordValid) {
-        // Auto-upgrade to bcrypt
         const hashed = await bcrypt.hash(password, 12);
         await db.query("UPDATE users SET password=? WHERE user_id=?", [
           hashed,
@@ -239,15 +236,10 @@ app.post("/api/auth/login", async (req, res) => {
         ]);
       }
     }
-
     if (!passwordValid)
       return res.status(401).json({ error: "Invalid credentials" });
-
     const { password: _, ...safeUser } = user;
-
-    // ✅ Set HTTP-only cookie
     setAuthCookie(res, safeUser);
-
     res.json({ message: "Login successful", user: safeUser });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -284,14 +276,14 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       [email, otp, expiresAt],
     );
     await transporter.sendMail({
-      from: `"VV Grand Park Residency" <vvgrandpark.hotel@gmail.com>`,
+      from: `"VV Grand Park Residency" <${process.env.GMAIL_USER || "vvgrandpark.hotel@gmail.com"}>`,
       to: email,
       subject: "Password Reset OTP — VV Grand Park Residency",
       html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid #e9ecef"><div style="background:#0F1923;padding:28px 32px;text-align:center"><h1 style="color:#C9A84C;font-size:1.4rem;margin:0;letter-spacing:2px">VV GRAND PARK</h1><p style="color:rgba(255,255,255,0.5);font-size:0.75rem;margin:4px 0 0;letter-spacing:3px">RESIDENCY</p></div><div style="padding:32px;text-align:center;background:#fff"><h2 style="color:#0F1923;margin-bottom:8px">Password Reset OTP</h2><p style="color:#868E96;font-size:0.9rem;margin-bottom:24px">Hello ${users[0].name}, use this OTP to reset your password. Valid for <strong>10 minutes</strong>.</p><div style="background:#0F1923;border-radius:12px;padding:20px 32px;display:inline-block;margin-bottom:24px"><span style="font-size:2.5rem;font-weight:700;color:#C9A84C;letter-spacing:8px">${otp}</span></div><p style="color:#C0392B;font-size:0.8rem">Do not share this OTP with anyone.</p></div><div style="background:#0F1923;padding:16px;text-align:center"><p style="color:rgba(255,255,255,0.3);font-size:0.72rem;margin:0">VV Grand Park Residency · hello@vvgrandpark.com</p></div></div>`,
     });
     res.json({ message: "OTP sent to your email" });
   } catch (err) {
-    console.error(err);
+    console.error("Email error:", err.message);
     res.status(500).json({ error: "Failed to send OTP. Try again." });
   }
 });
@@ -330,7 +322,6 @@ app.post("/api/auth/reset-password", async (req, res) => {
     );
     if (!rows.length)
       return res.status(400).json({ error: "Invalid or expired OTP" });
-    // ✅ Hash new password
     const hashed = await bcrypt.hash(new_password, 12);
     await db.query("UPDATE users SET password=? WHERE email=?", [
       hashed,
