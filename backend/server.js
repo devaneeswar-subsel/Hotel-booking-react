@@ -4,25 +4,42 @@ const mysql = require("mysql2/promise");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
+const bcrypt = require("bcryptjs");
 
 const app = express();
+
+// ─── CORS — must allow credentials for cookies ────────────────────────────────
+const ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 app.use(
   cors({
     origin: function (origin, callback) {
       if (
         !origin ||
-        origin.includes("vercel.app") ||
-        origin.includes("railway.app") ||
-        origin === "http://localhost:3000"
+        ALLOWED_ORIGINS.some((o) => origin.startsWith(o)) ||
+        origin.includes("vercel.app")
       ) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
       }
     },
+    credentials: true, // ✅ required for cookies
   }),
 );
+
 app.use(express.json());
+app.use(cookieParser()); // ✅ parse cookies
+
+// ─── JWT SECRET ───────────────────────────────────────────────────────────────
+const JWT_SECRET =
+  process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
+const JWT_EXPIRES = "7d"; // token valid 7 days
 
 // ─── DB ───────────────────────────────────────────────────────────────────────
 let db;
@@ -93,9 +110,68 @@ const razorpay = new Razorpay({
 });
 const GST_RATE = 0.18;
 
+// ─── HELPER: set secure JWT cookie ───────────────────────────────────────────
+function setAuthCookie(res, user) {
+  const token = jwt.sign(
+    { user_id: user.user_id, email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES },
+  );
+  res.cookie("auth_token", token, {
+    httpOnly: true, // ✅ JS cannot read this cookie
+    secure: process.env.NODE_ENV === "production", // ✅ HTTPS only in production
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // ✅ cross-site for Vercel+Railway
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+    path: "/",
+  });
+  return token;
+}
+
+// ─── MIDDLEWARE: verify JWT from cookie ──────────────────────────────────────
+function requireAuth(req, res, next) {
+  const token =
+    req.cookies?.auth_token ||
+    req.headers?.authorization?.replace("Bearer ", "");
+  if (!token) return res.status(401).json({ error: "Not authenticated" });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch (err) {
+    res.clearCookie("auth_token");
+    return res
+      .status(401)
+      .json({ error: "Session expired. Please login again." });
+  }
+}
+
+function requireAdmin(req, res, next) {
+  requireAuth(req, res, () => {
+    if (req.user.role !== "admin")
+      return res.status(403).json({ error: "Admin access required" });
+    next();
+  });
+}
+
 app.get("/", (req, res) =>
   res.json({ message: "VV Grand Park Residency API", status: "OK" }),
 );
+
+// ── SESSION CHECK (frontend calls on load to restore session) ─────────────────
+app.get("/api/auth/me", requireAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT user_id, name, email, role, phone FROM users WHERE user_id=?",
+      [req.user.user_id],
+    );
+    if (!rows.length) {
+      res.clearCookie("auth_token");
+      return res.status(401).json({ error: "User not found" });
+    }
+    res.json({ user: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  AUTH
@@ -105,14 +181,23 @@ app.post("/api/auth/register", async (req, res) => {
     const { name, email, password, phone } = req.body;
     if (!name || !email || !password)
       return res.status(400).json({ error: "name, email, password required" });
+    if (password.length < 6)
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters" });
+
     const [ex] = await db.query("SELECT user_id FROM users WHERE email=?", [
       email,
     ]);
     if (ex.length)
       return res.status(409).json({ error: "Email already registered" });
+
+    // ✅ Hash password before storing
+    const hashedPassword = await bcrypt.hash(password, 12);
+
     const [r] = await db.query(
       "INSERT INTO users (name,email,password,phone,role) VALUES (?,?,?,?,'guest')",
-      [name, email, password, phone || null],
+      [name, email, hashedPassword, phone || null],
     );
     res
       .status(201)
@@ -127,16 +212,56 @@ app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password)
       return res.status(400).json({ error: "email and password required" });
+
     const [rows] = await db.query(
-      "SELECT user_id,name,email,role,phone FROM users WHERE email=? AND password=?",
-      [email, password],
+      "SELECT user_id,name,email,role,phone,password FROM users WHERE email=?",
+      [email],
     );
     if (!rows.length)
       return res.status(401).json({ error: "Invalid credentials" });
-    res.json({ message: "Login successful", user: rows[0] });
+
+    const user = rows[0];
+
+    // ✅ Support both bcrypt hashed and plain text passwords (for migration)
+    let passwordValid = false;
+    if (user.password.startsWith("$2")) {
+      // bcrypt hashed
+      passwordValid = await bcrypt.compare(password, user.password);
+    } else {
+      // plain text (old users) — migrate them
+      passwordValid = user.password === password;
+      if (passwordValid) {
+        // Auto-upgrade to bcrypt
+        const hashed = await bcrypt.hash(password, 12);
+        await db.query("UPDATE users SET password=? WHERE user_id=?", [
+          hashed,
+          user.user_id,
+        ]);
+      }
+    }
+
+    if (!passwordValid)
+      return res.status(401).json({ error: "Invalid credentials" });
+
+    const { password: _, ...safeUser } = user;
+
+    // ✅ Set HTTP-only cookie
+    setAuthCookie(res, safeUser);
+
+    res.json({ message: "Login successful", user: safeUser });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  res.clearCookie("auth_token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    path: "/",
+  });
+  res.json({ message: "Logged out successfully" });
 });
 
 app.post("/api/auth/forgot-password", async (req, res) => {
@@ -195,14 +320,20 @@ app.post("/api/auth/reset-password", async (req, res) => {
       return res
         .status(400)
         .json({ error: "Email, OTP and new password required" });
+    if (new_password.length < 6)
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters" });
     const [rows] = await db.query(
       "SELECT * FROM password_otps WHERE email=? AND otp=? AND used=0 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
       [email, otp],
     );
     if (!rows.length)
       return res.status(400).json({ error: "Invalid or expired OTP" });
+    // ✅ Hash new password
+    const hashed = await bcrypt.hash(new_password, 12);
     await db.query("UPDATE users SET password=? WHERE email=?", [
-      new_password,
+      hashed,
       email,
     ]);
     await db.query("UPDATE password_otps SET used=1 WHERE email=?", [email]);
@@ -269,7 +400,7 @@ app.get("/api/reviews", async (req, res) => {
   }
 });
 
-app.post("/api/reviews", async (req, res) => {
+app.post("/api/reviews", requireAuth, async (req, res) => {
   try {
     const { user_id, booking_id, room_id, rating, review_text } = req.body;
     if (!user_id || !booking_id || !room_id || !rating || !review_text)
@@ -304,7 +435,7 @@ app.post("/api/reviews", async (req, res) => {
   }
 });
 
-app.get("/api/reviews/user/:user_id", async (req, res) => {
+app.get("/api/reviews/user/:user_id", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query(
       "SELECT review_id, booking_id FROM reviews WHERE user_id=?",
@@ -319,7 +450,7 @@ app.get("/api/reviews/user/:user_id", async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 //  PAYMENT
 // ══════════════════════════════════════════════════════════════════════════════
-app.post("/api/payment/create-order", async (req, res) => {
+app.post("/api/payment/create-order", requireAuth, async (req, res) => {
   try {
     const { user_id, room_id, check_in_date, check_out_date, guest_count } =
       req.body;
@@ -438,7 +569,7 @@ app.post("/api/payment/failed", async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 //  BOOKINGS
 // ══════════════════════════════════════════════════════════════════════════════
-app.get("/api/bookings/user/:user_id", async (req, res) => {
+app.get("/api/bookings/user/:user_id", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT b.*, r.room_type, r.price_per_night, r.image_url FROM bookings b JOIN rooms r ON b.room_id=r.room_id WHERE b.user_id=? AND b.status != 'pending' ORDER BY b.created_at DESC`,
@@ -450,7 +581,7 @@ app.get("/api/bookings/user/:user_id", async (req, res) => {
   }
 });
 
-app.patch("/api/bookings/:id/cancel", async (req, res) => {
+app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
   try {
     const [result] = await db.query(
       "UPDATE bookings SET status='cancelled' WHERE booking_id=?",
@@ -464,7 +595,7 @@ app.patch("/api/bookings/:id/cancel", async (req, res) => {
   }
 });
 
-app.post("/api/bookings", async (req, res) => {
+app.post("/api/bookings", requireAuth, async (req, res) => {
   try {
     const { user_id, room_id, check_in_date, check_out_date, guest_count } =
       req.body;
@@ -506,7 +637,7 @@ app.post("/api/bookings", async (req, res) => {
   }
 });
 
-app.patch("/api/bookings/:id/checkin", async (req, res) => {
+app.patch("/api/bookings/:id/checkin", requireAdmin, async (req, res) => {
   try {
     const now = new Date();
     await db.query(
@@ -519,7 +650,7 @@ app.patch("/api/bookings/:id/checkin", async (req, res) => {
   }
 });
 
-app.patch("/api/bookings/:id/checkout", async (req, res) => {
+app.patch("/api/bookings/:id/checkout", requireAdmin, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
       req.params.id,
@@ -561,7 +692,7 @@ app.patch("/api/bookings/:id/checkout", async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 //  ADD-ONS
 // ══════════════════════════════════════════════════════════════════════════════
-app.get("/api/bookings/:id/addons", async (req, res) => {
+app.get("/api/bookings/:id/addons", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query(
       "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at DESC",
@@ -573,7 +704,7 @@ app.get("/api/bookings/:id/addons", async (req, res) => {
   }
 });
 
-app.post("/api/bookings/:id/addons", async (req, res) => {
+app.post("/api/bookings/:id/addons", requireAdmin, async (req, res) => {
   try {
     const { label, amount } = req.body;
     if (!label || !amount)
@@ -612,43 +743,47 @@ app.post("/api/bookings/:id/addons", async (req, res) => {
   }
 });
 
-app.delete("/api/bookings/:id/addons/:addon_id", async (req, res) => {
-  try {
-    await db.query(
-      "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=?",
-      [req.params.addon_id, req.params.id],
-    );
-    const [addons] = await db.query(
-      "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
-      [req.params.id],
-    );
-    const addonTotal = Number(addons[0]?.total || 0);
-    const [bookingRows] = await db.query(
-      "SELECT * FROM bookings WHERE booking_id=?",
-      [req.params.id],
-    );
-    const booking = bookingRows[0];
-    const subtotal = Number(booking.total_price) + addonTotal;
-    const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
-    const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
-    await db.query(
-      "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
-      [addonTotal, gstAmount, finalTotal, req.params.id],
-    );
-    res.json({
-      message: "Addon removed",
-      new_addon_total: addonTotal,
-      new_final_total: finalTotal,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+app.delete(
+  "/api/bookings/:id/addons/:addon_id",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      await db.query(
+        "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=?",
+        [req.params.addon_id, req.params.id],
+      );
+      const [addons] = await db.query(
+        "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
+        [req.params.id],
+      );
+      const addonTotal = Number(addons[0]?.total || 0);
+      const [bookingRows] = await db.query(
+        "SELECT * FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      const booking = bookingRows[0];
+      const subtotal = Number(booking.total_price) + addonTotal;
+      const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
+      const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
+      await db.query(
+        "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
+        [addonTotal, gstAmount, finalTotal, req.params.id],
+      );
+      res.json({
+        message: "Addon removed",
+        new_addon_total: addonTotal,
+        new_final_total: finalTotal,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  ADMIN
 // ══════════════════════════════════════════════════════════════════════════════
-app.get("/api/admin/stats", async (req, res) => {
+app.get("/api/admin/stats", requireAdmin, async (req, res) => {
   try {
     const [[{ total_rooms }]] = await db.query(
       "SELECT COUNT(*) AS total_rooms FROM rooms",
@@ -677,7 +812,7 @@ app.get("/api/admin/stats", async (req, res) => {
   }
 });
 
-app.get("/api/admin/users", async (req, res) => {
+app.get("/api/admin/users", requireAdmin, async (req, res) => {
   try {
     const [rows] = await db.query(
       "SELECT user_id,name,email,phone,role,created_at FROM users ORDER BY created_at DESC",
@@ -688,7 +823,7 @@ app.get("/api/admin/users", async (req, res) => {
   }
 });
 
-app.get("/api/admin/users/:id", async (req, res) => {
+app.get("/api/admin/users/:id", requireAdmin, async (req, res) => {
   try {
     const [userRows] = await db.query(
       "SELECT user_id,name,email,phone,role,created_at FROM users WHERE user_id=?",
@@ -710,7 +845,7 @@ app.get("/api/admin/users/:id", async (req, res) => {
   }
 });
 
-app.get("/api/admin/bookings", async (req, res) => {
+app.get("/api/admin/bookings", requireAdmin, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.status NOT IN ('pending') ORDER BY b.created_at DESC`,
@@ -721,7 +856,7 @@ app.get("/api/admin/bookings", async (req, res) => {
   }
 });
 
-app.get("/api/admin/bookings/:id", async (req, res) => {
+app.get("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number, r.price_per_night, r.image_url FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.booking_id=?`,
@@ -739,7 +874,35 @@ app.get("/api/admin/bookings/:id", async (req, res) => {
   }
 });
 
-app.post("/api/admin/rooms", async (req, res) => {
+app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
+  try {
+    const [booking] = await db.query(
+      "SELECT status FROM bookings WHERE booking_id=?",
+      [req.params.id],
+    );
+    if (!booking.length)
+      return res.status(404).json({ error: "Booking not found" });
+    if (booking[0].status !== "cancelled")
+      return res
+        .status(400)
+        .json({ error: "Only cancelled bookings can be deleted" });
+    await db.query("DELETE FROM bookings WHERE booking_id=?", [req.params.id]);
+    res.json({ message: "Booking deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/admin/rooms", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM rooms ORDER BY room_id ASC");
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/admin/rooms", requireAdmin, async (req, res) => {
   try {
     const {
       room_number,
@@ -770,7 +933,7 @@ app.post("/api/admin/rooms", async (req, res) => {
   }
 });
 
-app.patch("/api/admin/rooms/:id", async (req, res) => {
+app.patch("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
   try {
     const {
       is_available,
@@ -824,43 +987,11 @@ app.patch("/api/admin/rooms/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/admin/rooms/:id", async (req, res) => {
+app.delete("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
   try {
     await db.query("DELETE FROM rooms WHERE room_id=?", [req.params.id]);
     res.json({ message: "Room deleted" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── GET ALL ROOMS INCLUDING BLOCKED (admin only) ──────────────────────────────
-app.get("/api/admin/rooms", async (req, res) => {
-  try {
-    const [rows] = await db.query("SELECT * FROM rooms ORDER BY room_id ASC");
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── DELETE CANCELLED BOOKING ──────────────────────────────────────────────────
-app.delete("/api/admin/bookings/:id", async (req, res) => {
-  try {
-    const [booking] = await db.query(
-      "SELECT status FROM bookings WHERE booking_id=?",
-      [req.params.id],
-    );
-    if (!booking.length)
-      return res.status(404).json({ error: "Booking not found" });
-    if (booking[0].status !== "cancelled")
-      return res
-        .status(400)
-        .json({ error: "Only cancelled bookings can be deleted" });
-    await db.query("DELETE FROM bookings WHERE booking_id=?", [req.params.id]);
-    res.json({ message: "Booking deleted successfully" });
-  } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });

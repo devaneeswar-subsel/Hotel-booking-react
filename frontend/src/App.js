@@ -15,6 +15,14 @@ import { XIcon, CheckIcon, BookingIcon, DownloadIcon } from "./Icons";
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
 
+// ✅ All API calls include credentials (sends HTTP-only cookie automatically)
+const apiFetch = (url, options = {}) =>
+  fetch(`${API}${url}`, {
+    ...options,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...options.headers },
+  });
+
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 function Toast({ msg, type, onHide }) {
   useEffect(() => {
@@ -66,9 +74,8 @@ function WriteReviewModal({
     if (!text.trim()) return showToast("Please write a review", "error");
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/reviews`, {
+      const res = await apiFetch("/api/reviews", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: user.user_id,
           booking_id: booking.booking_id,
@@ -404,9 +411,8 @@ function BookingModal({ room, user, onClose, showToast }) {
     }
     setLoading(true);
     try {
-      const orderRes = await fetch(`${API}/api/payment/create-order`, {
+      const orderRes = await apiFetch("/api/payment/create-order", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: user.user_id,
           room_id: room.room_id,
@@ -438,9 +444,8 @@ function BookingModal({ room, user, onClose, showToast }) {
         theme: { color: "#0F1923" },
         modal: {
           ondismiss: async () => {
-            await fetch(`${API}/api/payment/failed`, {
+            await apiFetch("/api/payment/failed", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ booking_id }),
             });
             showToast("Payment cancelled. Booking was not confirmed.", "error");
@@ -449,9 +454,8 @@ function BookingModal({ room, user, onClose, showToast }) {
         },
         handler: async (response) => {
           try {
-            const verifyRes = await fetch(`${API}/api/payment/verify`, {
+            const verifyRes = await apiFetch("/api/payment/verify", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 razorpay_order_id: response.razorpay_order_id,
                 razorpay_payment_id: response.razorpay_payment_id,
@@ -471,9 +475,8 @@ function BookingModal({ room, user, onClose, showToast }) {
       };
       const rzp = new window.Razorpay(options);
       rzp.on("payment.failed", async (resp) => {
-        await fetch(`${API}/api/payment/failed`, {
+        await apiFetch("/api/payment/failed", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ booking_id }),
         });
         showToast(`Payment failed: ${resp.error.description}`, "error");
@@ -651,7 +654,7 @@ function BookingModal({ room, user, onClose, showToast }) {
     );
   }
 
-  if (confirmedBooking) {
+  if (confirmedBooking)
     return (
       <PaymentSuccess
         booking={confirmedBooking}
@@ -659,7 +662,6 @@ function BookingModal({ room, user, onClose, showToast }) {
         onDownloadInvoice={downloadInvoice}
       />
     );
-  }
 
   return (
     <div className="modal-bg">
@@ -875,9 +877,8 @@ function AuthModal({ onClose, onLogin }) {
     setSuccess("");
     try {
       if (mode === "login") {
-        const res = await fetch(`${API}/api/auth/login`, {
+        const res = await apiFetch("/api/auth/login", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: form.email, password: form.password }),
         });
         const data = await res.json();
@@ -885,9 +886,8 @@ function AuthModal({ onClose, onLogin }) {
         onLogin(data.user);
         onClose();
       } else if (mode === "register") {
-        const res = await fetch(`${API}/api/auth/register`, {
+        const res = await apiFetch("/api/auth/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(form),
         });
         const data = await res.json();
@@ -895,9 +895,8 @@ function AuthModal({ onClose, onLogin }) {
         setSuccess("Account created! Please sign in.");
         setMode("login");
       } else if (mode === "forgot") {
-        const res = await fetch(`${API}/api/auth/forgot-password`, {
+        const res = await apiFetch("/api/auth/forgot-password", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: form.email }),
         });
         const data = await res.json();
@@ -905,9 +904,8 @@ function AuthModal({ onClose, onLogin }) {
         setSuccess("OTP sent to your email! Check inbox.");
         setMode("verify");
       } else if (mode === "verify") {
-        const res = await fetch(`${API}/api/auth/verify-otp`, {
+        const res = await apiFetch("/api/auth/verify-otp", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: form.email, otp: form.otp }),
         });
         const data = await res.json();
@@ -917,9 +915,8 @@ function AuthModal({ onClose, onLogin }) {
       } else if (mode === "reset") {
         if (form.new_password.length < 6)
           throw new Error("Password must be at least 6 characters");
-        const res = await fetch(`${API}/api/auth/reset-password`, {
+        const res = await apiFetch("/api/auth/reset-password", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             email: form.email,
             otp: form.otp,
@@ -1166,10 +1163,10 @@ function MyBookingsModal({ user, onClose, showToast }) {
   const fetchData = useCallback(() => {
     setLoading(true);
     Promise.all([
-      fetch(`${API}/api/bookings/user/${user.user_id}`)
+      apiFetch(`/api/bookings/user/${user.user_id}`)
         .then((r) => r.json())
         .catch(() => []),
-      fetch(`${API}/api/reviews/user/${user.user_id}`)
+      apiFetch(`/api/reviews/user/${user.user_id}`)
         .then((r) => r.json())
         .catch(() => []),
     ])
@@ -1330,16 +1327,8 @@ function MyBookingsModal({ user, onClose, showToast }) {
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  // ✅ FIX: Load user from localStorage on startup — persists across refresh
-  const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem("vvgp_user");
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true); // ✅ check session on load
   const [bookingRoom, setBookingRoom] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [showBookings, setShowBookings] = useState(false);
@@ -1351,21 +1340,62 @@ export default function App() {
     setToast({ msg, type });
   }, []);
 
-  // ✅ FIX: Save user to localStorage on login
+  // ✅ On app load — check if user has a valid session cookie
+  useEffect(() => {
+    apiFetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.user) setUser(data.user);
+      })
+      .catch(() => {})
+      .finally(() => setAuthLoading(false));
+  }, []);
+
   function handleLogin(u) {
     setUser(u);
-    localStorage.setItem("vvgp_user", JSON.stringify(u));
     showToast(`Welcome, ${u.name.split(" ")[0]}!`, "success");
     if (u.role === "admin") setTimeout(() => setShowAdmin(true), 500);
   }
 
-  // ✅ FIX: Remove user from localStorage on logout
-  function handleLogout() {
+  async function handleLogout() {
+    // ✅ Tell backend to clear the cookie
+    await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
-    localStorage.removeItem("vvgp_user");
     setShowBookings(false);
     setShowAdmin(false);
     showToast("Logged out successfully", "success");
+  }
+
+  // Show loading spinner while checking session
+  if (authLoading) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#0F1923",
+        }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <div
+            style={{
+              fontFamily: "'Playfair Display', serif",
+              fontSize: "1.2rem",
+              color: "#C9A84C",
+              letterSpacing: "2px",
+              marginBottom: 12,
+            }}
+          >
+            VV GRAND PARK
+          </div>
+          <div style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>
+            Loading...
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (selectedRoom) {
