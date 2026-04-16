@@ -1790,6 +1790,260 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
   );
 }
 
+/* ── RESET PASSWORD MODAL ── */
+function ResetPasswordModal({ user, onClose, showToast }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [show, setShow] = useState(false);
+
+  async function handleReset() {
+    if (password.length < 6) return showToast("Min 6 characters", "error");
+    if (password !== confirm)
+      return showToast("Passwords don't match", "error");
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `${API}/api/admin/users/${user.user_id}/reset-password`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ new_password: password }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      showToast(`Password reset for ${user.name}!`, "success");
+      onClose();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15,25,35,0.8)",
+        zIndex: 900,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1rem",
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 16,
+          width: "100%",
+          maxWidth: 400,
+          overflow: "hidden",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+        }}
+      >
+        <div
+          style={{
+            background: "#0F1923",
+            padding: "20px 24px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontFamily: "'Playfair Display', serif",
+                fontSize: "1rem",
+                fontWeight: 600,
+                color: "#fff",
+              }}
+            >
+              Reset Password
+            </div>
+            <div
+              style={{
+                fontSize: "0.75rem",
+                color: "rgba(255,255,255,0.5)",
+                marginTop: 2,
+              }}
+            >
+              {user.name} · {user.email}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: "rgba(255,255,255,0.1)",
+              border: "none",
+              width: 30,
+              height: 30,
+              borderRadius: "50%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <XIcon size={13} color="#fff" />
+          </button>
+        </div>
+        <div style={{ padding: "24px" }}>
+          <div style={{ marginBottom: 14 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: "0.62rem",
+                fontWeight: 700,
+                color: "#868E96",
+                marginBottom: 6,
+                letterSpacing: "0.8px",
+                textTransform: "uppercase",
+              }}
+            >
+              New Password
+            </label>
+            <div style={{ position: "relative" }}>
+              <input
+                type={show ? "text" : "password"}
+                placeholder="Min 6 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "10px 40px 10px 12px",
+                  borderRadius: 6,
+                  border: "1.5px solid #E9ECEF",
+                  fontSize: "0.875rem",
+                  fontFamily: "inherit",
+                  boxSizing: "border-box",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShow(!show)}
+                style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "1rem",
+                }}
+              >
+                {show ? "🙈" : "👁️"}
+              </button>
+            </div>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: "0.62rem",
+                fontWeight: 700,
+                color: "#868E96",
+                marginBottom: 6,
+                letterSpacing: "0.8px",
+                textTransform: "uppercase",
+              }}
+            >
+              Confirm Password
+            </label>
+            <input
+              type="password"
+              placeholder="Re-enter password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: 6,
+                border: "1.5px solid #E9ECEF",
+                fontSize: "0.875rem",
+                fontFamily: "inherit",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+          {password && confirm && password !== confirm && (
+            <div
+              style={{
+                background: "#FDECEA",
+                color: "#C0392B",
+                padding: "8px 12px",
+                borderRadius: 6,
+                fontSize: "0.78rem",
+                marginBottom: 14,
+              }}
+            >
+              ❌ Passwords don't match
+            </div>
+          )}
+          {password &&
+            confirm &&
+            password === confirm &&
+            password.length >= 6 && (
+              <div
+                style={{
+                  background: "#E8F8F0",
+                  color: "#2D9A6E",
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  fontSize: "0.78rem",
+                  marginBottom: 14,
+                }}
+              >
+                ✅ Passwords match
+              </div>
+            )}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={onClose}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: "transparent",
+                border: "1.5px solid #E9ECEF",
+                borderRadius: 8,
+                fontSize: "0.85rem",
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleReset}
+              disabled={loading}
+              style={{
+                flex: 2,
+                padding: "10px",
+                background: "#0F1923",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {loading ? "Resetting..." : "Reset Password"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════════════════
    MAIN ADMIN DASHBOARD
 ══════════════════════════════════════════════════════════════════════════════ */
@@ -1812,6 +2066,7 @@ export default function AdminDashboard({
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [editRoom, setEditRoom] = useState(null);
   const [cancelBookingData, setCancelBookingData] = useState(null);
+  const [resetPasswordUser, setResetPasswordUser] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false); // ✅ mobile sidebar toggle
 
   const fetchAll = () => {
@@ -3388,22 +3643,40 @@ export default function AdminDashboard({
                             {u.created_at?.slice(0, 10)}
                           </td>
                           <td style={{ padding: "11px 14px" }}>
-                            <button
-                              onClick={() => setSelectedUserId(u.user_id)}
-                              style={{
-                                padding: "5px 14px",
-                                borderRadius: 4,
-                                background: "#0F1923",
-                                color: "#fff",
-                                border: "none",
-                                fontSize: "0.75rem",
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                fontFamily: "inherit",
-                              }}
-                            >
-                              View
-                            </button>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button
+                                onClick={() => setSelectedUserId(u.user_id)}
+                                style={{
+                                  padding: "5px 10px",
+                                  borderRadius: 4,
+                                  background: "#0F1923",
+                                  color: "#fff",
+                                  border: "none",
+                                  fontSize: "0.72rem",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                View
+                              </button>
+                              <button
+                                onClick={() => setResetPasswordUser(u)}
+                                style={{
+                                  padding: "5px 10px",
+                                  borderRadius: 4,
+                                  background: "none",
+                                  border: "1.5px solid #C9A84C",
+                                  color: "#9A7A2E",
+                                  fontSize: "0.72rem",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                🔑 Reset
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -3602,6 +3875,13 @@ export default function AdminDashboard({
           booking={cancelBookingData}
           onConfirm={() => confirmCancelBooking(cancelBookingData.booking_id)}
           onClose={() => setCancelBookingData(null)}
+        />
+      )}
+      {resetPasswordUser && (
+        <ResetPasswordModal
+          user={resetPasswordUser}
+          onClose={() => setResetPasswordUser(null)}
+          showToast={showToast}
         />
       )}
 

@@ -15,7 +15,6 @@ import { XIcon, CheckIcon, BookingIcon, DownloadIcon } from "./Icons";
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
 
-// ✅ All API calls include credentials (sends HTTP-only cookie automatically)
 const apiFetch = (url, options = {}) =>
   fetch(`${API}${url}`, {
     ...options,
@@ -23,7 +22,6 @@ const apiFetch = (url, options = {}) =>
     headers: { "Content-Type": "application/json", ...options.headers },
   });
 
-// ─── TOAST ────────────────────────────────────────────────────────────────────
 function Toast({ msg, type, onHide }) {
   useEffect(() => {
     const t = setTimeout(onHide, 3500);
@@ -32,7 +30,6 @@ function Toast({ msg, type, onHide }) {
   return <div className={`toast ${type}`}>{msg}</div>;
 }
 
-// ─── STAR RATING INPUT ────────────────────────────────────────────────────────
 function StarRating({ value, onChange }) {
   const [hover, setHover] = useState(0);
   return (
@@ -57,7 +54,6 @@ function StarRating({ value, onChange }) {
   );
 }
 
-// ─── WRITE REVIEW MODAL ───────────────────────────────────────────────────────
 function WriteReviewModal({
   booking,
   user,
@@ -169,7 +165,6 @@ function WriteReviewModal({
   );
 }
 
-// ─── PAYMENT SUCCESS SCREEN ───────────────────────────────────────────────────
 function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
   const nights =
     booking.check_in_date && booking.check_out_date
@@ -379,7 +374,6 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
   );
 }
 
-// ─── BOOKING MODAL WITH RAZORPAY ──────────────────────────────────────────────
 function BookingModal({ room, user, onClose, showToast }) {
   const [form, setForm] = useState({
     check_in_date: "",
@@ -428,7 +422,6 @@ function BookingModal({ room, user, onClose, showToast }) {
         razorpay_key,
         room_name,
       } = orderData;
-
       const options = {
         key: razorpay_key,
         amount: Math.round(total_price * 100),
@@ -448,7 +441,7 @@ function BookingModal({ room, user, onClose, showToast }) {
               method: "POST",
               body: JSON.stringify({ booking_id }),
             });
-            showToast("Payment cancelled. Booking was not confirmed.", "error");
+            showToast("Payment cancelled.", "error");
             setLoading(false);
           },
         },
@@ -832,7 +825,7 @@ function BookingModal({ room, user, onClose, showToast }) {
   );
 }
 
-// ─── AUTH MODAL ───────────────────────────────────────────────────────────────
+// ─── AUTH MODAL — login + register only (forgot password removed) ─────────────
 function AuthModal({ onClose, onLogin }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
@@ -840,14 +833,11 @@ function AuthModal({ onClose, onLogin }) {
     email: "",
     password: "",
     phone: "",
-    otp: "",
-    new_password: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [showPass, setShowPass] = useState(false);
-  const [showNewPass, setShowNewPass] = useState(false);
 
   const eyeBtn = (show, toggle) => (
     <button
@@ -894,39 +884,6 @@ function AuthModal({ onClose, onLogin }) {
         if (!res.ok) throw new Error(data.error);
         setSuccess("Account created! Please sign in.");
         setMode("login");
-      } else if (mode === "forgot") {
-        const res = await apiFetch("/api/auth/forgot-password", {
-          method: "POST",
-          body: JSON.stringify({ email: form.email }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        setSuccess("OTP sent to your email! Check inbox.");
-        setMode("verify");
-      } else if (mode === "verify") {
-        const res = await apiFetch("/api/auth/verify-otp", {
-          method: "POST",
-          body: JSON.stringify({ email: form.email, otp: form.otp }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        setSuccess("OTP verified! Set your new password.");
-        setMode("reset");
-      } else if (mode === "reset") {
-        if (form.new_password.length < 6)
-          throw new Error("Password must be at least 6 characters");
-        const res = await apiFetch("/api/auth/reset-password", {
-          method: "POST",
-          body: JSON.stringify({
-            email: form.email,
-            otp: form.otp,
-            new_password: form.new_password,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        setSuccess("Password reset! Please sign in.");
-        setMode("login");
       }
     } catch (err) {
       setError(err.message);
@@ -935,19 +892,11 @@ function AuthModal({ onClose, onLogin }) {
     }
   }
 
-  const titles = {
-    login: "Welcome Back",
-    register: "Create Account",
-    forgot: "Forgot Password",
-    verify: "Enter OTP",
-    reset: "New Password",
-  };
-
   return (
     <div className="modal-bg">
       <div className="modal">
         <div className="modal-header">
-          <h2>{titles[mode]}</h2>
+          <h2>{mode === "login" ? "Welcome Back" : "Create Account"}</h2>
           <button className="modal-close" onClick={onClose}>
             <XIcon size={14} color="#495057" />
           </button>
@@ -981,42 +930,32 @@ function AuthModal({ onClose, onLogin }) {
                 />
               </div>
             )}
-            {["login", "register", "forgot", "verify"].includes(mode) && (
-              <div className="form-group">
-                <label>Email</label>
+            <div className="form-group">
+              <label>Email</label>
+              <input
+                type="email"
+                required
+                placeholder="you@email.com"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>Password</label>
+              <div style={{ position: "relative" }}>
                 <input
-                  type="email"
+                  type={showPass ? "text" : "password"}
                   required
-                  placeholder="you@email.com"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  readOnly={mode === "verify"}
-                  style={
-                    mode === "verify"
-                      ? { background: "#f8f9fa", color: "#868E96" }
-                      : {}
+                  placeholder="••••••••"
+                  value={form.password}
+                  onChange={(e) =>
+                    setForm({ ...form, password: e.target.value })
                   }
+                  style={{ paddingRight: 40 }}
                 />
+                {eyeBtn(showPass, () => setShowPass(!showPass))}
               </div>
-            )}
-            {(mode === "login" || mode === "register") && (
-              <div className="form-group">
-                <label>Password</label>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type={showPass ? "text" : "password"}
-                    required
-                    placeholder="••••••••"
-                    value={form.password}
-                    onChange={(e) =>
-                      setForm({ ...form, password: e.target.value })
-                    }
-                    style={{ paddingRight: 40 }}
-                  />
-                  {eyeBtn(showPass, () => setShowPass(!showPass))}
-                </div>
-              </div>
-            )}
+            </div>
             {mode === "register" && (
               <div className="form-group">
                 <label>Phone (optional)</label>
@@ -1027,87 +966,24 @@ function AuthModal({ onClose, onLogin }) {
                 />
               </div>
             )}
-            {mode === "verify" && (
-              <div className="form-group">
-                <label>Enter OTP (sent to your email)</label>
-                <input
-                  required
-                  placeholder="6-digit OTP"
-                  maxLength={6}
-                  value={form.otp}
-                  onChange={(e) => setForm({ ...form, otp: e.target.value })}
-                  style={{
-                    fontSize: "1.4rem",
-                    letterSpacing: "8px",
-                    textAlign: "center",
-                    fontWeight: 700,
-                  }}
-                />
-                <div
-                  style={{
-                    fontSize: "0.75rem",
-                    color: "var(--gray-400)",
-                    marginTop: 6,
-                  }}
-                >
-                  OTP valid for 10 minutes
-                </div>
-              </div>
-            )}
-            {mode === "reset" && (
-              <div className="form-group">
-                <label>New Password</label>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type={showNewPass ? "text" : "password"}
-                    required
-                    placeholder="Minimum 6 characters"
-                    value={form.new_password}
-                    onChange={(e) =>
-                      setForm({ ...form, new_password: e.target.value })
-                    }
-                    style={{ paddingRight: 40 }}
-                  />
-                  {eyeBtn(showNewPass, () => setShowNewPass(!showNewPass))}
-                </div>
-              </div>
-            )}
             <button className="submit-btn" type="submit" disabled={loading}>
               {loading
                 ? "Please wait..."
                 : mode === "login"
                   ? "Sign In"
-                  : mode === "register"
-                    ? "Create Account"
-                    : mode === "forgot"
-                      ? "Send OTP"
-                      : mode === "verify"
-                        ? "Verify OTP"
-                        : "Reset Password"}
+                  : "Create Account"}
             </button>
           </form>
+
+          {/* ✅ Forgot password removed — admin resets via dashboard */}
           {mode === "login" && (
-            <div style={{ textAlign: "center", marginTop: 10 }}>
-              <button
-                onClick={() => {
-                  setMode("forgot");
-                  setError("");
-                  setSuccess("");
-                }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--gold)",
-                  fontSize: "0.82rem",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  textDecoration: "underline",
-                }}
-              >
-                Forgot password?
-              </button>
+            <div style={{ textAlign: "center", marginTop: 8 }}>
+              <span style={{ fontSize: "0.78rem", color: "var(--gray-400)" }}>
+                Forgot password? Contact hotel reception
+              </span>
             </div>
           )}
+
           <div className="auth-switch">
             {mode === "login" ? (
               <>
@@ -1122,7 +998,7 @@ function AuthModal({ onClose, onLogin }) {
                   Register
                 </button>
               </>
-            ) : mode === "register" ? (
+            ) : (
               <>
                 Already have an account?{" "}
                 <button
@@ -1135,16 +1011,6 @@ function AuthModal({ onClose, onLogin }) {
                   Sign in
                 </button>
               </>
-            ) : (
-              <button
-                onClick={() => {
-                  setMode("login");
-                  setError("");
-                  setSuccess("");
-                }}
-              >
-                ← Back to Sign In
-              </button>
             )}
           </div>
         </div>
@@ -1153,7 +1019,6 @@ function AuthModal({ onClose, onLogin }) {
   );
 }
 
-// ─── MY BOOKINGS MODAL ────────────────────────────────────────────────────────
 function MyBookingsModal({ user, onClose, showToast }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1325,10 +1190,9 @@ function MyBookingsModal({ user, onClose, showToast }) {
   );
 }
 
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true); // ✅ check session on load
+  const [authLoading, setAuthLoading] = useState(true);
   const [bookingRoom, setBookingRoom] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [showBookings, setShowBookings] = useState(false);
@@ -1340,7 +1204,6 @@ export default function App() {
     setToast({ msg, type });
   }, []);
 
-  // ✅ On app load — check if user has a valid session cookie
   useEffect(() => {
     apiFetch("/api/auth/me")
       .then((r) => r.json())
@@ -1358,7 +1221,6 @@ export default function App() {
   }
 
   async function handleLogout() {
-    // ✅ Tell backend to clear the cookie
     await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
     setShowBookings(false);
@@ -1366,7 +1228,6 @@ export default function App() {
     showToast("Logged out successfully", "success");
   }
 
-  // Show loading spinner while checking session
   if (authLoading) {
     return (
       <div
@@ -1471,7 +1332,6 @@ export default function App() {
       <Gallery />
       <Testimonials />
       <Footer />
-
       {showAuth && (
         <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
       )}
@@ -1497,7 +1357,6 @@ export default function App() {
           onHide={() => setToast(null)}
         />
       )}
-
       {user && user.role !== "admin" && (
         <button
           onClick={() => setShowBookings(true)}
