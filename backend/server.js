@@ -3,7 +3,7 @@ const cors = require("cors");
 const mysql = require("mysql2/promise");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend"); // ✅ Resend instead of nodemailer
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const bcrypt = require("bcryptjs");
@@ -62,22 +62,8 @@ if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
   });
 }
 
-// ─── NODEMAILER — port 465 SSL (works on Railway) ────────────────────────────
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true, // ✅ SSL — required for port 465
-  auth: {
-    user: process.env.GMAIL_USER || "vvgrandpark.hotel@gmail.com",
-    pass: process.env.GMAIL_PASS,
-  },
-  tls: {
-    rejectUnauthorized: false, // ✅ allow self-signed certs on Railway
-  },
-  connectionTimeout: 30000, // 30 seconds timeout
-  greetingTimeout: 15000,
-  socketTimeout: 30000,
-});
+// ─── RESEND EMAIL ─────────────────────────────────────────────────────────────
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ─── AUTO MIGRATE ────────────────────────────────────────────────────────────
 async function runMigrations() {
@@ -268,6 +254,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       return res
         .status(404)
         .json({ error: "No account found with this email" });
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db.query("DELETE FROM password_otps WHERE email=?", [email]);
@@ -275,15 +262,23 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       "INSERT INTO password_otps (email, otp, expires_at) VALUES (?,?,?)",
       [email, otp, expiresAt],
     );
-    await transporter.sendMail({
-      from: `"VV Grand Park Residency" <${process.env.GMAIL_USER || "vvgrandpark.hotel@gmail.com"}>`,
+
+    // ✅ Send via Resend (works on Railway)
+    const { error } = await resend.emails.send({
+      from: "VV Grand Park Residency <onboarding@resend.dev>",
       to: email,
       subject: "Password Reset OTP — VV Grand Park Residency",
       html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid #e9ecef"><div style="background:#0F1923;padding:28px 32px;text-align:center"><h1 style="color:#C9A84C;font-size:1.4rem;margin:0;letter-spacing:2px">VV GRAND PARK</h1><p style="color:rgba(255,255,255,0.5);font-size:0.75rem;margin:4px 0 0;letter-spacing:3px">RESIDENCY</p></div><div style="padding:32px;text-align:center;background:#fff"><h2 style="color:#0F1923;margin-bottom:8px">Password Reset OTP</h2><p style="color:#868E96;font-size:0.9rem;margin-bottom:24px">Hello ${users[0].name}, use this OTP to reset your password. Valid for <strong>10 minutes</strong>.</p><div style="background:#0F1923;border-radius:12px;padding:20px 32px;display:inline-block;margin-bottom:24px"><span style="font-size:2.5rem;font-weight:700;color:#C9A84C;letter-spacing:8px">${otp}</span></div><p style="color:#C0392B;font-size:0.8rem">Do not share this OTP with anyone.</p></div><div style="background:#0F1923;padding:16px;text-align:center"><p style="color:rgba(255,255,255,0.3);font-size:0.72rem;margin:0">VV Grand Park Residency · hello@vvgrandpark.com</p></div></div>`,
     });
+
+    if (error) {
+      console.error("Resend error:", error);
+      return res.status(500).json({ error: "Failed to send OTP. Try again." });
+    }
+
     res.json({ message: "OTP sent to your email" });
   } catch (err) {
-    console.error("Email error:", err.message);
+    console.error("Forgot password error:", err.message);
     res.status(500).json({ error: "Failed to send OTP. Try again." });
   }
 });
