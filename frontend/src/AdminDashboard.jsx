@@ -18,6 +18,14 @@ import {
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
 
+// ✅ All admin fetches include credentials (JWT cookie)
+const apiFetch = (url, options = {}) =>
+  fetch(`${API}${url}`, {
+    ...options,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...options.headers },
+  });
+
 /* ── CHARTS ── */
 function BarChart({ data, color = "#C9A84C", height = 64 }) {
   if (!data || !data.length) return null;
@@ -418,12 +426,12 @@ function CancelWarningModal({ booking, onConfirm, onClose }) {
 }
 
 /* ── USER DETAIL MODAL ── */
-function UserDetailModal({ userId, onClose, showToast }) {
+function UserDetailModal({ userId, onClose }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API}/api/admin/users/${userId}`)
+    apiFetch(`/api/admin/users/${userId}`)
       .then((r) => r.json())
       .then(setUser)
       .finally(() => setLoading(false));
@@ -560,7 +568,7 @@ function UserDetailModal({ userId, onClose, showToast }) {
             padding: "20px 28px",
             borderBottom: "1px solid #E9ECEF",
             display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
+            gridTemplateColumns: "repeat(2, 1fr)",
             gap: 12,
           }}
         >
@@ -699,7 +707,7 @@ function UserDetailModal({ userId, onClose, showToast }) {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1fr 1fr",
+                    gridTemplateColumns: "1fr 1fr",
                     gap: 8,
                     fontSize: "0.78rem",
                   }}
@@ -720,20 +728,6 @@ function UserDetailModal({ userId, onClose, showToast }) {
                     </strong>
                   </div>
                 </div>
-                {b.actual_checkin && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontSize: "0.72rem",
-                      color: "#2D9A6E",
-                    }}
-                  >
-                    ✅ Checked in:{" "}
-                    {new Date(b.actual_checkin).toLocaleString("en-IN")}
-                    {b.actual_checkout &&
-                      ` → Checked out: ${new Date(b.actual_checkout).toLocaleString("en-IN")} (${b.hours_spent}h)`}
-                  </div>
-                )}
               </div>
             ))
           )}
@@ -750,7 +744,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const [addonLabel, setAddonLabel] = useState("");
   const [addonAmount, setAddonAmount] = useState("");
   const [addonLoading, setAddonLoading] = useState(false);
-
   const PRESET_ADDONS = [
     "Food & Beverages",
     "Laundry",
@@ -761,18 +754,17 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
 
   const fetchBooking = () => {
     setLoading(true);
-    fetch(`${API}/api/admin/bookings/${bookingId}`)
+    apiFetch(`/api/admin/bookings/${bookingId}`)
       .then((r) => r.json())
       .then(setBooking)
       .finally(() => setLoading(false));
   };
-
   useEffect(() => {
     fetchBooking();
-  }, [bookingId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bookingId]); // eslint-disable-line
 
   async function handleCheckin() {
-    const res = await fetch(`${API}/api/bookings/${bookingId}/checkin`, {
+    const res = await apiFetch(`/api/bookings/${bookingId}/checkin`, {
       method: "PATCH",
     });
     const data = await res.json();
@@ -785,7 +777,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   async function handleCheckout() {
     if (!window.confirm("Confirm checkout? This will calculate final bill."))
       return;
-    const res = await fetch(`${API}/api/bookings/${bookingId}/checkout`, {
+    const res = await apiFetch(`/api/bookings/${bookingId}/checkout`, {
       method: "PATCH",
     });
     const data = await res.json();
@@ -802,9 +794,8 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     if (!addonLabel || !addonAmount)
       return showToast("Enter label and amount", "error");
     setAddonLoading(true);
-    const res = await fetch(`${API}/api/bookings/${bookingId}/addons`, {
+    const res = await apiFetch(`/api/bookings/${bookingId}/addons`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ label: addonLabel, amount: +addonAmount }),
     });
     const data = await res.json();
@@ -818,7 +809,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   }
 
   async function removeAddon(addonId) {
-    await fetch(`${API}/api/bookings/${bookingId}/addons/${addonId}`, {
+    await apiFetch(`/api/bookings/${bookingId}/addons/${addonId}`, {
       method: "DELETE",
     });
     showToast("Addon removed", "success");
@@ -1320,13 +1311,20 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                 </button>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginBottom: 12,
+                flexWrap: "wrap",
+              }}
+            >
               <input
                 value={addonLabel}
                 onChange={(e) => setAddonLabel(e.target.value)}
                 placeholder="Label (e.g. Airport Transfer)"
                 style={{
-                  flex: 2,
+                  flex: "2 1 140px",
                   padding: "8px 12px",
                   borderRadius: 6,
                   border: "1.5px solid #E9ECEF",
@@ -1340,7 +1338,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                 placeholder="Amount ₹"
                 type="number"
                 style={{
-                  flex: 1,
+                  flex: "1 1 80px",
                   padding: "8px 12px",
                   borderRadius: 6,
                   border: "1.5px solid #E9ECEF",
@@ -1546,9 +1544,8 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
 
   async function save() {
     setLoading(true);
-    const res = await fetch(`${API}/api/admin/rooms/${room.room_id}`, {
+    const res = await apiFetch(`/api/admin/rooms/${room.room_id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
     const data = await res.json();
@@ -1807,22 +1804,23 @@ export default function AdminDashboard({
   const [bookings, setBookings] = useState([]);
   const [users, setUsers] = useState([]);
   const [rooms, setRooms] = useState([]);
-  const [allRooms, setAllRooms] = useState([]); // ✅ includes blocked rooms
+  const [allRooms, setAllRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bookingRoom, setBookingRoom] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [editRoom, setEditRoom] = useState(null);
-  const [cancelBookingData, setCancelBookingData] = useState(null); // ✅ for warning modal
+  const [cancelBookingData, setCancelBookingData] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // ✅ mobile sidebar toggle
 
   const fetchAll = () => {
     Promise.all([
-      fetch(`${API}/api/admin/stats`).then((r) => r.json()),
-      fetch(`${API}/api/admin/bookings`).then((r) => r.json()),
-      fetch(`${API}/api/admin/rooms`).then((r) => r.json()), // ✅ all rooms including blocked
-      fetch(`${API}/api/rooms`).then((r) => r.json()), // available only for booking
-      fetch(`${API}/api/admin/users`)
+      apiFetch("/api/admin/stats").then((r) => r.json()),
+      apiFetch("/api/admin/bookings").then((r) => r.json()),
+      apiFetch("/api/admin/rooms").then((r) => r.json()),
+      apiFetch("/api/rooms").then((r) => r.json()),
+      apiFetch("/api/admin/users")
         .then((r) => r.json())
         .catch(() => []),
     ])
@@ -1840,10 +1838,9 @@ export default function AdminDashboard({
     fetchAll();
   }, []);
 
-  // ✅ Cancel with warning
   async function confirmCancelBooking(id) {
     try {
-      const res = await fetch(`${API}/api/bookings/${id}/cancel`, {
+      const res = await apiFetch(`/api/bookings/${id}/cancel`, {
         method: "PATCH",
       });
       const data = await res.json();
@@ -1858,12 +1855,11 @@ export default function AdminDashboard({
     }
   }
 
-  // ✅ Delete cancelled booking
   async function deleteBooking(id) {
     if (!window.confirm("Permanently delete this cancelled booking record?"))
       return;
     try {
-      const res = await fetch(`${API}/api/admin/bookings/${id}`, {
+      const res = await apiFetch(`/api/admin/bookings/${id}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -1877,9 +1873,8 @@ export default function AdminDashboard({
 
   async function toggleRoom(roomId, current) {
     try {
-      await fetch(`${API}/api/admin/rooms/${roomId}`, {
+      await apiFetch(`/api/admin/rooms/${roomId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_available: current ? 0 : 1 }),
       });
       setAllRooms((r) =>
@@ -1936,65 +1931,14 @@ export default function AdminDashboard({
     { id: "book", label: "New Booking", icon: CalendarIcon },
   ];
 
-  const s = {
-    wrap: {
-      minHeight: "100vh",
-      background: "#F8F9FA",
-      fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-    },
-    sidebar: {
-      position: "fixed",
-      top: 0,
-      left: 0,
-      bottom: 0,
-      width: 220,
-      background: "#0F1923",
-      display: "flex",
-      flexDirection: "column",
-      borderRight: "1px solid rgba(201,168,76,0.12)",
-      zIndex: 100,
-    },
-    navItem: (active) => ({
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      padding: "11px 20px",
-      cursor: "pointer",
-      background: active ? "rgba(201,168,76,0.12)" : "transparent",
-      borderLeft: active ? "2.5px solid #C9A84C" : "2.5px solid transparent",
-      color: active ? "#C9A84C" : "rgba(255,255,255,0.5)",
-      fontSize: "0.82rem",
-      fontWeight: active ? 600 : 400,
-      transition: "all 0.18s",
-    }),
-    main: { marginLeft: 220, minHeight: "100vh" },
-    topbar: {
-      background: "#0F1923",
-      padding: "0 28px",
-      height: 64,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      borderBottom: "1px solid rgba(201,168,76,0.12)",
-      position: "sticky",
-      top: 0,
-      zIndex: 99,
-    },
-    content: { padding: "28px 28px" },
-    card: {
-      background: "#fff",
-      borderRadius: 14,
-      padding: "20px 22px",
-      border: "1px solid #E9ECEF",
-      boxShadow: "0 1px 4px rgba(15,25,35,0.05)",
-    },
-  };
+  const SIDEBAR_W = 220;
 
   if (loading)
     return (
       <div
         style={{
-          ...s.wrap,
+          minHeight: "100vh",
+          background: "#F8F9FA",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -2004,157 +1948,280 @@ export default function AdminDashboard({
       </div>
     );
 
-  return (
-    <div style={s.wrap}>
-      {/* SIDEBAR */}
-      <div style={s.sidebar}>
-        <div
+  const SidebarContent = () => (
+    <>
+      <div
+        style={{
+          padding: "24px 20px 20px",
+          borderBottom: "1px solid rgba(255,255,255,0.07)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <img
+          src="/logo.png"
+          alt="VV"
           style={{
-            padding: "24px 20px 20px",
-            borderBottom: "1px solid rgba(255,255,255,0.07)",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
+            height: 36,
+            width: 36,
+            objectFit: "contain",
+            mixBlendMode: "screen",
+            filter: "brightness(1.2)",
           }}
+        />
+        <div
+          style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}
         >
-          <img
-            src="/logo.png"
-            alt="VV"
+          <span
             style={{
-              height: 36,
-              width: 36,
-              objectFit: "contain",
-              mixBlendMode: "screen",
-              filter: "brightness(1.2)",
-            }}
-          />
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              lineHeight: 1.15,
+              fontFamily: "'Playfair Display', serif",
+              fontSize: "0.85rem",
+              fontWeight: 700,
+              color: "#fff",
+              letterSpacing: "1.5px",
             }}
           >
-            <span
-              style={{
-                fontFamily: "'Playfair Display', serif",
-                fontSize: "0.85rem",
-                fontWeight: 700,
-                color: "#fff",
-                letterSpacing: "1.5px",
-              }}
-            >
-              VV GRAND PARK
-            </span>
-            <span
-              style={{
-                fontFamily: "'Playfair Display', serif",
-                fontSize: "0.55rem",
-                color: "#C9A84C",
-                letterSpacing: "2.5px",
-              }}
-            >
-              RESIDENCY
-            </span>
-          </div>
-        </div>
-        <div style={{ padding: "16px 0", flex: 1 }}>
-          <div
+            VV GRAND PARK
+          </span>
+          <span
             style={{
-              padding: "6px 20px 10px",
-              fontSize: "0.6rem",
-              letterSpacing: "2px",
-              textTransform: "uppercase",
-              color: "rgba(255,255,255,0.25)",
+              fontFamily: "'Playfair Display', serif",
+              fontSize: "0.55rem",
+              color: "#C9A84C",
+              letterSpacing: "2.5px",
             }}
           >
-            Management
-          </div>
-          {tabs.map(({ id, label, icon: TabIcon }) => (
-            <div
-              key={id}
-              style={s.navItem(tab === id)}
-              onClick={() => setTab(id)}
-            >
-              <TabIcon
-                size={15}
-                color={tab === id ? "#C9A84C" : "rgba(255,255,255,0.4)"}
-              />
-              {label}
-            </div>
-          ))}
+            RESIDENCY
+          </span>
         </div>
+      </div>
+      <div style={{ padding: "16px 0", flex: 1 }}>
         <div
           style={{
-            padding: "16px 20px",
-            borderTop: "1px solid rgba(255,255,255,0.07)",
+            padding: "6px 20px 10px",
+            fontSize: "0.6rem",
+            letterSpacing: "2px",
+            textTransform: "uppercase",
+            color: "rgba(255,255,255,0.25)",
           }}
         >
+          Management
+        </div>
+        {tabs.map(({ id, label, icon: TabIcon }) => (
           <div
+            key={id}
+            onClick={() => {
+              setTab(id);
+              setSidebarOpen(false);
+            }}
             style={{
               display: "flex",
               alignItems: "center",
               gap: 10,
-              marginBottom: 12,
+              padding: "11px 20px",
+              cursor: "pointer",
+              background: tab === id ? "rgba(201,168,76,0.12)" : "transparent",
+              borderLeft:
+                tab === id ? "2.5px solid #C9A84C" : "2.5px solid transparent",
+              color: tab === id ? "#C9A84C" : "rgba(255,255,255,0.5)",
+              fontSize: "0.82rem",
+              fontWeight: tab === id ? 600 : 400,
+              transition: "all 0.18s",
+            }}
+          >
+            <TabIcon
+              size={15}
+              color={tab === id ? "#C9A84C" : "rgba(255,255,255,0.4)"}
+            />
+            {label}
+          </div>
+        ))}
+      </div>
+      <div
+        style={{
+          padding: "16px 20px",
+          borderTop: "1px solid rgba(255,255,255,0.07)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 12,
+          }}
+        >
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              background: "rgba(201,168,76,0.2)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <UserIcon size={14} color="#C9A84C" />
+          </div>
+          <div>
+            <div
+              style={{ fontSize: "0.78rem", fontWeight: 600, color: "#fff" }}
+            >
+              {adminUser?.name}
+            </div>
+            <div
+              style={{
+                fontSize: "0.65rem",
+                color: "rgba(255,255,255,0.35)",
+                letterSpacing: "0.5px",
+                textTransform: "uppercase",
+              }}
+            >
+              Administrator
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "9px 12px",
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 8,
+            color: "rgba(255,255,255,0.6)",
+            fontSize: "0.78rem",
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          <ArrowRightIcon size={13} color="rgba(255,255,255,0.5)" /> Back to
+          Site
+        </button>
+      </div>
+    </>
+  );
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#F8F9FA",
+        fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+      }}
+    >
+      {/* ✅ DESKTOP SIDEBAR */}
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: SIDEBAR_W,
+          background: "#0F1923",
+          display: "flex",
+          flexDirection: "column",
+          borderRight: "1px solid rgba(201,168,76,0.12)",
+          zIndex: 100,
+          transition: "transform 0.3s",
+        }}
+        className="admin-sidebar-desktop"
+      >
+        <SidebarContent />
+      </div>
+
+      {/* ✅ MOBILE SIDEBAR OVERLAY */}
+      {sidebarOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200 }}>
+          <div
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(0,0,0,0.5)",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              bottom: 0,
+              width: SIDEBAR_W,
+              background: "#0F1923",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <SidebarContent />
+          </div>
+        </div>
+      )}
+
+      {/* MAIN */}
+      <div
+        style={{ marginLeft: SIDEBAR_W, minHeight: "100vh" }}
+        className="admin-main"
+      >
+        {/* TOPBAR */}
+        <div
+          style={{
+            background: "#0F1923",
+            padding: "0 20px",
+            height: 64,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderBottom: "1px solid rgba(201,168,76,0.12)",
+            position: "sticky",
+            top: 0,
+            zIndex: 99,
+          }}
+        >
+          {/* ✅ Hamburger for mobile */}
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="admin-hamburger"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "4px 8px",
+              display: "none",
+              flexDirection: "column",
+              gap: 5,
             }}
           >
             <div
               style={{
-                width: 32,
-                height: 32,
-                borderRadius: "50%",
-                background: "rgba(201,168,76,0.2)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                width: 22,
+                height: 2,
+                background: "#C9A84C",
+                borderRadius: 2,
               }}
-            >
-              <UserIcon size={14} color="#C9A84C" />
-            </div>
-            <div>
-              <div
-                style={{ fontSize: "0.78rem", fontWeight: 600, color: "#fff" }}
-              >
-                {adminUser?.name}
-              </div>
-              <div
-                style={{
-                  fontSize: "0.65rem",
-                  color: "rgba(255,255,255,0.35)",
-                  letterSpacing: "0.5px",
-                  textTransform: "uppercase",
-                }}
-              >
-                Administrator
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "9px 12px",
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 8,
-              color: "rgba(255,255,255,0.6)",
-              fontSize: "0.78rem",
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            <ArrowRightIcon size={13} color="rgba(255,255,255,0.5)" /> Back to
-            Site
+            />
+            <div
+              style={{
+                width: 22,
+                height: 2,
+                background: "#C9A84C",
+                borderRadius: 2,
+              }}
+            />
+            <div
+              style={{
+                width: 22,
+                height: 2,
+                background: "#C9A84C",
+                borderRadius: 2,
+              }}
+            />
           </button>
-        </div>
-      </div>
-
-      {/* MAIN */}
-      <div style={s.main}>
-        <div style={s.topbar}>
           <div>
             <div
               style={{
@@ -2195,11 +2262,27 @@ export default function AdminDashboard({
           </div>
         </div>
 
-        <div style={s.content}>
+        {/* ✅ RESPONSIVE CSS injected */}
+        <style>{`
+          @media (max-width: 768px) {
+            .admin-sidebar-desktop { display: none !important; }
+            .admin-main { margin-left: 0 !important; }
+            .admin-hamburger { display: flex !important; }
+            .admin-stats-grid { grid-template-columns: 1fr 1fr !important; }
+            .admin-charts-grid { grid-template-columns: 1fr !important; }
+            .admin-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          }
+          @media (max-width: 480px) {
+            .admin-stats-grid { grid-template-columns: 1fr !important; }
+          }
+        `}</style>
+
+        <div style={{ padding: "20px" }}>
           {/* ── OVERVIEW ── */}
           {tab === "overview" && stats && (
             <>
               <div
+                className="admin-stats-grid"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
@@ -2237,6 +2320,7 @@ export default function AdminDashboard({
                 />
               </div>
               <div
+                className="admin-charts-grid"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "1fr 1fr 280px",
@@ -2244,7 +2328,15 @@ export default function AdminDashboard({
                   marginBottom: 24,
                 }}
               >
-                <div style={s.card}>
+                <div
+                  style={{
+                    background: "#fff",
+                    borderRadius: 14,
+                    padding: "20px 22px",
+                    border: "1px solid #E9ECEF",
+                    boxShadow: "0 1px 4px rgba(15,25,35,0.05)",
+                  }}
+                >
                   <div
                     style={{
                       display: "flex",
@@ -2300,7 +2392,15 @@ export default function AdminDashboard({
                     ))}
                   </div>
                 </div>
-                <div style={s.card}>
+                <div
+                  style={{
+                    background: "#fff",
+                    borderRadius: 14,
+                    padding: "20px 22px",
+                    border: "1px solid #E9ECEF",
+                    boxShadow: "0 1px 4px rgba(15,25,35,0.05)",
+                  }}
+                >
                   <div
                     style={{
                       display: "flex",
@@ -2377,7 +2477,11 @@ export default function AdminDashboard({
                 </div>
                 <div
                   style={{
-                    ...s.card,
+                    background: "#fff",
+                    borderRadius: 14,
+                    padding: "20px 22px",
+                    border: "1px solid #E9ECEF",
+                    boxShadow: "0 1px 4px rgba(15,25,35,0.05)",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
@@ -2448,7 +2552,15 @@ export default function AdminDashboard({
                   </div>
                 </div>
               </div>
-              <div style={s.card}>
+              <div
+                style={{
+                  background: "#fff",
+                  borderRadius: 14,
+                  padding: "20px 22px",
+                  border: "1px solid #E9ECEF",
+                  boxShadow: "0 1px 4px rgba(15,25,35,0.05)",
+                }}
+              >
                 <div
                   style={{
                     display: "flex",
@@ -2485,8 +2597,14 @@ export default function AdminDashboard({
                     View all <ArrowRightIcon size={12} color="#C9A84C" />
                   </button>
                 </div>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <div className="admin-table-wrap" style={{ overflowX: "auto" }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      minWidth: 600,
+                    }}
+                  >
                     <thead>
                       <tr>
                         {[
@@ -2494,7 +2612,6 @@ export default function AdminDashboard({
                           "Guest",
                           "Room",
                           "Check-in",
-                          "Check-out",
                           "Total",
                           "Status",
                         ].map((h) => (
@@ -2560,18 +2677,10 @@ export default function AdminDashboard({
                               padding: "11px 14px",
                               fontSize: "0.82rem",
                               color: "#495057",
+                              whiteSpace: "nowrap",
                             }}
                           >
                             {b.check_in_date?.slice(0, 10)}
-                          </td>
-                          <td
-                            style={{
-                              padding: "11px 14px",
-                              fontSize: "0.82rem",
-                              color: "#495057",
-                            }}
-                          >
-                            {b.check_out_date?.slice(0, 10)}
                           </td>
                           <td
                             style={{
@@ -2623,7 +2732,14 @@ export default function AdminDashboard({
 
           {/* ── BOOKINGS ── */}
           {tab === "bookings" && (
-            <div style={s.card}>
+            <div
+              style={{
+                background: "#fff",
+                borderRadius: 14,
+                padding: "20px 22px",
+                border: "1px solid #E9ECEF",
+              }}
+            >
               <div
                 style={{
                   display: "flex",
@@ -2645,7 +2761,6 @@ export default function AdminDashboard({
                   All Bookings{" "}
                   <span
                     style={{
-                      fontFamily: "inherit",
                       fontSize: "0.78rem",
                       fontWeight: 400,
                       color: "#868E96",
@@ -2664,7 +2779,8 @@ export default function AdminDashboard({
                     border: "1.5px solid #E9ECEF",
                     borderRadius: 8,
                     padding: "8px 12px",
-                    width: 240,
+                    minWidth: 200,
+                    flex: "0 1 240px",
                   }}
                 >
                   <SearchIcon size={14} color="#868E96" />
@@ -2684,8 +2800,14 @@ export default function AdminDashboard({
                   />
                 </div>
               </div>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <div className="admin-table-wrap" style={{ overflowX: "auto" }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    minWidth: 700,
+                  }}
+                >
                   <thead>
                     <tr>
                       {[
@@ -2694,9 +2816,6 @@ export default function AdminDashboard({
                         "Room",
                         "Check-in",
                         "Check-out",
-                        "Base",
-                        "Addons",
-                        "GST",
                         "Total",
                         "Status",
                         "Actions",
@@ -2783,34 +2902,6 @@ export default function AdminDashboard({
                         <td
                           style={{
                             padding: "11px 14px",
-                            fontSize: "0.82rem",
-                            color: "#495057",
-                          }}
-                        >
-                          Rs.{Number(b.total_price).toLocaleString()}
-                        </td>
-                        <td
-                          style={{
-                            padding: "11px 14px",
-                            fontSize: "0.82rem",
-                            color: "#C9A84C",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Rs.{Number(b.addon_charges || 0).toLocaleString()}
-                        </td>
-                        <td
-                          style={{
-                            padding: "11px 14px",
-                            fontSize: "0.82rem",
-                            color: "#868E96",
-                          }}
-                        >
-                          Rs.{Number(b.gst_amount || 0).toLocaleString()}
-                        </td>
-                        <td
-                          style={{
-                            padding: "11px 14px",
                             fontSize: "0.85rem",
                             fontWeight: 700,
                             color: "#0F1923",
@@ -2849,7 +2940,13 @@ export default function AdminDashboard({
                           </span>
                         </td>
                         <td style={{ padding: "11px 14px" }}>
-                          <div style={{ display: "flex", gap: 6 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
                             <button
                               onClick={() => setSelectedBookingId(b.booking_id)}
                               style={{
@@ -2866,7 +2963,6 @@ export default function AdminDashboard({
                             >
                               Details
                             </button>
-                            {/* ✅ Cancel with warning modal */}
                             {b.status === "confirmed" && (
                               <button
                                 onClick={() => setCancelBookingData(b)}
@@ -2888,7 +2984,6 @@ export default function AdminDashboard({
                                 <XIcon size={11} color="#C0392B" /> Cancel
                               </button>
                             )}
-                            {/* ✅ Delete cancelled bookings */}
                             {b.status === "cancelled" && (
                               <button
                                 onClick={() => deleteBooking(b.booking_id)}
@@ -2917,9 +3012,16 @@ export default function AdminDashboard({
             </div>
           )}
 
-          {/* ── ROOMS ── ✅ Shows ALL rooms including blocked */}
+          {/* ── ROOMS ── */}
           {tab === "rooms" && (
-            <div style={s.card}>
+            <div
+              style={{
+                background: "#fff",
+                borderRadius: 14,
+                padding: "20px 22px",
+                border: "1px solid #E9ECEF",
+              }}
+            >
               <div
                 style={{
                   display: "flex",
@@ -2939,7 +3041,6 @@ export default function AdminDashboard({
                   Room Management{" "}
                   <span
                     style={{
-                      fontFamily: "inherit",
                       fontSize: "0.78rem",
                       fontWeight: 400,
                       color: "#868E96",
@@ -2951,36 +3052,37 @@ export default function AdminDashboard({
                   </span>
                 </div>
               </div>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <div className="admin-table-wrap" style={{ overflowX: "auto" }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    minWidth: 560,
+                  }}
+                >
                   <thead>
                     <tr>
-                      {[
-                        "Room",
-                        "Type",
-                        "Price / Night",
-                        "Capacity",
-                        "Status",
-                        "Actions",
-                      ].map((h) => (
-                        <th
-                          key={h}
-                          style={{
-                            padding: "10px 14px",
-                            textAlign: "left",
-                            fontSize: "0.62rem",
-                            fontWeight: 700,
-                            color: "#868E96",
-                            textTransform: "uppercase",
-                            letterSpacing: "1px",
-                            borderBottom: "1.5px solid #E9ECEF",
-                            background: "#F8F9FA",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {h}
-                        </th>
-                      ))}
+                      {["Room", "Type", "Price/Night", "Status", "Actions"].map(
+                        (h) => (
+                          <th
+                            key={h}
+                            style={{
+                              padding: "10px 14px",
+                              textAlign: "left",
+                              fontSize: "0.62rem",
+                              fontWeight: 700,
+                              color: "#868E96",
+                              textTransform: "uppercase",
+                              letterSpacing: "1px",
+                              borderBottom: "1.5px solid #E9ECEF",
+                              background: "#F8F9FA",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {h}
+                          </th>
+                        ),
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -3030,19 +3132,6 @@ export default function AdminDashboard({
                         >
                           Rs.{Number(r.price_per_night).toLocaleString()}
                         </td>
-                        <td
-                          style={{
-                            padding: "11px 14px",
-                            fontSize: "0.82rem",
-                            color: "#495057",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 5,
-                          }}
-                        >
-                          <UserIcon size={13} color="#868E96" />{" "}
-                          {r.capacity || 2}
-                        </td>
                         <td style={{ padding: "11px 14px" }}>
                           <span
                             style={{
@@ -3061,16 +3150,22 @@ export default function AdminDashboard({
                           </span>
                         </td>
                         <td style={{ padding: "11px 14px" }}>
-                          <div style={{ display: "flex", gap: 8 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
                             <button
                               onClick={() => setEditRoom(r)}
                               style={{
-                                padding: "5px 12px",
+                                padding: "5px 10px",
                                 borderRadius: 4,
                                 border: "1.5px solid #C9A84C",
                                 color: "#9A7A2E",
                                 background: "none",
-                                fontSize: "0.75rem",
+                                fontSize: "0.72rem",
                                 fontWeight: 600,
                                 cursor: "pointer",
                                 fontFamily: "inherit",
@@ -3083,12 +3178,12 @@ export default function AdminDashboard({
                                 toggleRoom(r.room_id, r.is_available)
                               }
                               style={{
-                                padding: "5px 12px",
+                                padding: "5px 10px",
                                 borderRadius: 4,
                                 border: `1.5px solid ${r.is_available ? "#C0392B" : "#2D9A6E"}`,
                                 color: r.is_available ? "#C0392B" : "#2D9A6E",
                                 background: "none",
-                                fontSize: "0.75rem",
+                                fontSize: "0.72rem",
                                 fontWeight: 600,
                                 cursor: "pointer",
                                 fontFamily: "inherit",
@@ -3103,21 +3198,18 @@ export default function AdminDashboard({
                                   setTab("book");
                                 }}
                                 style={{
-                                  padding: "5px 12px",
+                                  padding: "5px 10px",
                                   borderRadius: 4,
                                   background: "#0F1923",
                                   color: "#fff",
                                   border: "none",
-                                  fontSize: "0.75rem",
+                                  fontSize: "0.72rem",
                                   fontWeight: 600,
                                   cursor: "pointer",
                                   fontFamily: "inherit",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 5,
                                 }}
                               >
-                                <CalendarIcon size={12} color="#fff" /> Book
+                                Book
                               </button>
                             )}
                           </div>
@@ -3132,7 +3224,14 @@ export default function AdminDashboard({
 
           {/* ── USERS ── */}
           {tab === "users" && (
-            <div style={s.card}>
+            <div
+              style={{
+                background: "#fff",
+                borderRadius: 14,
+                padding: "20px 22px",
+                border: "1px solid #E9ECEF",
+              }}
+            >
               <div
                 style={{
                   fontFamily: "'Playfair Display', serif",
@@ -3145,7 +3244,6 @@ export default function AdminDashboard({
                 Registered Users{" "}
                 <span
                   style={{
-                    fontFamily: "inherit",
                     fontSize: "0.78rem",
                     fontWeight: 400,
                     color: "#868E96",
@@ -3161,21 +3259,25 @@ export default function AdminDashboard({
                     textAlign: "center",
                     padding: "40px",
                     color: "#868E96",
-                    fontSize: "0.9rem",
                   }}
                 >
                   No users found
                 </div>
               ) : (
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <div className="admin-table-wrap" style={{ overflowX: "auto" }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      minWidth: 500,
+                    }}
+                  >
                     <thead>
                       <tr>
                         {[
                           "#",
                           "Name",
                           "Email",
-                          "Phone",
                           "Role",
                           "Joined",
                           "Actions",
@@ -3259,15 +3361,6 @@ export default function AdminDashboard({
                           >
                             {u.email}
                           </td>
-                          <td
-                            style={{
-                              padding: "11px 14px",
-                              fontSize: "0.82rem",
-                              color: "#495057",
-                            }}
-                          >
-                            {u.phone || "—"}
-                          </td>
                           <td style={{ padding: "11px 14px" }}>
                             <span
                               style={{
@@ -3309,7 +3402,7 @@ export default function AdminDashboard({
                                 fontFamily: "inherit",
                               }}
                             >
-                              View Details
+                              View
                             </button>
                           </td>
                         </tr>
@@ -3338,7 +3431,7 @@ export default function AdminDashboard({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
                   gap: 20,
                 }}
               >
@@ -3353,21 +3446,9 @@ export default function AdminDashboard({
                         overflow: "hidden",
                         border: "1px solid #E9ECEF",
                         boxShadow: "0 1px 4px rgba(15,25,35,0.05)",
-                        cursor: "pointer",
-                        transition: "all 0.2s",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = "translateY(-4px)";
-                        e.currentTarget.style.boxShadow =
-                          "0 8px 24px rgba(15,25,35,0.1)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = "none";
-                        e.currentTarget.style.boxShadow =
-                          "0 1px 4px rgba(15,25,35,0.05)";
                       }}
                     >
-                      <div style={{ height: 160, overflow: "hidden" }}>
+                      <div style={{ height: 140, overflow: "hidden" }}>
                         <img
                           src={
                             r.image_url ||
@@ -3381,20 +3462,20 @@ export default function AdminDashboard({
                           }}
                         />
                       </div>
-                      <div style={{ padding: "16px 18px" }}>
+                      <div style={{ padding: "14px 16px" }}>
                         <div
                           style={{
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
-                            marginBottom: 8,
+                            marginBottom: 6,
                           }}
                         >
                           <span
                             style={{
                               background: "#0F1923",
                               color: "#E8D5A3",
-                              padding: "3px 10px",
+                              padding: "2px 8px",
                               borderRadius: 3,
                               fontSize: "0.62rem",
                               fontWeight: 700,
@@ -3405,34 +3486,27 @@ export default function AdminDashboard({
                             {r.room_type}
                           </span>
                           <span
-                            style={{
-                              fontSize: "0.75rem",
-                              color: "#868E96",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 4,
-                            }}
+                            style={{ fontSize: "0.72rem", color: "#868E96" }}
                           >
-                            <UserIcon size={12} color="#868E96" />
-                            {r.capacity || 2}
+                            👥 {r.capacity || 2}
                           </span>
                         </div>
                         <div
                           style={{
                             fontFamily: "'Playfair Display', serif",
-                            fontSize: "1rem",
+                            fontSize: "0.95rem",
                             fontWeight: 600,
                             color: "#0F1923",
-                            marginBottom: 4,
+                            marginBottom: 2,
                           }}
                         >
                           Room {r.room_number || r.room_id}
                         </div>
                         <div
                           style={{
-                            fontSize: "0.8rem",
+                            fontSize: "0.78rem",
                             color: "#868E96",
-                            marginBottom: 14,
+                            marginBottom: 12,
                           }}
                         >
                           {r.description || "Premium hotel room"}
@@ -3448,7 +3522,7 @@ export default function AdminDashboard({
                             <div
                               style={{
                                 fontFamily: "'Playfair Display', serif",
-                                fontSize: "1.05rem",
+                                fontSize: "1rem",
                                 fontWeight: 600,
                                 color: "#0F1923",
                               }}
@@ -3456,7 +3530,7 @@ export default function AdminDashboard({
                               Rs.{Number(r.price_per_night).toLocaleString()}{" "}
                               <span
                                 style={{
-                                  fontSize: "0.7rem",
+                                  fontSize: "0.65rem",
                                   fontWeight: 400,
                                   color: "#868E96",
                                 }}
@@ -3465,9 +3539,9 @@ export default function AdminDashboard({
                               </span>
                             </div>
                             <div
-                              style={{ fontSize: "0.65rem", color: "#868E96" }}
+                              style={{ fontSize: "0.62rem", color: "#868E96" }}
                             >
-                              +18% GST applicable
+                              +18% GST
                             </div>
                           </div>
                           <button
@@ -3477,17 +3551,14 @@ export default function AdminDashboard({
                               color: "#fff",
                               border: "none",
                               borderRadius: 6,
-                              padding: "8px 16px",
-                              fontSize: "0.78rem",
+                              padding: "7px 14px",
+                              fontSize: "0.75rem",
                               fontWeight: 600,
                               cursor: "pointer",
                               fontFamily: "inherit",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 6,
                             }}
                           >
-                            Book <ArrowRightIcon size={13} color="#fff" />
+                            Book
                           </button>
                         </div>
                       </div>
@@ -3526,8 +3597,6 @@ export default function AdminDashboard({
           }}
         />
       )}
-
-      {/* ✅ Cancel Warning Modal */}
       {cancelBookingData && (
         <CancelWarningModal
           booking={cancelBookingData}
@@ -3644,9 +3713,8 @@ function AdminBookingForm({ room, adminUser, onClose, showToast, onSuccess }) {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/bookings`, {
+      const res = await apiFetch("/api/bookings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: adminUser.user_id,
           room_id: room.room_id,
