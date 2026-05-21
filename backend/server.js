@@ -983,9 +983,8 @@ app.delete("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
 });
 
 // ─── START ────────────────────────────────────────────────────────────────────
-// ─── START ────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 VV Grand Park API running on port ${PORT}`);
-});
+app.listen(PORT, () =>
+  console.log(`🚀 VV Grand Park API running on http://localhost:${PORT}`),
+);
