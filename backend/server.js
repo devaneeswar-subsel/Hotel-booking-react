@@ -4,7 +4,7 @@ const cors = require("cors");
 const mysql = require("mysql2/promise");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
-const { Resend } = require("resend"); 
+const { Resend } = require("resend");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const bcrypt = require("bcryptjs");
@@ -983,8 +983,324 @@ app.delete("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ADD THESE TO server.js
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── 1. Add requireManager middleware (after requireAdmin) ─────────────────────
+function requireManager(req, res, next) {
+  requireAuth(req, res, () => {
+    if (req.user.role !== "admin" && req.user.role !== "manager")
+      return res.status(403).json({ error: "Manager access required" });
+    next();
+  });
+}
+
+// ── 2. Add manager auth routes ────────────────────────────────────────────────
+
+// Manager login (same as regular login but checks role)
+app.post("/api/manager/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password)
+      return res.status(400).json({ error: "email and password required" });
+    const [rows] = await db.query(
+      "SELECT user_id,name,email,role,phone,password FROM users WHERE email=? AND role IN ('admin','manager')",
+      [email],
+    );
+    if (!rows.length)
+      return res
+        .status(401)
+        .json({ error: "Invalid credentials or not a manager account" });
+    const user = rows[0];
+    let passwordValid = false;
+    if (user.password.startsWith("$2")) {
+      passwordValid = await bcrypt.compare(password, user.password);
+    } else {
+      passwordValid = user.password === password;
+      if (passwordValid) {
+        const hashed = await bcrypt.hash(password, 12);
+        await db.query("UPDATE users SET password=? WHERE user_id=?", [
+          hashed,
+          user.user_id,
+        ]);
+      }
+    }
+    if (!passwordValid)
+      return res.status(401).json({ error: "Invalid credentials" });
+    const { password: _, ...safeUser } = user;
+    setAuthCookie(res, safeUser);
+    res.json({ message: "Login successful", user: safeUser });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── 3. Manager routes ─────────────────────────────────────────────────────────
+
+// Get all bookings (manager can view)
+app.get("/api/manager/bookings", requireManager, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number
+       FROM bookings b
+       JOIN users u ON b.user_id=u.user_id
+       JOIN rooms r ON b.room_id=r.room_id
+       WHERE b.status NOT IN ('pending')
+       ORDER BY b.created_at DESC`,
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get single booking detail (manager)
+app.get("/api/manager/bookings/:id", requireManager, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number, r.price_per_night, r.image_url
+       FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id
+       WHERE b.booking_id=?`,
+      [req.params.id],
+    );
+    if (!rows.length)
+      return res.status(404).json({ error: "Booking not found" });
+    const [addons] = await db.query(
+      "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at ASC",
+      [req.params.id],
+    );
+    res.json({ ...rows[0], addons });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Check-in (manager)
+app.patch(
+  "/api/manager/bookings/:id/checkin",
+  requireManager,
+  async (req, res) => {
+    try {
+      const now = new Date();
+      await db.query(
+        "UPDATE bookings SET actual_checkin=?, status='confirmed' WHERE booking_id=?",
+        [now, req.params.id],
+      );
+      res.json({ message: "Checked in successfully", actual_checkin: now });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// Check-out (manager)
+app.patch(
+  "/api/manager/bookings/:id/checkout",
+  requireManager,
+  async (req, res) => {
+    try {
+      const [rows] = await db.query(
+        "SELECT * FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      if (!rows.length)
+        return res.status(404).json({ error: "Booking not found" });
+      const booking = rows[0];
+      const now = new Date();
+      const checkinTime = booking.actual_checkin
+        ? new Date(booking.actual_checkin)
+        : new Date(booking.check_in_date);
+      const hoursSpent =
+        Math.round(((now - checkinTime) / (1000 * 60 * 60)) * 100) / 100;
+      const [addons] = await db.query(
+        "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
+        [req.params.id],
+      );
+      const addonTotal = Number(addons[0]?.total || 0);
+      const subtotal = Number(booking.total_price) + addonTotal;
+      const gstAmount = Math.round(subtotal * 0.18 * 100) / 100;
+      const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
+      await db.query(
+        `UPDATE bookings SET actual_checkout=?, hours_spent=?, addon_charges=?, gst_amount=?, final_total=?, status='completed' WHERE booking_id=?`,
+        [now, hoursSpent, addonTotal, gstAmount, finalTotal, req.params.id],
+      );
+      res.json({
+        message: "Checked out successfully",
+        actual_checkout: now,
+        hours_spent: hoursSpent,
+        final_total: finalTotal,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// Add-ons (manager)
+app.post(
+  "/api/manager/bookings/:id/addons",
+  requireManager,
+  async (req, res) => {
+    try {
+      const { label, amount } = req.body;
+      if (!label || !amount)
+        return res.status(400).json({ error: "label and amount required" });
+      const [r] = await db.query(
+        "INSERT INTO booking_addons (booking_id, label, amount) VALUES (?,?,?)",
+        [req.params.id, label, amount],
+      );
+      const [addons] = await db.query(
+        "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
+        [req.params.id],
+      );
+      const addonTotal = Number(addons[0]?.total || 0);
+      const [bookingRows] = await db.query(
+        "SELECT * FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      const booking = bookingRows[0];
+      const subtotal = Number(booking.total_price) + addonTotal;
+      const gstAmount = Math.round(subtotal * 0.18 * 100) / 100;
+      const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
+      await db.query(
+        "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
+        [addonTotal, gstAmount, finalTotal, req.params.id],
+      );
+      res
+        .status(201)
+        .json({
+          addon_id: r.insertId,
+          label,
+          amount,
+          new_addon_total: addonTotal,
+          new_final_total: finalTotal,
+        });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+app.delete(
+  "/api/manager/bookings/:id/addons/:addon_id",
+  requireManager,
+  async (req, res) => {
+    try {
+      await db.query(
+        "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=?",
+        [req.params.addon_id, req.params.id],
+      );
+      const [addons] = await db.query(
+        "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
+        [req.params.id],
+      );
+      const addonTotal = Number(addons[0]?.total || 0);
+      const [bookingRows] = await db.query(
+        "SELECT * FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      const booking = bookingRows[0];
+      const subtotal = Number(booking.total_price) + addonTotal;
+      const gstAmount = Math.round(subtotal * 0.18 * 100) / 100;
+      const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
+      await db.query(
+        "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
+        [addonTotal, gstAmount, finalTotal, req.params.id],
+      );
+      res.json({
+        message: "Addon removed",
+        new_addon_total: addonTotal,
+        new_final_total: finalTotal,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ── 4. Reports route ──────────────────────────────────────────────────────────
+app.get("/api/manager/reports", requireManager, async (req, res) => {
+  try {
+    const { type, start_date, end_date } = req.query;
+    // Calculate date range
+    let startDate, endDate;
+    const now = new Date();
+    if (start_date && end_date) {
+      startDate = start_date;
+      endDate = end_date;
+    } else if (type === "weekly") {
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      const mon = new Date(now.setDate(diff));
+      startDate = mon.toISOString().slice(0, 10);
+      endDate = new Date().toISOString().slice(0, 10);
+    } else {
+      // monthly
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+        .toISOString()
+        .slice(0, 10);
+      endDate = new Date().toISOString().slice(0, 10);
+    }
+
+    const [bookings] = await db.query(
+      `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number
+       FROM bookings b
+       JOIN users u ON b.user_id=u.user_id
+       JOIN rooms r ON b.room_id=r.room_id
+       WHERE b.status NOT IN ('pending','cancelled')
+       AND DATE(b.created_at) BETWEEN ? AND ?
+       ORDER BY b.created_at ASC`,
+      [startDate, endDate],
+    );
+
+    const [[summary]] = await db.query(
+      `SELECT
+        COUNT(*) as total_bookings,
+        SUM(COALESCE(final_total, total_price)) as total_revenue,
+        SUM(gst_amount) as total_gst,
+        SUM(COALESCE(addon_charges, 0)) as total_addons,
+        COUNT(CASE WHEN status='completed' THEN 1 END) as completed,
+        COUNT(CASE WHEN status='confirmed' THEN 1 END) as confirmed
+       FROM bookings
+       WHERE status NOT IN ('pending','cancelled')
+       AND DATE(created_at) BETWEEN ? AND ?`,
+      [startDate, endDate],
+    );
+
+    res.json({ bookings, summary, startDate, endDate, type: type || "custom" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── 5. Create manager user (admin only) ───────────────────────────────────────
+app.post("/api/admin/create-manager", requireAdmin, async (req, res) => {
+  try {
+    const { name, email, password, phone } = req.body;
+    if (!name || !email || !password)
+      return res.status(400).json({ error: "name, email, password required" });
+    const [ex] = await db.query("SELECT user_id FROM users WHERE email=?", [
+      email,
+    ]);
+    if (ex.length)
+      return res.status(409).json({ error: "Email already registered" });
+    const hashed = await bcrypt.hash(password, 12);
+    const [r] = await db.query(
+      "INSERT INTO users (name,email,password,phone,role) VALUES (?,?,?,?,'manager')",
+      [name, email, hashed, phone || null],
+    );
+    res
+      .status(201)
+      .json({ message: "Manager created successfully", user_id: r.insertId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── START ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
+
 app.listen(PORT, () =>
   console.log(`🚀 VV Grand Park API running on http://localhost:${PORT}`),
 );
