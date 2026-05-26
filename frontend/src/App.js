@@ -10,6 +10,7 @@ import Testimonials from "./Testimonials";
 import Footer from "./Footer";
 import RoomDetail from "./Roomdetail";
 import AdminDashboard from "./AdminDashboard";
+import ManagerDashboard from "./ManagerDashboard";
 import { XIcon, CheckIcon, BookingIcon, DownloadIcon } from "./Icons";
 
 const API = process.env.REACT_APP_API_URL;
@@ -1197,6 +1198,7 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false);
   const [showBookings, setShowBookings] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showManager, setShowManager] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [toast, setToast] = useState(null);
 
@@ -1208,7 +1210,11 @@ export default function App() {
     apiFetch("/api/auth/me")
       .then((r) => r.json())
       .then((data) => {
-        if (data.user) setUser(data.user);
+        if (data.user) {
+          setUser(data.user);
+          if (data.user.role === "admin") setShowAdmin(true);
+          if (data.user.role === "manager") setShowManager(true);
+        }
       })
       .catch(() => {})
       .finally(() => setAuthLoading(false));
@@ -1218,6 +1224,7 @@ export default function App() {
     setUser(u);
     showToast(`Welcome, ${u.name.split(" ")[0]}!`, "success");
     if (u.role === "admin") setTimeout(() => setShowAdmin(true), 500);
+    if (u.role === "manager") setTimeout(() => setShowManager(true), 500);
   }
 
   async function handleLogout() {
@@ -1225,6 +1232,7 @@ export default function App() {
     setUser(null);
     setShowBookings(false);
     setShowAdmin(false);
+    setShowManager(false);
     showToast("Logged out successfully", "success");
   }
 
@@ -1291,6 +1299,21 @@ export default function App() {
     );
   }
 
+  if (showManager && user?.role === "manager") {
+    return (
+      <>
+        <ManagerDashboard managerUser={user} onLogout={handleLogout} />
+        {toast && (
+          <Toast
+            msg={toast.msg}
+            type={toast.type}
+            onHide={() => setToast(null)}
+          />
+        )}
+      </>
+    );
+  }
+
   if (showAdmin && user?.role === "admin") {
     return (
       <>
@@ -1318,7 +1341,11 @@ export default function App() {
         onAuthClick={() => setShowAuth(true)}
         onLogout={handleLogout}
         onMyBookings={() =>
-          user?.role === "admin" ? setShowAdmin(true) : setShowBookings(true)
+          user?.role === "admin"
+            ? setShowAdmin(true)
+            : user?.role === "manager"
+              ? setShowManager(true)
+              : setShowBookings(true)
         }
       />
       <Rooms
@@ -1343,13 +1370,16 @@ export default function App() {
           showToast={showToast}
         />
       )}
-      {showBookings && user && user.role !== "admin" && (
-        <MyBookingsModal
-          user={user}
-          onClose={() => setShowBookings(false)}
-          showToast={showToast}
-        />
-      )}
+      {showBookings &&
+        user &&
+        user.role !== "admin" &&
+        user.role !== "manager" && (
+          <MyBookingsModal
+            user={user}
+            onClose={() => setShowBookings(false)}
+            showToast={showToast}
+          />
+        )}
       {toast && (
         <Toast
           msg={toast.msg}
@@ -1357,7 +1387,7 @@ export default function App() {
           onHide={() => setToast(null)}
         />
       )}
-      {user && user.role !== "admin" && (
+      {user && user.role !== "admin" && user.role !== "manager" && (
         <button
           onClick={() => setShowBookings(true)}
           style={{
