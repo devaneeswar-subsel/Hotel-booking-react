@@ -3,8 +3,6 @@ import {
   XIcon,
   DownloadIcon,
   BookingIcon,
-  BedIcon,
-  CalendarIcon,
   ArrowRightIcon,
   UserIcon,
   SearchIcon,
