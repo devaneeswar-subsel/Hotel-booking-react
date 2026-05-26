@@ -1304,5 +1304,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () =>
   console.log(`🚀 VV Grand Park API running on http://localhost:${PORT}`),
 );
-   
- 
