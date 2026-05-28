@@ -37,12 +37,19 @@ export default function ManagerLogin({ onLogin }) {
     setLoading(true);
     setError("");
     try {
-      const res = await apiFetch("/api/manager/login", {
+      // ✅ CHANGED: use /api/auth/login instead of /api/manager/login
+      const res = await apiFetch("/api/auth/login", {
         method: "POST",
         body: JSON.stringify(form),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+
+      // ✅ Check role after login — only allow manager or admin
+      if (data.user.role !== "manager" && data.user.role !== "admin") {
+        throw new Error("Access denied. Manager accounts only.");
+      }
+
       onLogin(data.user);
     } catch (err) {
       setError(err.message);
