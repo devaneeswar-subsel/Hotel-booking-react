@@ -18,13 +18,52 @@ import {
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
 
-// ✅ All admin fetches include credentials (JWT cookie)
 const apiFetch = (url, options = {}) =>
   fetch(`${API}${url}`, {
     ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options.headers },
   });
+
+/* ── LIVE TIMER ── */
+function LiveTimer({ checkinTime }) {
+  const [elapsed, setElapsed] = useState("");
+
+  useEffect(() => {
+    function update() {
+      const now = new Date();
+      const start = new Date(checkinTime);
+      const diff = Math.floor((now - start) / 1000);
+      if (diff < 0) {
+        setElapsed("00:00:00");
+        return;
+      }
+      const h = Math.floor(diff / 3600);
+      const m = Math.floor((diff % 3600) / 60);
+      const s = diff % 60;
+      setElapsed(
+        `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`,
+      );
+    }
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [checkinTime]);
+
+  return (
+    <span
+      style={{
+        fontFamily: "monospace",
+        fontSize: "1.6rem",
+        fontWeight: 700,
+        color: "#2D9A6E",
+        letterSpacing: "3px",
+      }}
+    >
+      {elapsed}
+    </span>
+  );
+}
 
 /* ── CHARTS ── */
 function BarChart({ data, color = "#C9A84C", height = 64 }) {
@@ -1790,6 +1829,453 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
   );
 }
 
+/* ── ADD ROOM MODAL ── */
+function AddRoomModal({ onClose, showToast, onRefresh }) {
+  const [form, setForm] = useState({
+    room_number: "",
+    room_type: "Standard",
+    price_per_night: "",
+    capacity: 2,
+    description: "",
+    image_url: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState(false);
+
+  async function save() {
+    if (!form.room_number || !form.price_per_night)
+      return showToast("Room number and price are required", "error");
+    setLoading(true);
+    const res = await apiFetch("/api/admin/rooms", {
+      method: "POST",
+      body: JSON.stringify(form),
+    });
+    const data = await res.json();
+    setLoading(false);
+    if (!res.ok) return showToast(data.error || "Failed to add room", "error");
+    showToast(`Room #${form.room_number} added successfully!`, "success");
+    onRefresh();
+    onClose();
+  }
+
+  const iStyle = {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 8,
+    border: "1.5px solid #E9ECEF",
+    fontSize: "0.85rem",
+    fontFamily: "inherit",
+    color: "#212529",
+    boxSizing: "border-box",
+    outline: "none",
+    transition: "border-color 0.2s",
+  };
+  const lStyle = {
+    display: "block",
+    fontSize: "0.62rem",
+    fontWeight: 700,
+    color: "#868E96",
+    marginBottom: 6,
+    letterSpacing: "0.8px",
+    textTransform: "uppercase",
+  };
+
+  const roomTypes = ["Standard", "Deluxe", "Suite", "Luxury", "Presidential"];
+  const typeColors = {
+    Standard: "#6B7280",
+    Deluxe: "#2471A3",
+    Suite: "#7C3AED",
+    Luxury: "#C9A84C",
+    Presidential: "#C0392B",
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15,25,35,0.8)",
+        zIndex: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1rem",
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 20,
+          width: "100%",
+          maxWidth: 560,
+          maxHeight: "92vh",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.3)",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            background: "#0F1923",
+            padding: "22px 26px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontFamily: "'Playfair Display', serif",
+                fontSize: "1.1rem",
+                fontWeight: 600,
+                color: "#fff",
+              }}
+            >
+              Add New Room
+            </div>
+            <div
+              style={{
+                fontSize: "0.72rem",
+                color: "rgba(255,255,255,0.4)",
+                marginTop: 2,
+              }}
+            >
+              Fill in the room details below
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: "rgba(255,255,255,0.1)",
+              border: "none",
+              width: 34,
+              height: 34,
+              borderRadius: "50%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <XIcon size={14} color="#fff" />
+          </button>
+        </div>
+
+        <div style={{ overflowY: "auto", flex: 1, padding: "22px 26px" }}>
+          {/* Image preview */}
+          {form.image_url && (
+            <div
+              style={{
+                marginBottom: 18,
+                borderRadius: 12,
+                overflow: "hidden",
+                height: 160,
+                position: "relative",
+              }}
+            >
+              <img
+                src={form.image_url}
+                alt="preview"
+                onError={() => setPreview(false)}
+                onLoad={() => setPreview(true)}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background:
+                    "linear-gradient(to top, rgba(15,25,35,0.6) 0%, transparent 50%)",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 10,
+                  left: 14,
+                  color: "#fff",
+                  fontSize: "0.72rem",
+                  fontWeight: 600,
+                }}
+              >
+                Image Preview
+              </div>
+            </div>
+          )}
+
+          {/* Room Type selector */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={lStyle}>Room Type</label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {roomTypes.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setForm({ ...form, room_type: t })}
+                  style={{
+                    padding: "7px 14px",
+                    borderRadius: 20,
+                    border: `2px solid ${form.room_type === t ? typeColors[t] : "#E9ECEF"}`,
+                    background: form.room_type === t ? typeColors[t] : "#fff",
+                    color: form.room_type === t ? "#fff" : "#495057",
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Room number & Price */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 14,
+              marginBottom: 14,
+            }}
+          >
+            <div>
+              <label style={lStyle}>Room Number *</label>
+              <input
+                style={iStyle}
+                placeholder="e.g. 102"
+                value={form.room_number}
+                onChange={(e) =>
+                  setForm({ ...form, room_number: e.target.value })
+                }
+                onFocus={(e) => (e.target.style.borderColor = "#C9A84C")}
+                onBlur={(e) => (e.target.style.borderColor = "#E9ECEF")}
+              />
+            </div>
+            <div>
+              <label style={lStyle}>Price / Night (₹) *</label>
+              <input
+                style={iStyle}
+                type="number"
+                placeholder="e.g. 2500"
+                value={form.price_per_night}
+                onChange={(e) =>
+                  setForm({ ...form, price_per_night: e.target.value })
+                }
+                onFocus={(e) => (e.target.style.borderColor = "#C9A84C")}
+                onBlur={(e) => (e.target.style.borderColor = "#E9ECEF")}
+              />
+            </div>
+          </div>
+
+          {/* Capacity */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={lStyle}>Capacity (max guests)</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setForm({ ...form, capacity: n })}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 8,
+                    border: `2px solid ${form.capacity === n ? "#0F1923" : "#E9ECEF"}`,
+                    background: form.capacity === n ? "#0F1923" : "#fff",
+                    color: form.capacity === n ? "#C9A84C" : "#495057",
+                    fontSize: "0.85rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Description */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={lStyle}>Description</label>
+            <textarea
+              style={{ ...iStyle, resize: "vertical", minHeight: 72 }}
+              placeholder="Describe the room amenities, view, features..."
+              value={form.description}
+              onChange={(e) =>
+                setForm({ ...form, description: e.target.value })
+              }
+              onFocus={(e) => (e.target.style.borderColor = "#C9A84C")}
+              onBlur={(e) => (e.target.style.borderColor = "#E9ECEF")}
+            />
+          </div>
+
+          {/* Image URL */}
+          <div style={{ marginBottom: 20 }}>
+            <label style={lStyle}>Image URL</label>
+            <input
+              style={iStyle}
+              placeholder="https://images.unsplash.com/..."
+              value={form.image_url}
+              onChange={(e) => setForm({ ...form, image_url: e.target.value })}
+              onFocus={(e) => (e.target.style.borderColor = "#C9A84C")}
+              onBlur={(e) => (e.target.style.borderColor = "#E9ECEF")}
+            />
+            <div
+              style={{ fontSize: "0.68rem", color: "#868E96", marginTop: 4 }}
+            >
+              Paste any image URL — Unsplash works great for hotel photos
+            </div>
+          </div>
+
+          {/* Price preview */}
+          {form.price_per_night && (
+            <div
+              style={{
+                background: "#F8F9FA",
+                borderRadius: 10,
+                padding: "14px 16px",
+                marginBottom: 20,
+                border: "1px solid #E9ECEF",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.62rem",
+                  fontWeight: 700,
+                  color: "#868E96",
+                  letterSpacing: "1px",
+                  textTransform: "uppercase",
+                  marginBottom: 8,
+                }}
+              >
+                Pricing Preview
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "0.82rem",
+                  marginBottom: 4,
+                }}
+              >
+                <span style={{ color: "#868E96" }}>Base price / night</span>
+                <span style={{ fontWeight: 600 }}>
+                  Rs.{Number(form.price_per_night).toLocaleString()}
+                </span>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "0.82rem",
+                  marginBottom: 4,
+                }}
+              >
+                <span style={{ color: "#868E96" }}>GST (18%)</span>
+                <span style={{ fontWeight: 600 }}>
+                  Rs.
+                  {Math.round(
+                    Number(form.price_per_night) * 0.18,
+                  ).toLocaleString()}
+                </span>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "0.9rem",
+                  borderTop: "1px solid #E9ECEF",
+                  paddingTop: 8,
+                  marginTop: 4,
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: "'Playfair Display', serif",
+                    fontWeight: 600,
+                    color: "#0F1923",
+                  }}
+                >
+                  Guest pays / night
+                </span>
+                <strong
+                  style={{
+                    fontFamily: "'Playfair Display', serif",
+                    color: "#0F1923",
+                  }}
+                >
+                  Rs.
+                  {Math.round(
+                    Number(form.price_per_night) * 1.18,
+                  ).toLocaleString()}
+                </strong>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            padding: "16px 26px",
+            borderTop: "1px solid #E9ECEF",
+            display: "flex",
+            gap: 10,
+          }}
+        >
+          <button
+            onClick={onClose}
+            style={{
+              flex: 1,
+              padding: "11px",
+              background: "transparent",
+              border: "1.5px solid #E9ECEF",
+              borderRadius: 8,
+              fontSize: "0.85rem",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              fontWeight: 500,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={loading}
+            style={{
+              flex: 2,
+              padding: "11px",
+              background: loading ? "#868E96" : "#0F1923",
+              color: loading ? "#fff" : "#C9A84C",
+              border: "none",
+              borderRadius: 8,
+              fontSize: "0.88rem",
+              fontWeight: 700,
+              cursor: loading ? "not-allowed" : "pointer",
+              fontFamily: "inherit",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              transition: "all 0.2s",
+            }}
+          >
+            {loading ? "Adding Room..." : "✚ Add Room"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── RESET PASSWORD MODAL ── */
 function ResetPasswordModal({ user, onClose, showToast }) {
   const [password, setPassword] = useState("");
@@ -2067,7 +2553,8 @@ export default function AdminDashboard({
   const [editRoom, setEditRoom] = useState(null);
   const [cancelBookingData, setCancelBookingData] = useState(null);
   const [resetPasswordUser, setResetPasswordUser] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false); // ✅ mobile sidebar toggle
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showAddRoom, setShowAddRoom] = useState(false);
 
   const fetchAll = () => {
     Promise.all([
@@ -2126,6 +2613,22 @@ export default function AdminDashboard({
     }
   }
 
+  async function deleteRoom(roomId) {
+    if (!window.confirm("Permanently delete this room? This cannot be undone."))
+      return;
+    try {
+      const res = await apiFetch(`/api/admin/rooms/${roomId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setAllRooms((r) => r.filter((x) => x.room_id !== roomId));
+      showToast("Room deleted successfully", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
   async function toggleRoom(roomId, current) {
     try {
       await apiFetch(`/api/admin/rooms/${roomId}`, {
@@ -2178,9 +2681,15 @@ export default function AdminDashboard({
       b.email?.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
+  // Currently checked-in guests (have actual_checkin but no actual_checkout)
+  const checkedInBookings = bookings.filter(
+    (b) => b.actual_checkin && !b.actual_checkout && b.status === "confirmed",
+  );
+
   const tabs = [
     { id: "overview", label: "Overview", icon: GridIcon },
     { id: "bookings", label: "Bookings", icon: BookingIcon },
+    { id: "checkins", label: "Check-in Details", icon: BedIcon },
     { id: "rooms", label: "Rooms", icon: BedIcon },
     { id: "users", label: "Users", icon: UsersIcon },
     { id: "book", label: "New Booking", icon: CalendarIcon },
@@ -2290,6 +2799,21 @@ export default function AdminDashboard({
               color={tab === id ? "#C9A84C" : "rgba(255,255,255,0.4)"}
             />
             {label}
+            {id === "checkins" && checkedInBookings.length > 0 && (
+              <span
+                style={{
+                  marginLeft: "auto",
+                  background: "#2D9A6E",
+                  color: "#fff",
+                  borderRadius: 10,
+                  padding: "1px 7px",
+                  fontSize: "0.6rem",
+                  fontWeight: 700,
+                }}
+              >
+                {checkedInBookings.length}
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -2370,7 +2894,7 @@ export default function AdminDashboard({
         fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
       }}
     >
-      {/* ✅ DESKTOP SIDEBAR */}
+      {/* DESKTOP SIDEBAR */}
       <div
         style={{
           position: "fixed",
@@ -2390,7 +2914,7 @@ export default function AdminDashboard({
         <SidebarContent />
       </div>
 
-      {/* ✅ MOBILE SIDEBAR OVERLAY */}
+      {/* MOBILE SIDEBAR OVERLAY */}
       {sidebarOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200 }}>
           <div
@@ -2438,7 +2962,6 @@ export default function AdminDashboard({
             zIndex: 99,
           }}
         >
-          {/* ✅ Hamburger for mobile */}
           <button
             onClick={() => setSidebarOpen(true)}
             className="admin-hamburger"
@@ -2517,7 +3040,6 @@ export default function AdminDashboard({
           </div>
         </div>
 
-        {/* ✅ RESPONSIVE CSS injected */}
         <style>{`
           @media (max-width: 768px) {
             .admin-sidebar-desktop { display: none !important; }
@@ -2529,6 +3051,10 @@ export default function AdminDashboard({
           }
           @media (max-width: 480px) {
             .admin-stats-grid { grid-template-columns: 1fr !important; }
+          }
+          @keyframes pulse-green {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
           }
         `}</style>
 
@@ -3267,6 +3793,316 @@ export default function AdminDashboard({
             </div>
           )}
 
+          {/* ── CHECK-IN DETAILS ── */}
+          {tab === "checkins" && (
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 20,
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontFamily: "'Playfair Display', serif",
+                      fontSize: "1.1rem",
+                      fontWeight: 600,
+                      color: "#0F1923",
+                    }}
+                  >
+                    Currently Checked-in Guests
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "0.78rem",
+                      color: "#868E96",
+                      marginTop: 3,
+                    }}
+                  >
+                    {checkedInBookings.length > 0 ? (
+                      <span>
+                        <span style={{ color: "#2D9A6E", fontWeight: 600 }}>
+                          {checkedInBookings.length}
+                        </span>{" "}
+                        guest{checkedInBookings.length !== 1 ? "s" : ""}{" "}
+                        currently on premises
+                      </span>
+                    ) : (
+                      "No guests currently checked in"
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={fetchAll}
+                  style={{
+                    background: "#0F1923",
+                    color: "#C9A84C",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "8px 16px",
+                    fontSize: "0.78rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  ↻ Refresh
+                </button>
+              </div>
+
+              {checkedInBookings.length === 0 ? (
+                <div
+                  style={{
+                    background: "#fff",
+                    borderRadius: 16,
+                    border: "1px solid #E9ECEF",
+                    padding: "60px 20px",
+                    textAlign: "center",
+                  }}
+                >
+                  <div style={{ fontSize: "3rem", marginBottom: 14 }}>🏨</div>
+                  <div
+                    style={{
+                      fontFamily: "'Playfair Display', serif",
+                      fontSize: "1.1rem",
+                      color: "#0F1923",
+                      marginBottom: 8,
+                    }}
+                  >
+                    No guests currently checked in
+                  </div>
+                  <div style={{ fontSize: "0.82rem", color: "#868E96" }}>
+                    When a booking is checked in, it will appear here with a
+                    live timer
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(320px, 1fr))",
+                    gap: 16,
+                  }}
+                >
+                  {checkedInBookings.map((b) => (
+                    <div
+                      key={b.booking_id}
+                      style={{
+                        background: "#fff",
+                        borderRadius: 16,
+                        border: "1px solid #E9ECEF",
+                        overflow: "hidden",
+                        boxShadow: "0 2px 12px rgba(15,25,35,0.08)",
+                      }}
+                    >
+                      {/* Card Header */}
+                      <div
+                        style={{
+                          background: "#0F1923",
+                          padding: "16px 20px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 42,
+                              height: 42,
+                              borderRadius: "50%",
+                              background: "rgba(201,168,76,0.2)",
+                              border: "1.5px solid #C9A84C",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: "1.1rem",
+                              fontWeight: 700,
+                              color: "#C9A84C",
+                              fontFamily: "'Playfair Display', serif",
+                            }}
+                          >
+                            {b.guest_name?.charAt(0)}
+                          </div>
+                          <div>
+                            <div
+                              style={{
+                                fontSize: "0.9rem",
+                                fontWeight: 600,
+                                color: "#fff",
+                              }}
+                            >
+                              {b.guest_name}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "0.68rem",
+                                color: "rgba(255,255,255,0.4)",
+                                marginTop: 1,
+                              }}
+                            >
+                              Booking #{b.booking_id}
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                            background: "rgba(45,154,110,0.2)",
+                            border: "1px solid #2D9A6E",
+                            borderRadius: 20,
+                            padding: "3px 10px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: "50%",
+                              background: "#2D9A6E",
+                              display: "inline-block",
+                              animation:
+                                "pulse-green 1.5s ease-in-out infinite",
+                            }}
+                          />
+                          <span
+                            style={{
+                              fontSize: "0.62rem",
+                              fontWeight: 700,
+                              color: "#2D9A6E",
+                              letterSpacing: "1px",
+                            }}
+                          >
+                            LIVE
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Live Timer */}
+                      <div
+                        style={{
+                          background: "#F0FDF6",
+                          borderBottom: "1px solid #BBF0D6",
+                          padding: "16px 20px",
+                          textAlign: "center",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "0.6rem",
+                            fontWeight: 700,
+                            color: "#868E96",
+                            letterSpacing: "1.5px",
+                            textTransform: "uppercase",
+                            marginBottom: 8,
+                          }}
+                        >
+                          Time Spent on Premises
+                        </div>
+                        <LiveTimer checkinTime={b.actual_checkin} />
+                        <div
+                          style={{
+                            fontSize: "0.68rem",
+                            color: "#6B7280",
+                            marginTop: 6,
+                          }}
+                        >
+                          Checked in:{" "}
+                          {new Date(b.actual_checkin).toLocaleString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Guest Details */}
+                      <div style={{ padding: "14px 18px 18px" }}>
+                        {[
+                          {
+                            label: "Room",
+                            val: `${b.room_type}${b.room_number ? ` · #${b.room_number}` : ""}`,
+                          },
+                          {
+                            label: "Scheduled Check-in",
+                            val: b.check_in_date?.slice(0, 10),
+                          },
+                          {
+                            label: "Scheduled Check-out",
+                            val: b.check_out_date?.slice(0, 10),
+                          },
+                          {
+                            label: "Guests",
+                            val: `${b.guest_count || 1} person${(b.guest_count || 1) > 1 ? "s" : ""}`,
+                          },
+                          {
+                            label: "Room Charges",
+                            val: `Rs.${Number(b.total_price).toLocaleString()}`,
+                          },
+                        ].map(({ label, val }) => (
+                          <div
+                            key={label}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              fontSize: "0.78rem",
+                              padding: "6px 0",
+                              borderBottom: "1px solid #F3F4F6",
+                            }}
+                          >
+                            <span style={{ color: "#9CA3AF" }}>{label}</span>
+                            <span style={{ fontWeight: 600, color: "#0F1923" }}>
+                              {val}
+                            </span>
+                          </div>
+                        ))}
+                        <button
+                          onClick={() => setSelectedBookingId(b.booking_id)}
+                          style={{
+                            width: "100%",
+                            marginTop: 14,
+                            padding: "10px",
+                            background: "#0F1923",
+                            color: "#C9A84C",
+                            border: "none",
+                            borderRadius: 8,
+                            fontSize: "0.8rem",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                          }}
+                        >
+                          View Details & Checkout →
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── ROOMS ── */}
           {tab === "rooms" && (
             <div
@@ -3283,6 +4119,8 @@ export default function AdminDashboard({
                   alignItems: "center",
                   justifyContent: "space-between",
                   marginBottom: 20,
+                  flexWrap: "wrap",
+                  gap: 12,
                 }}
               >
                 <div
@@ -3306,6 +4144,25 @@ export default function AdminDashboard({
                     {allRooms.filter((r) => !r.is_available).length} blocked)
                   </span>
                 </div>
+                <button
+                  onClick={() => setShowAddRoom(true)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    background: "#0F1923",
+                    color: "#C9A84C",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "9px 18px",
+                    fontSize: "0.82rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  ✚ Add New Room
+                </button>
               </div>
               <div className="admin-table-wrap" style={{ overflowX: "auto" }}>
                 <table
@@ -3467,6 +4324,22 @@ export default function AdminDashboard({
                                 Book
                               </button>
                             )}
+                            <button
+                              onClick={() => deleteRoom(r.room_id)}
+                              style={{
+                                padding: "5px 10px",
+                                borderRadius: 4,
+                                border: "1.5px solid #868E96",
+                                color: "#868E96",
+                                background: "none",
+                                fontSize: "0.72rem",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                              }}
+                            >
+                              🗑 Delete
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -3620,9 +4493,17 @@ export default function AdminDashboard({
                             <span
                               style={{
                                 background:
-                                  u.role === "admin" ? "#0F1923" : "#F1F3F5",
+                                  u.role === "admin"
+                                    ? "#0F1923"
+                                    : u.role === "manager"
+                                      ? "#2471A3"
+                                      : "#F1F3F5",
                                 color:
-                                  u.role === "admin" ? "#E8D5A3" : "#495057",
+                                  u.role === "admin"
+                                    ? "#E8D5A3"
+                                    : u.role === "manager"
+                                      ? "#fff"
+                                      : "#495057",
                                 padding: "3px 10px",
                                 borderRadius: 3,
                                 fontSize: "0.65rem",
@@ -3882,6 +4763,13 @@ export default function AdminDashboard({
           user={resetPasswordUser}
           onClose={() => setResetPasswordUser(null)}
           showToast={showToast}
+        />
+      )}
+      {showAddRoom && (
+        <AddRoomModal
+          onClose={() => setShowAddRoom(false)}
+          showToast={showToast}
+          onRefresh={fetchAll}
         />
       )}
 

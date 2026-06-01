@@ -826,7 +826,7 @@ function BookingModal({ room, user, onClose, showToast }) {
   );
 }
 
-// ─── AUTH MODAL — login + register only (forgot password removed) ─────────────
+// ─── AUTH MODAL ───────────────────────────────────────────────────────────────
 function AuthModal({ onClose, onLogin }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
@@ -957,16 +957,26 @@ function AuthModal({ onClose, onLogin }) {
                 {eyeBtn(showPass, () => setShowPass(!showPass))}
               </div>
             </div>
+
+            {/* ✅ CHANGED: Phone is now mandatory for registration */}
             {mode === "register" && (
               <div className="form-group">
-                <label>Phone (optional)</label>
+                <label>
+                  Phone Number
+                  <span style={{ color: "#C0392B", marginLeft: 3 }}>*</span>
+                </label>
                 <input
+                  required
+                  type="tel"
                   placeholder="+91 XXXXX XXXXX"
                   value={form.phone}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  pattern="[0-9+\s\-]{7,15}"
+                  title="Please enter a valid phone number"
                 />
               </div>
             )}
+
             <button className="submit-btn" type="submit" disabled={loading}>
               {loading
                 ? "Please wait..."
@@ -976,7 +986,6 @@ function AuthModal({ onClose, onLogin }) {
             </button>
           </form>
 
-          {/* ✅ Forgot password removed — admin resets via dashboard */}
           {mode === "login" && (
             <div style={{ textAlign: "center", marginTop: 8 }}>
               <span style={{ fontSize: "0.78rem", color: "var(--gray-400)" }}>
