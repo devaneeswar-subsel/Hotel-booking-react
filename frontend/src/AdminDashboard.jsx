@@ -2277,7 +2277,6 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
     image_url: "",
   });
   const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState(false);
 
   async function save() {
     if (!form.room_number || !form.price_per_night)
@@ -2417,8 +2416,8 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
               <img
                 src={form.image_url}
                 alt="preview"
-                onError={() => setPreview(false)}
-                onLoad={() => setPreview(true)}
+                onError={(e) => (e.target.style.display = "none")}
+                onLoad={(e) => (e.target.style.display = "block")}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
               <div
