@@ -569,7 +569,29 @@ app.get("/api/bookings/user/:user_id", requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+app.patch(
+  "/api/admin/users/:id/reset-password",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { new_password } = req.body;
+      if (!new_password || new_password.length < 6)
+        return res
+          .status(400)
+          .json({ error: "Password must be at least 6 characters" });
+      const hashed = await bcrypt.hash(new_password, 12);
+      const [result] = await db.query(
+        "UPDATE users SET password=? WHERE user_id=?",
+        [hashed, req.params.id],
+      );
+      if (!result.affectedRows)
+        return res.status(404).json({ error: "User not found" });
+      res.json({ message: "Password reset successfully" });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
   try {
     const [result] = await db.query(
@@ -1169,15 +1191,13 @@ app.post(
         "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
         [addonTotal, gstAmount, finalTotal, req.params.id],
       );
-      res
-        .status(201)
-        .json({
-          addon_id: r.insertId,
-          label,
-          amount,
-          new_addon_total: addonTotal,
-          new_final_total: finalTotal,
-        });
+      res.status(201).json({
+        addon_id: r.insertId,
+        label,
+        amount,
+        new_addon_total: addonTotal,
+        new_final_total: finalTotal,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
