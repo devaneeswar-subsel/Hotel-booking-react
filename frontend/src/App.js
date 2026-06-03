@@ -1221,8 +1221,13 @@ export default function App() {
       .then((data) => {
         if (data.user) {
           setUser(data.user);
-          if (data.user.role === "admin") setShowAdmin(true);
-          if (data.user.role === "manager") setShowManager(true);
+          if (data.user.role === "admin") {
+            setShowAdmin(true);
+            setShowManager(false);
+          } else if (data.user.role === "manager") {
+            setShowManager(true);
+            setShowAdmin(false);
+          }
         }
       })
       .catch(() => {})
@@ -1232,8 +1237,13 @@ export default function App() {
   function handleLogin(u) {
     setUser(u);
     showToast(`Welcome, ${u.name.split(" ")[0]}!`, "success");
-    if (u.role === "admin") setTimeout(() => setShowAdmin(true), 500);
-    if (u.role === "manager") setTimeout(() => setShowManager(true), 500);
+    if (u.role === "admin") {
+      setShowAdmin(true);
+      setShowManager(false);
+    } else if (u.role === "manager") {
+      setShowManager(true);
+      setShowAdmin(false);
+    }
   }
 
   async function handleLogout() {
