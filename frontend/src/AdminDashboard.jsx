@@ -2725,11 +2725,10 @@ function ResetPasswordModal({ user, onClose, showToast }) {
       return showToast("Passwords don't match", "error");
     setLoading(true);
     try {
-      const res = await fetch(
-        `${API}/api/admin/users/${user.user_id}/reset-password`,
+      const res = await apiFetch(
+        `/api/admin/users/${user.user_id}/reset-password`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ new_password: password }),
         },
       );
