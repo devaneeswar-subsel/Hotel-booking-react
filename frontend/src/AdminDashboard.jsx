@@ -783,6 +783,8 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const [addonLabel, setAddonLabel] = useState("");
   const [addonAmount, setAddonAmount] = useState("");
   const [addonLoading, setAddonLoading] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("Online");
+  const [addonPaid, setAddonPaid] = useState(false);
   const PRESET_ADDONS = [
     "Food & Beverages",
     "Laundry",
@@ -790,6 +792,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     "Extra Bed",
     "Room Service",
   ];
+  const PAYMENT_MODES = ["Cash", "UPI", "Card", "Online", "Bank Transfer"];
 
   const fetchBooking = () => {
     setLoading(true);
@@ -859,6 +862,8 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   async function downloadInvoice() {
     if (!booking) return;
     const b = booking;
+    const selectedPaymentMode = paymentMode;
+    const isAddonPaid = addonPaid;
     const ci = b.actual_checkin
       ? new Date(b.actual_checkin).toLocaleString("en-IN")
       : b.check_in_date?.slice(0, 10);
@@ -872,10 +877,13 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
           )
         : 1;
     const basePrice = Number(b.total_price);
-    const addonTotal = Number(b.addon_charges || 0);
-    const subtotal = basePrice + addonTotal;
-    const gst = Number(b.gst_amount || subtotal * GST_RATE);
-    const finalTotal = Number(b.final_total || subtotal + gst);
+    const roomGstPdf = Math.round(basePrice * GST_RATE * 100) / 100;
+    const alreadyPaidPdf = Math.round((basePrice + roomGstPdf) * 100) / 100;
+    const addonTotalPdf = Number(b.addon_charges || 0);
+    const addonGstPdf = Math.round(addonTotalPdf * GST_RATE * 100) / 100;
+    const remainingPdf = Math.round((addonTotalPdf + addonGstPdf) * 100) / 100;
+    const grandTotalPdf =
+      Math.round((alreadyPaidPdf + remainingPdf) * 100) / 100;
     const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
     const today = new Date().toLocaleDateString("en-IN", {
       day: "numeric",
@@ -885,61 +893,69 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     const W = 210;
+    const L = 18;
+    const R = W - 18;
+
+    // ── Header (compact 32mm) ────────────────────────────────────────────────
     doc.setFillColor(15, 25, 35);
-    doc.rect(0, 0, W, 42, "F");
+    doc.rect(0, 0, W, 32, "F");
     doc.setFont("times", "bold");
-    doc.setFontSize(22);
+    doc.setFontSize(17);
     doc.setTextColor(201, 168, 76);
-    doc.text("VV GRAND PARK", 18, 18);
+    doc.text("VV GRAND PARK", L, 13);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
+    doc.setFontSize(7);
     doc.setTextColor(180, 160, 100);
-    doc.text("RESIDENCY", 18, 25);
+    doc.text("RESIDENCY", L, 19);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
+    doc.setFontSize(17);
     doc.setTextColor(255, 255, 255);
-    doc.text("INVOICE", W - 18, 20, { align: "right" });
+    doc.text("INVOICE", R, 13, { align: "right" });
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(150, 140, 120);
-    doc.text(invNo, W - 18, 27, { align: "right" });
-    doc.text(`Date: ${today}`, W - 18, 33, { align: "right" });
-    doc.setDrawColor(201, 168, 76);
-    doc.setLineWidth(0.5);
-    doc.line(18, 48, W - 18, 48);
-    doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
+    doc.setTextColor(150, 140, 120);
+    doc.text(invNo, R, 20, { align: "right" });
+    doc.text(`Date: ${today}`, R, 27, { align: "right" });
+
+    // ── Bill To / From (compact) ─────────────────────────────────────────────
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.4);
+    doc.line(L, 37, R, 37);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
     doc.setTextColor(134, 142, 150);
-    doc.text("BILL TO", 18, 58);
-    doc.text("FROM", W / 2 + 10, 58);
+    doc.text("BILL TO", L, 44);
+    doc.text("FROM", W / 2 + 8, 44);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.setTextColor(15, 25, 35);
-    doc.text(b.guest_name || "Guest", 18, 66);
+    doc.text(b.guest_name || "Guest", L, 51);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.setTextColor(73, 80, 87);
-    doc.text(b.email || "", 18, 72);
-    if (b.phone) doc.text(b.phone, 18, 78);
+    doc.text(b.email || "", L, 57);
+    if (b.phone) doc.text(b.phone, L, 63);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.setTextColor(15, 25, 35);
-    doc.text("VV Grand Park Residency", W / 2 + 10, 66);
+    doc.text("VV Grand Park Residency", W / 2 + 8, 51);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.setTextColor(73, 80, 87);
-    doc.text("123 Palace Road, Chennai", W / 2 + 10, 72);
-    doc.text("hello@vvgrandpark.com", W / 2 + 10, 78);
-    doc.text("+91 12345 67890 | GSTIN: 33AAAAA0000A1Z5", W / 2 + 10, 84);
-    const tableTop = 98;
+    doc.text("123 Palace Road, Chennai", W / 2 + 8, 57);
+    doc.text("hello@vvgrandpark.com | +91 12345 67890", W / 2 + 8, 63);
+    doc.text("GSTIN: 33AAAAA0000A1Z5", W / 2 + 8, 69);
+
+    // ── Stay Details Table ───────────────────────────────────────────────────
+    const tableTop = 76;
     doc.setFillColor(15, 25, 35);
-    doc.rect(18, tableTop, W - 36, 10, "F");
+    doc.rect(L, tableTop, W - 36, 8, "F");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.5);
+    doc.setFontSize(7.5);
     doc.setTextColor(201, 168, 76);
-    doc.text("DESCRIPTION", 24, tableTop + 7);
-    doc.text("DETAILS", 110, tableTop + 7);
-    doc.text("AMOUNT", W - 18, tableTop + 7, { align: "right" });
+    doc.text("DESCRIPTION", L + 4, tableTop + 5.5);
+    doc.text("DETAILS", 108, tableTop + 5.5);
+    doc.text("AMOUNT", R, tableTop + 5.5, { align: "right" });
     const rows = [
       {
         desc: `${b.room_type} — Room ${b.room_number || b.room_id}`,
@@ -951,125 +967,204 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       ...(b.hours_spent
         ? [
             {
-              desc: "Total Hours Stayed",
-              detail: `${b.hours_spent} hours`,
+              desc: "Hours Stayed",
+              detail: `${b.hours_spent} hrs`,
               amount: "—",
             },
           ]
         : []),
       { desc: "Guests", detail: `${b.guest_count || 1}`, amount: "—" },
     ];
-    let y = tableTop + 18;
+    let y = tableTop + 13;
     rows.forEach((row, i) => {
       if (i % 2 === 0) {
         doc.setFillColor(248, 249, 250);
-        doc.rect(18, y - 6, W - 36, 10, "F");
+        doc.rect(L, y - 5, W - 36, 8, "F");
       }
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
+      doc.setFontSize(8);
       doc.setTextColor(15, 25, 35);
-      doc.text(row.desc, 24, y);
-      doc.setTextColor(73, 80, 87);
-      doc.text(String(row.detail), 110, y);
-      doc.text(row.amount, W - 18, y, { align: "right" });
-      y += 12;
+      doc.text(row.desc, L + 4, y);
+      doc.setTextColor(80, 80, 80);
+      doc.text(String(row.detail), 108, y);
+      doc.text(row.amount, R, y, { align: "right" });
+      y += 8;
     });
+
+    // ── Add-on rows ──────────────────────────────────────────────────────────
     if (b.addons && b.addons.length > 0) {
-      y += 4;
-      doc.setFillColor(240, 240, 240);
-      doc.rect(18, y - 6, W - 36, 10, "F");
+      y += 2;
+      doc.setFillColor(235, 235, 235);
+      doc.rect(L, y - 4, W - 36, 8, "F");
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.5);
-      doc.setTextColor(15, 25, 35);
-      doc.text("ADD-ON CHARGES", 24, y);
-      y += 12;
+      doc.setFontSize(7.5);
+      doc.setTextColor(80, 80, 80);
+      doc.text("ADD-ON CHARGES", L + 4, y + 1);
+      y += 8;
       b.addons.forEach((addon, i) => {
         if (i % 2 === 0) {
           doc.setFillColor(248, 249, 250);
-          doc.rect(18, y - 6, W - 36, 10, "F");
+          doc.rect(L, y - 5, W - 36, 8, "F");
         }
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
+        doc.setFontSize(8);
         doc.setTextColor(15, 25, 35);
-        doc.text(addon.label, 24, y);
-        doc.setTextColor(73, 80, 87);
+        doc.text(addon.label, L + 4, y);
+        doc.setTextColor(80, 80, 80);
         doc.text(
           new Date(addon.created_at).toLocaleDateString("en-IN"),
-          110,
+          108,
           y,
         );
-        doc.text(`Rs.${Number(addon.amount).toLocaleString()}`, W - 18, y, {
+        doc.text(`Rs.${Number(addon.amount).toLocaleString()}`, R, y, {
           align: "right",
         });
-        y += 12;
+        y += 8;
       });
     }
-    y += 4;
-    doc.setDrawColor(225, 225, 225);
+
+    // ── Bill Summary (right-aligned, compact) ────────────────────────────────
+    y += 5;
+    doc.setDrawColor(220, 220, 220);
     doc.setLineWidth(0.3);
-    doc.line(18, y, W - 18, y);
-    y += 8;
+    doc.line(L, y, R, y);
+    y += 5;
+    const SX = W - 90;
+
+    // Already Paid
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.5);
+    doc.setTextColor(160, 160, 160);
+    doc.text("BOOKING PAYMENT — ALREADY PAID", L, y + 1);
+    y += 6;
     [
       { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
-      { label: "Add-on Charges", val: `Rs.${addonTotal.toLocaleString()}` },
-      { label: "Subtotal", val: `Rs.${subtotal.toLocaleString()}` },
-      { label: "GST (18%)", val: `Rs.${Math.round(gst).toLocaleString()}` },
+      {
+        label: "GST (18%)",
+        val: `Rs.${Math.round(roomGstPdf).toLocaleString()}`,
+      },
     ].forEach(({ label, val }) => {
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(73, 80, 87);
-      doc.text(label, W - 90, y);
-      doc.setTextColor(15, 25, 35);
+      doc.setFontSize(8);
+      doc.setTextColor(110, 110, 110);
+      doc.text(label, SX, y);
       doc.setFont("helvetica", "bold");
-      doc.text(val, W - 18, y, { align: "right" });
-      y += 9;
+      doc.setTextColor(30, 30, 30);
+      doc.text(val, R, y, { align: "right" });
+      y += 6;
     });
-    y += 2;
-    doc.setFillColor(15, 25, 35);
-    doc.roundedRect(W - 90, y - 6, 72, 18, 3, 3, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(201, 168, 76);
-    doc.text("GRAND TOTAL", W - 54, y + 1, { align: "center" });
-    doc.setFontSize(13);
-    doc.setTextColor(255, 255, 255);
-    doc.text(`Rs.${Math.round(finalTotal).toLocaleString()}`, W - 54, y + 9, {
-      align: "center",
-    });
-    y += 28;
-    const sc =
-      b.status === "confirmed"
-        ? [45, 154, 110]
-        : b.status === "cancelled"
-          ? [192, 57, 43]
-          : [36, 113, 163];
-    doc.setFillColor(...sc);
-    doc.roundedRect(18, y - 5, 36, 10, 2, 2, "F");
+    doc.setFillColor(232, 248, 240);
+    doc.rect(SX - 1, y - 4, R - SX + 3, 7, "F");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.setTextColor(255, 255, 255);
-    doc.text(b.status?.toUpperCase(), 36, y + 2, { align: "center" });
-    const footerY = 272;
+    doc.setTextColor(45, 154, 110);
+    doc.text("Amount Already Paid", SX, y + 1);
+    doc.text(`Rs.${Math.round(alreadyPaidPdf).toLocaleString()}`, R, y + 1, {
+      align: "right",
+    });
+    y += 9;
+
+    // Add-ons
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.5);
+    doc.setTextColor(160, 160, 160);
+    doc.text("ADD-ON CHARGES", L, y + 1);
+    y += 6;
+    [
+      { label: "Add-on Charges", val: `Rs.${addonTotalPdf.toLocaleString()}` },
+      {
+        label: "GST on Add-ons (18%)",
+        val: `Rs.${Math.round(addonGstPdf).toLocaleString()}`,
+      },
+    ].forEach(({ label, val }) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(110, 110, 110);
+      doc.text(label, SX, y);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 30, 30);
+      doc.text(val, R, y, { align: "right" });
+      y += 6;
+    });
+    const remBg = isAddonPaid ? [232, 248, 240] : [255, 248, 220];
+    const remTxt = isAddonPaid ? [45, 154, 110] : [180, 120, 20];
+    doc.setFillColor(...remBg);
+    doc.rect(SX - 1, y - 4, R - SX + 3, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...remTxt);
+    doc.text(isAddonPaid ? "Add-ons Paid" : "Remaining to Pay", SX, y + 1);
+    doc.text(`Rs.${Math.round(remainingPdf).toLocaleString()}`, R, y + 1, {
+      align: "right",
+    });
+    y += 8;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(140, 140, 140);
+    doc.text(
+      `Payment Mode: ${selectedPaymentMode}   Status: ${isAddonPaid ? "PAID" : "PENDING"}`,
+      SX,
+      y,
+    );
+    y += 8;
+
+    // Grand Total box
     doc.setDrawColor(201, 168, 76);
-    doc.setLineWidth(0.4);
-    doc.line(18, footerY, W - 18, footerY);
+    doc.setLineWidth(0.5);
+    doc.line(SX - 1, y - 1, R, y - 1);
+    doc.setFillColor(15, 25, 35);
+    doc.roundedRect(SX - 1, y + 1, R - SX + 3, 14, 2, 2, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(201, 168, 76);
+    doc.text("GRAND TOTAL", (SX - 1 + R) / 2, y + 6.5, { align: "center" });
+    doc.setFontSize(11);
+    doc.setTextColor(255, 255, 255);
+    doc.text(
+      `Rs.${Math.round(grandTotalPdf).toLocaleString()}`,
+      (SX - 1 + R) / 2,
+      y + 13,
+      { align: "center" },
+    );
+    y += 20;
+
+    // Status badge
+    // const sc =
+    //   b.status === "confirmed"
+    //     ? [45, 154, 110]
+    //     : b.status === "cancelled"
+    //       ? [192, 57, 43]
+    //       : [36, 113, 163];
+    // doc.setFillColor(...sc);
+    // doc.roundedRect(L, y - 3, 32, 8, 2, 2, "F");
+    // doc.setFont("helvetica", "bold");
+    // doc.setFontSize(7);
+    // doc.setTextColor(255, 255, 255);
+    // doc.text(b.status?.toUpperCase(), L + 16, y + 2.5, { align: "center" });
+
+    // ── Footer (fixed bottom) ────────────────────────────────────────────────
+    const footerY = 282;
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.3);
+    doc.line(L, footerY, R, footerY);
     doc.setFont("helvetica", "italic");
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.setTextColor(134, 142, 150);
     doc.text(
       "Thank you for choosing VV Grand Park Residency. We look forward to welcoming you again.",
       W / 2,
-      footerY + 7,
+      footerY + 5,
       { align: "center" },
     );
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.text(
       "www.vvgrandpark.com  |  hello@vvgrandpark.com  |  +91 12345 67890",
       W / 2,
-      footerY + 13,
+      footerY + 11,
       { align: "center" },
     );
+
     doc.save(`${invNo}-${(b.guest_name || "guest").replace(/\s+/g, "_")}.pdf`);
   }
 
@@ -1101,10 +1196,15 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   if (!booking) return null;
 
   const basePrice = Number(booking.total_price);
+  // Already paid: room charges + GST on room
+  const roomGst = Math.round(basePrice * GST_RATE * 100) / 100;
+  const alreadyPaid = Math.round((basePrice + roomGst) * 100) / 100;
+  // Add-ons: separate calculation
   const addonTotal = Number(booking.addon_charges || 0);
-  const subtotal = basePrice + addonTotal;
-  const gst = Math.round(subtotal * GST_RATE * 100) / 100;
-  const finalTotal = Number(booking.final_total || subtotal + gst);
+  const addonGst = Math.round(addonTotal * GST_RATE * 100) / 100;
+  const remainingAmount = Math.round((addonTotal + addonGst) * 100) / 100;
+  // Grand total
+  const finalTotal = Math.round((alreadyPaid + remainingAmount) * 100) / 100;
 
   return (
     <div
@@ -1463,6 +1563,109 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               </div>
             )}
           </div>
+          {/* Payment Mode Selector */}
+          <div
+            style={{
+              background: "#F8F9FA",
+              borderRadius: 12,
+              padding: "16px 20px",
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                fontSize: "0.72rem",
+                fontWeight: 700,
+                color: "#868E96",
+                letterSpacing: "1px",
+                textTransform: "uppercase",
+                marginBottom: 12,
+              }}
+            >
+              Payment Mode
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {PAYMENT_MODES.map((mode) => {
+                const icons = {
+                  Cash: (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />
+                    </svg>
+                  ),
+                  UPI: (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z" />
+                    </svg>
+                  ),
+                  Card: (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
+                    </svg>
+                  ),
+                  Online: (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.9-4.33-3.56zm2.95-8H5.08c.96-1.66 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z" />
+                    </svg>
+                  ),
+                  "Bank Transfer": (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M11.5 2L2 7v2h19V7L11.5 2zM4 10v7H2v2h20v-2h-2v-7h-2v7h-4v-7h-2v7H8v-7H4z" />
+                    </svg>
+                  ),
+                };
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => setPaymentMode(mode)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "7px 16px",
+                      borderRadius: 20,
+                      border: `2px solid ${paymentMode === mode ? "#0F1923" : "#E9ECEF"}`,
+                      background: paymentMode === mode ? "#0F1923" : "#fff",
+                      color: paymentMode === mode ? "#C9A84C" : "#495057",
+                      fontSize: "0.78rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {icons[mode]}
+                    {mode}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div
             style={{
               background: "#0F1923",
@@ -1482,42 +1685,212 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
             >
               Bill Summary
             </div>
-            {[
-              {
-                label: "Room Charges",
-                val: `Rs.${basePrice.toLocaleString()}`,
-              },
-              {
-                label: "Add-on Charges",
-                val: `Rs.${addonTotal.toLocaleString()}`,
-              },
-              { label: "Subtotal", val: `Rs.${subtotal.toLocaleString()}` },
-              {
-                label: "GST (18%)",
-                val: `Rs.${Math.round(gst).toLocaleString()}`,
-              },
-            ].map(({ label, val }) => (
+
+            {/* Already Paid Section */}
+            <div style={{ marginBottom: 10 }}>
               <div
-                key={label}
+                style={{
+                  fontSize: "0.6rem",
+                  fontWeight: 700,
+                  color: "rgba(255,255,255,0.3)",
+                  letterSpacing: "1.5px",
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                Booking Payment (Already Paid)
+              </div>
+              {[
+                {
+                  label: "Room Charges",
+                  val: `Rs.${basePrice.toLocaleString()}`,
+                },
+                {
+                  label: "GST (18%)",
+                  val: `Rs.${Math.round(roomGst).toLocaleString()}`,
+                },
+              ].map(({ label, val }) => (
+                <div
+                  key={label}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: "0.82rem",
+                    padding: "4px 0",
+                    borderBottom: "1px solid rgba(255,255,255,0.05)",
+                  }}
+                >
+                  <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                    {label}
+                  </span>
+                  <span
+                    style={{ color: "rgba(255,255,255,0.7)", fontWeight: 600 }}
+                  >
+                    {val}
+                  </span>
+                </div>
+              ))}
+              <div
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  fontSize: "0.82rem",
-                  padding: "5px 0",
-                  borderBottom: "1px solid rgba(255,255,255,0.07)",
+                  alignItems: "center",
+                  marginTop: 8,
+                  background: "rgba(45,154,110,0.15)",
+                  borderRadius: 6,
+                  padding: "7px 10px",
+                  border: "1px solid rgba(45,154,110,0.3)",
                 }}
               >
-                <span style={{ color: "rgba(255,255,255,0.55)" }}>{label}</span>
-                <span style={{ color: "#fff", fontWeight: 600 }}>{val}</span>
+                <span
+                  style={{
+                    fontSize: "0.82rem",
+                    color: "#2D9A6E",
+                    fontWeight: 700,
+                  }}
+                >
+                  Amount Already Paid
+                </span>
+                <span
+                  style={{
+                    fontSize: "0.95rem",
+                    color: "#2D9A6E",
+                    fontWeight: 700,
+                  }}
+                >
+                  Rs.{Math.round(alreadyPaid).toLocaleString()}
+                </span>
               </div>
-            ))}
+            </div>
+
+            {/* Divider */}
+            <div
+              style={{
+                borderTop: "1px dashed rgba(255,255,255,0.1)",
+                margin: "12px 0",
+              }}
+            />
+
+            {/* Add-ons Section */}
+            <div style={{ marginBottom: 10 }}>
+              <div
+                style={{
+                  fontSize: "0.6rem",
+                  fontWeight: 700,
+                  color: "rgba(255,255,255,0.3)",
+                  letterSpacing: "1.5px",
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                Add-on Charges
+              </div>
+              {[
+                {
+                  label: "Add-on Charges",
+                  val: `Rs.${addonTotal.toLocaleString()}`,
+                },
+                {
+                  label: "GST on Add-ons (18%)",
+                  val: `Rs.${Math.round(addonGst).toLocaleString()}`,
+                },
+              ].map(({ label, val }) => (
+                <div
+                  key={label}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: "0.82rem",
+                    padding: "4px 0",
+                    borderBottom: "1px solid rgba(255,255,255,0.05)",
+                  }}
+                >
+                  <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                    {label}
+                  </span>
+                  <span
+                    style={{ color: "rgba(255,255,255,0.7)", fontWeight: 600 }}
+                  >
+                    {val}
+                  </span>
+                </div>
+              ))}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginTop: 8,
+                  background: addonPaid
+                    ? "rgba(45,154,110,0.15)"
+                    : "rgba(201,168,76,0.12)",
+                  borderRadius: 6,
+                  padding: "7px 10px",
+                  border: `1px solid ${addonPaid ? "rgba(45,154,110,0.3)" : "rgba(201,168,76,0.25)"}`,
+                  transition: "all 0.3s",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: "0.82rem",
+                      color: addonPaid ? "#2D9A6E" : "#C9A84C",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {addonPaid ? "Add-ons Paid" : "Remaining Amount to Pay"}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "0.68rem",
+                      color: "rgba(255,255,255,0.35)",
+                      marginTop: 2,
+                    }}
+                  >
+                    {addonPaid
+                      ? `Received via ${paymentMode}`
+                      : `via ${paymentMode}`}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {addonPaid && (
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="#2D9A6E"
+                    >
+                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                    </svg>
+                  )}
+                  <span
+                    style={{
+                      fontSize: "1.1rem",
+                      color: addonPaid ? "#2D9A6E" : "#C9A84C",
+                      fontWeight: 700,
+                      fontFamily: "'Playfair Display', serif",
+                    }}
+                  >
+                    Rs.{Math.round(remainingAmount).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div
+              style={{
+                borderTop: "1px solid rgba(201,168,76,0.3)",
+                margin: "12px 0",
+              }}
+            />
+
+            {/* Grand Total */}
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                fontSize: "1rem",
-                padding: "12px 0 0",
-                marginTop: 4,
+                alignItems: "center",
               }}
             >
               <span
@@ -1525,6 +1898,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                   fontFamily: "'Playfair Display', serif",
                   fontWeight: 700,
                   color: "#C9A84C",
+                  fontSize: "1rem",
                 }}
               >
                 Grand Total
@@ -1534,34 +1908,97 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                   fontFamily: "'Playfair Display', serif",
                   fontWeight: 700,
                   color: "#fff",
-                  fontSize: "1.1rem",
+                  fontSize: "1.4rem",
                 }}
               >
                 Rs.{Math.round(finalTotal).toLocaleString()}
               </span>
             </div>
           </div>
-          <button
-            onClick={downloadInvoice}
-            style={{
-              width: "100%",
-              padding: 12,
-              background: "#C9A84C",
-              color: "#fff",
-              border: "none",
-              borderRadius: 8,
-              fontFamily: "inherit",
-              fontWeight: 600,
-              fontSize: "0.88rem",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-            }}
-          >
-            <DownloadIcon size={15} color="#fff" /> Download Invoice (PDF)
-          </button>
+          <div style={{ display: "flex", gap: 10 }}>
+            {/* Download Invoice — 50% left */}
+            <button
+              onClick={downloadInvoice}
+              style={{
+                flex: 1,
+                padding: 12,
+                background: "#0F1923",
+                color: "#C9A84C",
+                border: "none",
+                borderRadius: 8,
+                fontFamily: "inherit",
+                fontWeight: 600,
+                fontSize: "0.82rem",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+              }}
+            >
+              <DownloadIcon size={14} color="#C9A84C" /> Download Invoice
+            </button>
+            {/* Paid button — 50% right */}
+            <button
+              onClick={() => setAddonPaid(!addonPaid)}
+              style={{
+                flex: 1,
+                padding: 12,
+                borderRadius: 8,
+                fontFamily: "inherit",
+                fontWeight: 700,
+                fontSize: "0.88rem",
+                cursor: addonTotal > 0 ? "pointer" : "not-allowed",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                border: "none",
+                transition: "all 0.2s",
+                background: addonPaid
+                  ? "#2D9A6E"
+                  : addonTotal > 0
+                    ? "#C9A84C"
+                    : "#E9ECEF",
+                color: addonPaid
+                  ? "#fff"
+                  : addonTotal > 0
+                    ? "#0F1923"
+                    : "#868E96",
+                opacity: addonTotal > 0 ? 1 : 0.6,
+              }}
+              disabled={addonTotal === 0}
+              title={
+                addonTotal === 0 ? "No add-on charges to mark as paid" : ""
+              }
+            >
+              {addonPaid ? (
+                <>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                  </svg>
+                  Add-ons Paid
+                </>
+              ) : (
+                <>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />
+                  </svg>
+                  Mark as Paid
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1840,6 +2277,7 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
     image_url: "",
   });
   const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState(false);
 
   async function save() {
     if (!form.room_number || !form.price_per_night)
@@ -1979,7 +2417,8 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
               <img
                 src={form.image_url}
                 alt="preview"
-                onError={(e) => (e.target.style.display = "none")}
+                onError={() => setPreview(false)}
+                onLoad={() => setPreview(true)}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
               <div

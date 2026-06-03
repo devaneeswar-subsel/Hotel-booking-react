@@ -15,6 +15,8 @@ const app = express();
 const ALLOWED_ORIGINS = [
   "http://localhost:3000",
   process.env.FRONTEND_URL,
+  "https://vvgrandpark.com",
+  "https://www.vvgrandpark.com",
 ].filter(Boolean);
 
 app.use(
