@@ -64,6 +64,9 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const [addonLabel, setAddonLabel] = useState("");
   const [addonAmount, setAddonAmount] = useState("");
   const [addonLoading, setAddonLoading] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("Cash");
+  const [addonPaid, setAddonPaid] = useState(false);
+  const PAYMENT_MODES = ["Cash", "UPI", "Card", "Online", "Bank Transfer"];
   const PRESET_ADDONS = [
     "Food & Beverages",
     "Laundry",
@@ -140,6 +143,8 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   async function downloadInvoice() {
     if (!booking) return;
     const b = booking;
+    const selectedPaymentMode = paymentMode;
+    const isAddonPaid = addonPaid;
     const ci = b.actual_checkin
       ? new Date(b.actual_checkin).toLocaleString("en-IN")
       : b.check_in_date?.slice(0, 10);
@@ -344,16 +349,27 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       doc.text(val, R, y, { align: "right" });
       y += 6;
     });
-    doc.setFillColor(255, 248, 220);
+    const remBg = isAddonPaid ? [232, 248, 240] : [255, 248, 220];
+    const remTxt = isAddonPaid ? [45, 154, 110] : [180, 120, 20];
+    doc.setFillColor(...remBg);
     doc.rect(SX - 1, y - 4, R - SX + 3, 7, "F");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.setTextColor(180, 120, 20);
-    doc.text("Remaining to Pay", SX, y + 1);
+    doc.setTextColor(...remTxt);
+    doc.text(isAddonPaid ? "Add-ons Paid" : "Remaining to Pay", SX, y + 1);
     doc.text(`Rs.${Math.round(remaining).toLocaleString()}`, R, y + 1, {
       align: "right",
     });
-    y += 12;
+    y += 8;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(140, 140, 140);
+    doc.text(
+      `Payment Mode: ${selectedPaymentMode}   Status: ${isAddonPaid ? "PAID" : "PENDING"}`,
+      SX,
+      y,
+    );
+    y += 8;
     doc.setDrawColor(201, 168, 76);
     doc.setLineWidth(0.5);
     doc.line(SX - 1, y - 1, R, y - 1);
@@ -780,6 +796,108 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               </div>
             )}
           </div>
+          {/* Payment Mode */}
+          <div
+            style={{
+              background: "#F8F9FA",
+              borderRadius: 12,
+              padding: "16px 20px",
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                fontSize: "0.72rem",
+                fontWeight: 700,
+                color: "#868E96",
+                letterSpacing: "1px",
+                textTransform: "uppercase",
+                marginBottom: 12,
+              }}
+            >
+              Payment Mode
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {PAYMENT_MODES.map((mode) => {
+                const icons = {
+                  Cash: (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />
+                    </svg>
+                  ),
+                  UPI: (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z" />
+                    </svg>
+                  ),
+                  Card: (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
+                    </svg>
+                  ),
+                  Online: (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.9-4.33-3.56zm2.95-8H5.08c.96-1.66 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z" />
+                    </svg>
+                  ),
+                  "Bank Transfer": (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M11.5 2L2 7v2h19V7L11.5 2zM4 10v7H2v2h20v-2h-2v-7h-2v7h-4v-7h-2v7H8v-7H4z" />
+                    </svg>
+                  ),
+                };
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => setPaymentMode(mode)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "7px 16px",
+                      borderRadius: 20,
+                      border: `2px solid ${paymentMode === mode ? "#0F1923" : "#E9ECEF"}`,
+                      background: paymentMode === mode ? "#0F1923" : "#fff",
+                      color: paymentMode === mode ? "#C9A84C" : "#495057",
+                      fontSize: "0.78rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {icons[mode]}
+                    {mode}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           {/* Bill Summary */}
           <div
             style={{
@@ -930,31 +1048,59 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                   justifyContent: "space-between",
                   alignItems: "center",
                   marginTop: 8,
-                  background: "rgba(201,168,76,0.12)",
+                  background: addonPaid
+                    ? "rgba(45,154,110,0.15)"
+                    : "rgba(201,168,76,0.12)",
                   borderRadius: 6,
                   padding: "7px 10px",
-                  border: "1px solid rgba(201,168,76,0.25)",
+                  border: `1px solid ${addonPaid ? "rgba(45,154,110,0.3)" : "rgba(201,168,76,0.25)"}`,
+                  transition: "all 0.3s",
                 }}
               >
-                <span
-                  style={{
-                    fontSize: "0.82rem",
-                    color: "#C9A84C",
-                    fontWeight: 700,
-                  }}
-                >
-                  Remaining Amount to Pay
-                </span>
-                <span
-                  style={{
-                    fontSize: "1.1rem",
-                    color: "#C9A84C",
-                    fontWeight: 700,
-                    fontFamily: "'Playfair Display',serif",
-                  }}
-                >
-                  Rs.{Math.round(remainingAmount).toLocaleString()}
-                </span>
+                <div>
+                  <div
+                    style={{
+                      fontSize: "0.82rem",
+                      color: addonPaid ? "#2D9A6E" : "#C9A84C",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {addonPaid ? "Add-ons Paid" : "Remaining Amount to Pay"}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "0.68rem",
+                      color: "rgba(255,255,255,0.35)",
+                      marginTop: 2,
+                    }}
+                  >
+                    {addonPaid
+                      ? `Received via ${paymentMode}`
+                      : `via ${paymentMode}`}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {addonPaid && (
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="#2D9A6E"
+                    >
+                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                    </svg>
+                  )}
+                  <span
+                    style={{
+                      fontSize: "1.1rem",
+                      color: addonPaid ? "#2D9A6E" : "#C9A84C",
+                      fontWeight: 700,
+                      fontFamily: "'Playfair Display',serif",
+                    }}
+                  >
+                    Rs.{Math.round(remainingAmount).toLocaleString()}
+                  </span>
+                </div>
               </div>
             </div>
             <div
@@ -992,27 +1138,85 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               </span>
             </div>
           </div>
-          <button
-            onClick={downloadInvoice}
-            style={{
-              width: "100%",
-              padding: 12,
-              background: "#0F1923",
-              color: "#C9A84C",
-              border: "none",
-              borderRadius: 8,
-              fontFamily: "inherit",
-              fontWeight: 600,
-              fontSize: "0.88rem",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-            }}
-          >
-            <DownloadIcon size={15} color="#C9A84C" /> Download Invoice (PDF)
-          </button>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={downloadInvoice}
+              style={{
+                flex: 1,
+                padding: 12,
+                background: "#0F1923",
+                color: "#C9A84C",
+                border: "none",
+                borderRadius: 8,
+                fontFamily: "inherit",
+                fontWeight: 600,
+                fontSize: "0.82rem",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+              }}
+            >
+              <DownloadIcon size={14} color="#C9A84C" /> Download Invoice
+            </button>
+            <button
+              onClick={() => setAddonPaid(!addonPaid)}
+              style={{
+                flex: 1,
+                padding: 12,
+                borderRadius: 8,
+                fontFamily: "inherit",
+                fontWeight: 700,
+                fontSize: "0.88rem",
+                cursor: addonTotal > 0 ? "pointer" : "not-allowed",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                border: "none",
+                transition: "all 0.2s",
+                background: addonPaid
+                  ? "#2D9A6E"
+                  : addonTotal > 0
+                    ? "#C9A84C"
+                    : "#E9ECEF",
+                color: addonPaid
+                  ? "#fff"
+                  : addonTotal > 0
+                    ? "#0F1923"
+                    : "#868E96",
+                opacity: addonTotal > 0 ? 1 : 0.6,
+              }}
+              disabled={addonTotal === 0}
+            >
+              {addonPaid ? (
+                <>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                  </svg>
+                  Add-ons Paid
+                </>
+              ) : (
+                <>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />
+                  </svg>
+                  Mark as Paid
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
