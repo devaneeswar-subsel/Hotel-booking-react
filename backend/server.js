@@ -339,7 +339,8 @@ app.post("/api/auth/reset-password", async (req, res) => {
 app.get("/api/rooms", async (req, res) => {
   try {
     const { type, min_price, max_price, check_in, check_out } = req.query;
-    let q = "SELECT * FROM rooms WHERE is_available=1";
+    let q =
+      "SELECT room_id, room_number, room_type, price_per_night, capacity, description, image_url, is_available, created_at FROM rooms WHERE is_available=1";
     const p = [];
     if (type) {
       q += " AND room_type=?";
