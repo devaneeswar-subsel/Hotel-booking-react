@@ -36,7 +36,8 @@ app.use(
   }),
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser());
 
 // ─── JWT ─────────────────────────────────────────────────────────────────────
@@ -984,6 +985,23 @@ app.patch("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
     if (image_url !== undefined) {
       fields.push("image_url=?");
       values.push(image_url);
+    }
+    // ADD THESE 4 BLOCKS:
+    if (req.body.image2 !== undefined) {
+      fields.push("image2=?");
+      values.push(req.body.image2);
+    }
+    if (req.body.image3 !== undefined) {
+      fields.push("image3=?");
+      values.push(req.body.image3);
+    }
+    if (req.body.image4 !== undefined) {
+      fields.push("image4=?");
+      values.push(req.body.image4);
+    }
+    if (req.body.image5 !== undefined) {
+      fields.push("image5=?");
+      values.push(req.body.image5);
     }
     if (!fields.length)
       return res.status(400).json({ error: "No fields to update" });

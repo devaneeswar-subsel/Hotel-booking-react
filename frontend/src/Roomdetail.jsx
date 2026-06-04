@@ -1,6 +1,195 @@
 import React, { useState } from "react";
 import "./App.css";
 
+// ── SVG Icons ──────────────────────────────────────────────────────────────
+const IconBed = () => (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M2 9V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4" />
+    <path d="M2 9h20v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9z" />
+    <path d="M6 9V6" />
+    <path d="M18 9V6" />
+    <path d="M2 13h20" />
+  </svg>
+);
+const IconUsers = () => (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+const IconStar = () => (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="#F59E0B"
+    stroke="#F59E0B"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+const IconCheck = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+const IconArrowLeft = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <line x1="19" y1="12" x2="5" y2="12" />
+    <polyline points="12 19 5 12 12 5" />
+  </svg>
+);
+const IconShield = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+const IconBadge = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="12" cy="8" r="6" />
+    <path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11" />
+  </svg>
+);
+const IconTag = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+    <line x1="7" y1="7" x2="7.01" y2="7" />
+  </svg>
+);
+const IconClock = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
+  </svg>
+);
+const IconSmoke = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <line x1="1" y1="1" x2="23" y2="23" />
+    <path d="M20 15H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1z" />
+    <path d="M18 15V9" />
+  </svg>
+);
+const IconX = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+const IconCoffee = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
+    <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
+    <line x1="6" y1="1" x2="6" y2="4" />
+    <line x1="10" y1="1" x2="10" y2="4" />
+    <line x1="14" y1="1" x2="14" y2="4" />
+  </svg>
+);
+
+// ── Room Data ───────────────────────────────────────────────────────────────
 const ROOM_EXTRAS = {
   Standard: {
     amenities: [
@@ -96,6 +285,7 @@ const ROOM_EXTRAS = {
   },
 };
 
+// ── Component ───────────────────────────────────────────────────────────────
 export default function RoomDetail({
   room,
   user,
@@ -109,6 +299,15 @@ export default function RoomDetail({
     ? [room.image_url, ...extra.images.slice(1)]
     : extra.images;
 
+  const policies = [
+    { icon: <IconClock />, text: "Check-in from 2:00 PM" },
+    { icon: <IconClock />, text: "Check-out by 11:00 AM" },
+    { icon: <IconSmoke />, text: "Non-smoking room" },
+    { icon: <IconX />, text: "No pets allowed" },
+    { icon: <IconCheck />, text: "Free cancellation within 48 hrs" },
+    { icon: <IconCoffee />, text: "Breakfast available (extra charge)" },
+  ];
+
   return (
     <div
       style={{
@@ -117,19 +316,64 @@ export default function RoomDetail({
         fontFamily: "var(--font-body)",
       }}
     >
-      {/* TOP NAV */}
+      <style>{`
+        .rd-layout {
+          display: grid;
+          grid-template-columns: 1fr 360px;
+          gap: 2rem;
+          align-items: start;
+        }
+        .rd-sticky { position: sticky; top: 80px; }
+        .rd-main-img { height: 460px; }
+        .rd-policies-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px 16px;
+        }
+        .rd-nav { padding: 0 2rem; }
+        .rd-book-btn {
+          width: 100%;
+          padding: 15px;
+          background: #1a1a2e;
+          color: #ffffff;
+          border: none;
+          border-radius: 10px;
+          font-size: 1rem;
+          font-weight: 700;
+          cursor: pointer;
+          letter-spacing: 0.3px;
+          transition: background 0.2s, transform 0.15s;
+          font-family: var(--font-body);
+        }
+        .rd-book-btn:hover { background: #2d2d4e; transform: translateY(-1px); }
+        .rd-book-btn:active { transform: translateY(0); }
+        .rd-price-row:not(:last-child) { border-bottom: 1px solid var(--c-border); }
+        @media (max-width: 768px) {
+          .rd-layout { grid-template-columns: 1fr; }
+          .rd-sticky { position: static; order: -1; }
+          .rd-main-img { height: 260px; }
+          .rd-policies-grid { grid-template-columns: 1fr; }
+          .rd-nav { padding: 0 1rem; }
+          .rd-content { padding: 1rem !important; }
+        }
+        @media (max-width: 480px) {
+          .rd-main-img { height: 210px; }
+        }
+      `}</style>
+
+      {/* ── TOP NAV ── */}
       <div
+        className="rd-nav"
         style={{
           position: "sticky",
           top: 0,
           zIndex: 100,
           background: "#fff",
           borderBottom: "1px solid var(--c-border)",
-          padding: "0 2rem",
           height: "64px",
           display: "flex",
           alignItems: "center",
-          gap: "16px",
+          gap: "12px",
         }}
       >
         <button
@@ -137,19 +381,20 @@ export default function RoomDetail({
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "8px",
+            gap: "6px",
             background: "none",
             border: "1.5px solid var(--c-border)",
             borderRadius: "8px",
-            padding: "8px 16px",
+            padding: "8px 14px",
             cursor: "pointer",
             fontFamily: "var(--font-body)",
-            fontSize: "0.875rem",
+            fontSize: "0.85rem",
             color: "var(--c-dark)",
             transition: "all 0.2s",
+            whiteSpace: "nowrap",
           }}
         >
-          ← Back to Rooms
+          <IconArrowLeft /> Back to Rooms
         </button>
         <div
           style={{
@@ -157,80 +402,81 @@ export default function RoomDetail({
             fontWeight: 700,
             fontSize: "1rem",
             color: "var(--c-dark)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
           {room.room_type} — Room {room.room_number || room.room_id}
         </div>
       </div>
 
-      <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "2rem" }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 380px",
-            gap: "2rem",
-            alignItems: "start",
-          }}
-        >
-          {/* LEFT — IMAGES */}
+      {/* ── MAIN CONTENT ── */}
+      <div
+        className="rd-content"
+        style={{ maxWidth: "1100px", margin: "0 auto", padding: "2rem" }}
+      >
+        <div className="rd-layout">
+          {/* ── LEFT: IMAGES + INFO ── */}
           <div>
-            {/* Main Image */}
+            {/* Main image */}
             <div
+              className="rd-main-img"
               style={{
-                borderRadius: "var(--radius-lg)",
+                borderRadius: "14px",
                 overflow: "hidden",
-                height: "460px",
-                marginBottom: "12px",
+                marginBottom: "10px",
                 position: "relative",
               }}
             >
               <img
                 src={images[activeImg]}
                 alt={room.room_type}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  transition: "opacity 0.3s",
-                }}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
               <div
                 style={{
                   position: "absolute",
-                  top: "16px",
-                  left: "16px",
-                  background: "rgba(108,99,255,0.9)",
+                  top: "14px",
+                  left: "14px",
+                  background: "var(--c-primary)",
                   color: "#fff",
                   padding: "4px 14px",
                   borderRadius: "20px",
-                  fontSize: "0.8rem",
+                  fontSize: "0.78rem",
                   fontWeight: 700,
-                  backdropFilter: "blur(4px)",
                 }}
               >
                 {room.room_type}
               </div>
             </div>
 
-            {/* Thumbnail Strip */}
-            <div style={{ display: "flex", gap: "10px" }}>
+            {/* Thumbnails */}
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                overflowX: "auto",
+                paddingBottom: "4px",
+              }}
+            >
               {images.map((img, i) => (
                 <div
                   key={i}
                   onClick={() => setActiveImg(i)}
                   style={{
-                    width: "80px",
-                    height: "60px",
-                    borderRadius: "10px",
+                    width: "78px",
+                    height: "58px",
+                    borderRadius: "8px",
                     overflow: "hidden",
                     cursor: "pointer",
                     flexShrink: 0,
                     border:
                       activeImg === i
-                        ? "3px solid var(--c-primary)"
+                        ? "2.5px solid var(--c-primary)"
                         : "2px solid transparent",
-                    transition: "border 0.2s",
-                    opacity: activeImg === i ? 1 : 0.7,
+                    opacity: activeImg === i ? 1 : 0.6,
+                    transition: "all 0.2s",
                   }}
                 >
                   <img
@@ -246,23 +492,25 @@ export default function RoomDetail({
               ))}
             </div>
 
-            {/* Room Info */}
+            {/* Room title + desc */}
             <div style={{ marginTop: "2rem" }}>
-              <div
+              <h2
                 style={{
                   fontFamily: "var(--font-display)",
                   fontSize: "1.5rem",
                   fontWeight: 700,
                   marginBottom: "8px",
+                  color: "var(--c-dark)",
                 }}
               >
                 Room {room.room_number || room.room_id} — {room.room_type}
-              </div>
+              </h2>
               <p
                 style={{
                   color: "var(--c-muted)",
-                  lineHeight: 1.7,
-                  marginBottom: "1.5rem",
+                  lineHeight: 1.75,
+                  marginBottom: "1.75rem",
+                  fontSize: "0.92rem",
                 }}
               >
                 {room.description ||
@@ -270,33 +518,38 @@ export default function RoomDetail({
               </p>
 
               {/* Amenities */}
-              <div
+              <h3
                 style={{
                   fontFamily: "var(--font-display)",
                   fontWeight: 700,
                   fontSize: "1rem",
-                  marginBottom: "12px",
+                  marginBottom: "14px",
+                  color: "var(--c-dark)",
                 }}
               >
                 Room Amenities
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+              </h3>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 {extra.amenities.map((a, i) => (
                   <div
                     key={i}
                     style={{
                       background: "#F3F4FF",
                       color: "var(--c-primary)",
-                      padding: "6px 14px",
-                      borderRadius: "20px",
+                      padding: "7px 14px",
+                      borderRadius: "8px",
                       fontSize: "0.8rem",
                       fontWeight: 600,
                       display: "flex",
                       alignItems: "center",
                       gap: "6px",
+                      border: "1px solid #E0E1FF",
                     }}
                   >
-                    ✓ {a}
+                    <span style={{ color: "var(--c-primary)" }}>
+                      <IconCheck />
+                    </span>
+                    {a}
                   </div>
                 ))}
               </div>
@@ -306,93 +559,121 @@ export default function RoomDetail({
                 style={{
                   marginTop: "2rem",
                   background: "#fff",
-                  borderRadius: "var(--radius-md)",
+                  borderRadius: "12px",
                   border: "1px solid var(--c-border)",
                   padding: "1.25rem",
                 }}
               >
-                <div
+                <h3
                   style={{
                     fontFamily: "var(--font-display)",
                     fontWeight: 700,
                     fontSize: "1rem",
-                    marginBottom: "12px",
+                    marginBottom: "14px",
+                    color: "var(--c-dark)",
                   }}
                 >
                   Hotel Policies
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "10px",
-                    fontSize: "0.85rem",
-                    color: "var(--c-muted)",
-                  }}
-                >
-                  <div>🕐 Check-in: 2:00 PM</div>
-                  <div>🕐 Check-out: 11:00 AM</div>
-                  <div>🚭 Non-smoking room</div>
-                  <div>🐾 No pets allowed</div>
-                  <div>❌ No cancellation fee if cancelled 48hrs prior</div>
-                  <div>🍳 Breakfast available at extra cost</div>
+                </h3>
+                <div className="rd-policies-grid">
+                  {policies.map((p, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "8px",
+                        fontSize: "0.83rem",
+                        color: "var(--c-muted)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: "var(--c-primary)",
+                          marginTop: "1px",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {p.icon}
+                      </span>
+                      {p.text}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* RIGHT — BOOKING CARD */}
-          <div style={{ position: "sticky", top: "80px" }}>
+          {/* ── RIGHT: BOOKING CARD ── */}
+          <div className="rd-sticky">
             <div
               style={{
                 background: "#fff",
-                borderRadius: "var(--radius-md)",
+                borderRadius: "16px",
                 border: "1px solid var(--c-border)",
-                boxShadow: "var(--shadow-md)",
+                boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
                 overflow: "hidden",
               }}
             >
-              {/* Price Header */}
+              {/* Price block — dark background so text is always visible */}
               <div
                 style={{
-                  background:
-                    "linear-gradient(135deg, var(--c-primary) 0%, #43C6AC 100%)",
-                  padding: "1.5rem",
+                  background: "#1a1a2e",
+                  padding: "1.5rem 1.5rem 1.25rem",
                 }}
               >
                 <div
                   style={{
-                    color: "rgba(255,255,255,0.8)",
-                    fontSize: "0.8rem",
-                    marginBottom: "4px",
+                    fontSize: "0.72rem",
+                    fontWeight: 600,
+                    color: "rgba(255,255,255,0.5)",
+                    letterSpacing: "0.8px",
+                    textTransform: "uppercase",
+                    marginBottom: "6px",
                   }}
                 >
                   Starting from
                 </div>
                 <div
                   style={{
-                    fontFamily: "var(--font-display)",
-                    fontSize: "2.2rem",
-                    fontWeight: 800,
-                    color: "#fff",
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "6px",
                   }}
                 >
-                  ₹{Number(room.price_per_night).toLocaleString()}
                   <span
-                    style={{ fontSize: "1rem", fontWeight: 400, opacity: 0.8 }}
+                    style={{
+                      fontFamily: "var(--font-display)",
+                      fontSize: "2.4rem",
+                      fontWeight: 800,
+                      color: "#fff",
+                      lineHeight: 1,
+                    }}
                   >
-                    {" "}
+                    ₹{Number(room.price_per_night).toLocaleString()}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "0.85rem",
+                      color: "rgba(255,255,255,0.5)",
+                      fontWeight: 400,
+                    }}
+                  >
                     /night
                   </span>
                 </div>
                 <div
                   style={{
-                    color: "rgba(255,255,255,0.7)",
-                    fontSize: "0.8rem",
-                    marginTop: "4px",
+                    marginTop: "10px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    color: "rgba(255,255,255,0.55)",
+                    fontSize: "0.78rem",
                   }}
                 >
-                  👤 Up to {room.capacity || 2} guests
+                  <IconUsers />
+                  Up to {room.capacity || 2} guests
                 </div>
               </div>
 
@@ -405,33 +686,48 @@ export default function RoomDetail({
                 }}
               >
                 {[
-                  { icon: "🛏", label: "Type", val: room.room_type },
-                  { icon: "👤", label: "Guests", val: room.capacity || 2 },
-                  { icon: "⭐", label: "Rating", val: "4.9" },
+                  { icon: <IconBed />, label: "Type", val: room.room_type },
+                  {
+                    icon: <IconUsers />,
+                    label: "Guests",
+                    val: room.capacity || 2,
+                  },
+                  { icon: <IconStar />, label: "Rating", val: "4.9" },
                 ].map((s, i) => (
                   <div
                     key={i}
                     style={{
-                      padding: "14px",
+                      padding: "14px 10px",
                       textAlign: "center",
                       borderRight: i < 2 ? "1px solid var(--c-border)" : "none",
                     }}
                   >
-                    <div style={{ fontSize: "1.2rem" }}>{s.icon}</div>
                     <div
                       style={{
-                        fontSize: "0.7rem",
+                        display: "flex",
+                        justifyContent: "center",
+                        color: "var(--c-primary)",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      {s.icon}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.67rem",
                         color: "var(--c-muted)",
-                        marginTop: "2px",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.4px",
                       }}
                     >
                       {s.label}
                     </div>
                     <div
                       style={{
-                        fontSize: "0.8rem",
+                        fontSize: "0.82rem",
                         fontWeight: 700,
                         color: "var(--c-dark)",
+                        marginTop: "2px",
                       }}
                     >
                       {s.val}
@@ -440,16 +736,10 @@ export default function RoomDetail({
                 ))}
               </div>
 
-              {/* Book Button */}
-              <div style={{ padding: "1.25rem" }}>
+              {/* Book button */}
+              <div style={{ padding: "1.25rem 1.25rem 0.75rem" }}>
                 <button
-                  className="book-btn"
-                  style={{
-                    width: "100%",
-                    fontSize: "1rem",
-                    padding: "14px",
-                    marginTop: 0,
-                  }}
+                  className="rd-book-btn"
                   onClick={() => {
                     if (!user) {
                       onAuthPrompt();
@@ -458,37 +748,40 @@ export default function RoomDetail({
                     onBook(room);
                   }}
                 >
-                  Book Now →
+                  Book Now
                 </button>
                 <p
                   style={{
                     textAlign: "center",
-                    fontSize: "0.75rem",
+                    fontSize: "0.73rem",
                     color: "var(--c-muted)",
-                    marginTop: "10px",
+                    marginTop: "8px",
                   }}
                 >
                   Free cancellation · No hidden charges
                 </p>
               </div>
 
-              {/* Price Breakdown */}
+              {/* Price Estimate */}
               <div style={{ padding: "0 1.25rem 1.25rem" }}>
                 <div
                   style={{
-                    background: "#F9FAFF",
+                    background: "#F8F9FF",
                     borderRadius: "10px",
-                    padding: "12px",
+                    overflow: "hidden",
+                    border: "1px solid var(--c-border)",
                   }}
                 >
                   <div
                     style={{
-                      fontSize: "0.75rem",
+                      padding: "10px 14px",
+                      borderBottom: "1px solid var(--c-border)",
+                      fontSize: "0.7rem",
                       fontWeight: 700,
                       color: "var(--c-muted)",
-                      marginBottom: "8px",
                       textTransform: "uppercase",
-                      letterSpacing: "0.5px",
+                      letterSpacing: "0.6px",
+                      background: "#F0F1FA",
                     }}
                   >
                     Price Estimate
@@ -496,18 +789,19 @@ export default function RoomDetail({
                   {[1, 2, 3, 5, 7].map((n) => (
                     <div
                       key={n}
+                      className="rd-price-row"
                       style={{
                         display: "flex",
                         justifyContent: "space-between",
-                        fontSize: "0.8rem",
-                        padding: "3px 0",
-                        color: "var(--c-muted)",
+                        alignItems: "center",
+                        padding: "9px 14px",
+                        fontSize: "0.82rem",
                       }}
                     >
-                      <span>
+                      <span style={{ color: "var(--c-muted)" }}>
                         {n} night{n > 1 ? "s" : ""}
                       </span>
-                      <span style={{ fontWeight: 600, color: "var(--c-dark)" }}>
+                      <span style={{ fontWeight: 700, color: "var(--c-dark)" }}>
                         ₹{(room.price_per_night * n).toLocaleString()}
                       </span>
                     </div>
@@ -521,20 +815,28 @@ export default function RoomDetail({
               style={{
                 display: "flex",
                 justifyContent: "center",
-                gap: "16px",
-                marginTop: "16px",
+                gap: "20px",
+                marginTop: "14px",
               }}
             >
-              {["🔒 Secure", "✅ Verified", "🏆 Best Price"].map((b, i) => (
+              {[
+                { icon: <IconShield />, label: "Secure" },
+                { icon: <IconBadge />, label: "Verified" },
+                { icon: <IconTag />, label: "Best Price" },
+              ].map((b, i) => (
                 <div
                   key={i}
                   style={{
-                    fontSize: "0.75rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    fontSize: "0.73rem",
                     color: "var(--c-muted)",
                     fontWeight: 500,
                   }}
                 >
-                  {b}
+                  <span style={{ color: "var(--c-primary)" }}>{b.icon}</span>
+                  {b.label}
                 </div>
               ))}
             </div>

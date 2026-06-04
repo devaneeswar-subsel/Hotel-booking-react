@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from "react";
-import {
+import React, { useState, useEffect, useRef } from "react";import {
   TrendingUpIcon,
   BedIcon,
   UsersIcon,
@@ -2005,25 +2004,166 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   );
 }
 
-/* ── EDIT ROOM MODAL ── */
+// ═══════════════════════════════════════════════════════════════════
+// PATCH FOR AdminDashboard.jsx
+// ---------------------------------------------------------------
+// STEP 1: Add `useRef` to the React import at the top (line 1):
+//   import React, { useState, useEffect, useRef } from "react";
+//
+// STEP 2: Delete the entire old `EditRoomModal` function
+//   (from `/* ── EDIT ROOM MODAL ── */` down to its closing `}`)
+//
+// STEP 3: Paste EVERYTHING below this comment block in its place.
+// ═══════════════════════════════════════════════════════════════════
+
+/* ── helpers: file → base64 ── */
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ── single image upload slot ── */
+function ImageSlot({ index, value, onChange, isMain }) {
+  const [mode, setMode] = useState("idle");
+  const [urlInput, setUrlInput] = useState("");
+  const [dragging, setDragging] = useState(false);
+  const fileRef = useRef();
+
+  async function handleFile(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const b64 = await fileToBase64(file);
+    onChange(b64);
+    setMode("idle");
+  }
+
+  function applyUrl() {
+    if (!urlInput.trim()) return;
+    onChange(urlInput.trim());
+    setUrlInput("");
+    setMode("idle");
+  }
+
+  const slotLabel = isMain ? "Main Photo" : `Photo ${index + 1}`;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      {/* Label */}
+      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        {isMain && (
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="#C9A84C">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+        )}
+        <span style={{ fontSize: "0.6rem", fontWeight: 700, color: isMain ? "#C9A84C" : "#868E96", textTransform: "uppercase", letterSpacing: "0.8px" }}>
+          {slotLabel}
+        </span>
+      </div>
+
+      {/* Box */}
+      <div
+        style={{ width: "100%", aspectRatio: isMain ? "16/9" : "4/3", borderRadius: 10, overflow: "hidden", border: dragging ? "2px dashed #C9A84C" : "1.5px solid #E9ECEF", background: "#F8F9FA", position: "relative", transition: "border-color 0.2s" }}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={async (e) => { e.preventDefault(); setDragging(false); await handleFile(e.dataTransfer.files[0]); }}
+      >
+        {/* PREVIEW */}
+        {value && (
+          <>
+            <img src={value} alt={slotLabel} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.style.display = "none"; }} />
+            {isMain && (
+              <div style={{ position: "absolute", top: 8, left: 8, background: "rgba(201,168,76,0.92)", color: "#fff", fontSize: "0.58rem", fontWeight: 700, letterSpacing: "0.8px", padding: "3px 8px", borderRadius: 4, textTransform: "uppercase" }}>Main</div>
+            )}
+            {/* Hover actions */}
+            <div style={{ position: "absolute", bottom: 6, right: 6, display: "flex", gap: 5 }}>
+              <button onClick={() => fileRef.current.click()} title="Replace"
+                style={{ background: "rgba(15,25,35,0.75)", border: "none", borderRadius: 6, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+                </svg>
+              </button>
+              <button onClick={() => onChange("")} title="Remove"
+                style={{ background: "rgba(192,57,43,0.8)", border: "none", borderRadius: 6, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" />
+                </svg>
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* EMPTY STATE */}
+        {!value && mode === "idle" && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 10 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#CED4DA" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+            </svg>
+            <div style={{ fontSize: "0.65rem", color: "#ADB5BD", textAlign: "center" }}>{isMain ? "Main photo" : "Add photo"}</div>
+            <div style={{ display: "flex", gap: 5 }}>
+              <button onClick={() => fileRef.current.click()} style={{ padding: "4px 10px", borderRadius: 20, border: "none", background: "#0F1923", color: "#fff", fontSize: "0.65rem", fontWeight: 600, cursor: "pointer" }}>Upload</button>
+              <button onClick={() => setMode("url")} style={{ padding: "4px 10px", borderRadius: 20, border: "1.5px solid #E9ECEF", background: "#fff", color: "#495057", fontSize: "0.65rem", fontWeight: 600, cursor: "pointer" }}>URL</button>
+            </div>
+          </div>
+        )}
+
+        {/* URL INPUT */}
+        {!value && mode === "url" && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 7, padding: 10 }}>
+            <div style={{ fontSize: "0.65rem", color: "#868E96", fontWeight: 600 }}>Paste image URL</div>
+            <input autoFocus value={urlInput} onChange={(e) => setUrlInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyUrl()} placeholder="https://..."
+              style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1.5px solid #C9A84C", fontSize: "0.7rem", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+            <div style={{ display: "flex", gap: 5 }}>
+              <button onClick={applyUrl} style={{ padding: "4px 12px", borderRadius: 20, border: "none", background: "#0F1923", color: "#C9A84C", fontSize: "0.65rem", fontWeight: 600, cursor: "pointer" }}>Apply</button>
+              <button onClick={() => setMode("idle")} style={{ padding: "4px 12px", borderRadius: 20, border: "1.5px solid #E9ECEF", background: "#fff", color: "#495057", fontSize: "0.65rem", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Hidden file input */}
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
+        onChange={async (e) => { await handleFile(e.target.files[0]); e.target.value = ""; }} />
+    </div>
+  );
+}
+
+/* ── EDIT ROOM MODAL — 5-slot image upload ── */
 function EditRoomModal({ room, onClose, showToast, onRefresh }) {
   const [form, setForm] = useState({
-    room_number: room.room_number || "",
-    room_type: room.room_type || "",
-    price_per_night: room.price_per_night || "",
-    capacity: room.capacity || 2,
-    description: room.description || "",
-    image_url: room.image_url || "",
-    is_available: room.is_available,
+    room_number:    room.room_number    || "",
+    room_type:      room.room_type      || "",
+    price_per_night:room.price_per_night|| "",
+    capacity:       room.capacity       || 2,
+    description:    room.description   || "",
+    is_available:   room.is_available,
   });
+  const [images, setImages] = useState([
+    room.image_url || "",
+    room.image2    || "",
+    room.image3    || "",
+    room.image4    || "",
+    room.image5    || "",
+  ]);
   const [loading, setLoading] = useState(false);
+
+  function setImage(i, val) {
+    setImages((prev) => { const n = [...prev]; n[i] = val; return n; });
+  }
 
   async function save() {
     setLoading(true);
-    const res = await apiFetch(`/api/admin/rooms/${room.room_id}`, {
-      method: "PATCH",
-      body: JSON.stringify(form),
-    });
+    const payload = {
+      ...form,
+      image_url: images[0],
+      image2:    images[1],
+      image3:    images[2],
+      image4:    images[3],
+      image5:    images[4],
+    };
+    const res = await apiFetch(`/api/admin/rooms/${room.room_id}`, { method: "PATCH", body: JSON.stringify(payload) });
     const data = await res.json();
     setLoading(false);
     if (!res.ok) return showToast(data.error, "error");
@@ -2032,234 +2172,91 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
     onClose();
   }
 
-  const iStyle = {
-    width: "100%",
-    padding: "9px 12px",
-    borderRadius: 6,
-    border: "1.5px solid #E9ECEF",
-    fontSize: "0.85rem",
-    fontFamily: "inherit",
-    color: "#212529",
-    boxSizing: "border-box",
-  };
-  const lStyle = {
-    display: "block",
-    fontSize: "0.62rem",
-    fontWeight: 700,
-    color: "#868E96",
-    marginBottom: 5,
-    letterSpacing: "0.8px",
-    textTransform: "uppercase",
-  };
+  const iStyle = { width: "100%", padding: "9px 12px", borderRadius: 6, border: "1.5px solid #E9ECEF", fontSize: "0.85rem", fontFamily: "inherit", color: "#212529", boxSizing: "border-box" };
+  const lStyle = { display: "block", fontSize: "0.62rem", fontWeight: 700, color: "#868E96", marginBottom: 5, letterSpacing: "0.8px", textTransform: "uppercase" };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(15,25,35,0.7)",
-        zIndex: 700,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "1rem",
-        backdropFilter: "blur(6px)",
-      }}
-    >
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 20,
-          width: "100%",
-          maxWidth: 480,
-          boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            background: "#0F1923",
-            padding: "20px 24px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <div
-            style={{
-              fontFamily: "'Playfair Display', serif",
-              fontSize: "1rem",
-              fontWeight: 600,
-              color: "#fff",
-            }}
-          >
-            Edit Room #{room.room_number || room.room_id}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,25,35,0.75)", zIndex: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", backdropFilter: "blur(6px)" }}>
+      <div style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 600, maxHeight: "92vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 24px 64px rgba(0,0,0,0.28)" }}>
+
+        {/* Header */}
+        <div style={{ background: "#0F1923", padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1rem", fontWeight: 600, color: "#fff" }}>Edit Room #{room.room_number || room.room_id}</div>
+            <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Upload photos or paste URLs · drag &amp; drop supported</div>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "rgba(255,255,255,0.1)",
-              border: "none",
-              width: 30,
-              height: 30,
-              borderRadius: "50%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-            }}
-          >
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.1)", border: "none", width: 30, height: 30, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
             <XIcon size={13} color="#fff" />
           </button>
         </div>
-        <div style={{ padding: "22px 24px" }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 12,
-              marginBottom: 12,
-            }}
-          >
+
+        {/* Scrollable body */}
+        <div style={{ overflowY: "auto", flex: 1, padding: "20px 24px" }}>
+
+          {/* ── IMAGES ── */}
+          <div style={{ background: "#F8F9FA", borderRadius: 12, padding: 14, marginBottom: 18, border: "1px solid #E9ECEF" }}>
+            <div style={{ fontSize: "0.65rem", fontWeight: 700, color: "#495057", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 12 }}>
+              Room Photos — upload file, paste URL, or drag &amp; drop
+            </div>
+            {/* Main — full width */}
+            <div style={{ marginBottom: 10 }}>
+              <ImageSlot index={0} value={images[0]} onChange={(v) => setImage(0, v)} isMain={true} />
+            </div>
+            {/* 4 thumbnails */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+              {[1, 2, 3, 4].map((i) => (
+                <ImageSlot key={i} index={i} value={images[i]} onChange={(v) => setImage(i, v)} isMain={false} />
+              ))}
+            </div>
+            <div style={{ marginTop: 8, fontSize: "0.62rem", color: "#ADB5BD", lineHeight: 1.5 }}>
+              JPG, PNG, WebP supported. Files are converted to base64 and stored securely.
+            </div>
+          </div>
+
+          {/* ── ROOM FIELDS ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
             <div>
               <label style={lStyle}>Room Number</label>
-              <input
-                style={iStyle}
-                value={form.room_number}
-                onChange={(e) =>
-                  setForm({ ...form, room_number: e.target.value })
-                }
-              />
+              <input style={iStyle} value={form.room_number} onChange={(e) => setForm({ ...form, room_number: e.target.value })} />
             </div>
             <div>
               <label style={lStyle}>Room Type</label>
-              <select
-                style={iStyle}
-                value={form.room_type}
-                onChange={(e) =>
-                  setForm({ ...form, room_type: e.target.value })
-                }
-              >
-                {["Standard", "Deluxe", "Suite", "Luxury", "Presidential"].map(
-                  (t) => (
-                    <option key={t}>{t}</option>
-                  ),
-                )}
+              <select style={iStyle} value={form.room_type} onChange={(e) => setForm({ ...form, room_type: e.target.value })}>
+                {["Standard", "Deluxe", "Suite", "Luxury", "Presidential"].map((t) => <option key={t}>{t}</option>)}
               </select>
             </div>
           </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 12,
-              marginBottom: 12,
-            }}
-          >
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
             <div>
               <label style={lStyle}>Price / Night (₹)</label>
-              <input
-                style={iStyle}
-                type="number"
-                value={form.price_per_night}
-                onChange={(e) =>
-                  setForm({ ...form, price_per_night: e.target.value })
-                }
-              />
+              <input style={iStyle} type="number" value={form.price_per_night} onChange={(e) => setForm({ ...form, price_per_night: e.target.value })} />
             </div>
             <div>
               <label style={lStyle}>Capacity</label>
-              <input
-                style={iStyle}
-                type="number"
-                min={1}
-                max={10}
-                value={form.capacity}
-                onChange={(e) => setForm({ ...form, capacity: e.target.value })}
-              />
+              <input style={iStyle} type="number" min={1} max={10} value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
             </div>
           </div>
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 14 }}>
             <label style={lStyle}>Description</label>
-            <textarea
-              style={{ ...iStyle, resize: "vertical", minHeight: 60 }}
-              value={form.description}
-              onChange={(e) =>
-                setForm({ ...form, description: e.target.value })
-              }
-            />
+            <textarea style={{ ...iStyle, resize: "vertical", minHeight: 64 }} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={lStyle}>Image URL</label>
-            <input
-              style={iStyle}
-              value={form.image_url}
-              onChange={(e) => setForm({ ...form, image_url: e.target.value })}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              marginBottom: 20,
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
             <label style={{ ...lStyle, margin: 0 }}>Status:</label>
             <button
-              onClick={() =>
-                setForm({ ...form, is_available: form.is_available ? 0 : 1 })
-              }
-              style={{
-                background: form.is_available ? "#E8F8F0" : "#FDECEA",
-                color: form.is_available ? "#2D9A6E" : "#C0392B",
-                border: `1.5px solid ${form.is_available ? "#2D9A6E" : "#C0392B"}`,
-                borderRadius: 6,
-                padding: "5px 14px",
-                fontSize: "0.78rem",
-                fontWeight: 700,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {form.is_available ? "✅ Available" : "🚫 Blocked"}
+              onClick={() => setForm({ ...form, is_available: form.is_available ? 0 : 1 })}
+              style={{ background: form.is_available ? "#E8F8F0" : "#FDECEA", color: form.is_available ? "#2D9A6E" : "#C0392B", border: `1.5px solid ${form.is_available ? "#2D9A6E" : "#C0392B"}`, borderRadius: 6, padding: "5px 14px", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              {form.is_available ? "Available" : "Blocked"}
             </button>
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              onClick={onClose}
-              style={{
-                flex: 1,
-                padding: 10,
-                background: "transparent",
-                border: "1.5px solid #E9ECEF",
-                borderRadius: 6,
-                fontSize: "0.85rem",
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={save}
-              disabled={loading}
-              style={{
-                flex: 2,
-                padding: 10,
-                background: "#0F1923",
-                color: "#fff",
-                border: "none",
-                borderRadius: 6,
-                fontSize: "0.85rem",
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {loading ? "Saving..." : "Save Changes"}
-            </button>
-          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "14px 24px", borderTop: "1px solid #E9ECEF", display: "flex", gap: 10, flexShrink: 0 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 10, background: "transparent", border: "1.5px solid #E9ECEF", borderRadius: 8, fontSize: "0.85rem", cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+          <button onClick={save} disabled={loading}
+            style={{ flex: 2, padding: 10, background: loading ? "#868E96" : "#0F1923", color: loading ? "#fff" : "#C9A84C", border: "none", borderRadius: 8, fontSize: "0.88rem", fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+            {loading ? "Saving..." : "Save Changes"}
+          </button>
         </div>
       </div>
     </div>
