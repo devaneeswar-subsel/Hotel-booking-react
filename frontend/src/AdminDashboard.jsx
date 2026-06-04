@@ -2018,10 +2018,26 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
 
 /* ── helpers: file → base64 ── */
 function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 800;
+        let w = img.width,
+          h = img.height;
+        if (w > MAX) {
+          h = (h * MAX) / w;
+          w = MAX;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
+      };
+      img.src = e.target.result;
+    };
     reader.readAsDataURL(file);
   });
 }
