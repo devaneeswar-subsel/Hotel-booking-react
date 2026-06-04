@@ -200,8 +200,7 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
       <div
         className="hero"
         style={{
-          backgroundImage:
-            "url('https://images.unsplash.com/photo-1566073771259-6a8506099945?w=1800')",
+          backgroundImage: "url('/hotel-hero.webp')",
         }}
       >
         <div className="hero-overlay" />
@@ -215,7 +214,9 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
           <h1>
             Where Luxury
             <br />
-            Meets <em>Comfort</em>
+            Meets
+            <br />
+            <em>Comfort</em>
           </h1>
 
           <p className="hero-sub">
