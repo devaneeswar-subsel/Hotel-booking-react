@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
 import { MapPinIcon } from "./Icons";
+
 const API = process.env.REACT_APP_API_URL;
 
 const STATIC_REVIEWS = [
@@ -29,7 +30,6 @@ const STATIC_REVIEWS = [
 
 export default function Testimonials() {
   const [reviews, setReviews] = useState([]);
-  const [expanded, setExpanded] = useState(null);
 
   useEffect(() => {
     fetch(`${API}/api/reviews`)
@@ -57,103 +57,98 @@ export default function Testimonials() {
           isReal: true,
         }))
       : STATIC_REVIEWS
-  ).slice(0, 5); // max 5 reviews
+  ).slice(0, 3); // only 3 most recent
 
   const avgRating =
     reviews.length > 0
       ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1)
       : "5.0";
 
-  const totalReviews =
-    reviews.length > 0 ? reviews.length : STATIC_REVIEWS.length;
-
   return (
     <div className="section">
       {/* Header */}
-      <div style={{ marginBottom: 40 }}>
-        <div className="section-eyebrow">
-          <span>Guest Reviews</span>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 16,
-          }}
-        >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 16,
+          marginBottom: 40,
+        }}
+      >
+        <div>
+          <div className="section-eyebrow">
+            <span>Guest Reviews</span>
+          </div>
           <h2 className="section-title" style={{ marginBottom: 0 }}>
             Words from <em>Our Guests</em>
           </h2>
-          {/* Rating Summary */}
+        </div>
+        {/* Rating badge */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            background: "var(--navy)",
+            padding: "12px 20px",
+            borderRadius: 12,
+            flexShrink: 0,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: "2rem",
+                fontWeight: 700,
+                color: "#fff",
+                lineHeight: 1,
+              }}
+            >
+              {avgRating}
+            </div>
+            <div style={{ display: "flex", gap: 2, marginTop: 4 }}>
+              {[1, 2, 3, 4, 5].map((s) => (
+                <span key={s} style={{ color: "#C9A84C", fontSize: "0.75rem" }}>
+                  ★
+                </span>
+              ))}
+            </div>
+          </div>
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              background: "var(--navy)",
-              padding: "12px 20px",
-              borderRadius: 12,
-              flexShrink: 0,
+              width: 1,
+              height: 36,
+              background: "rgba(255,255,255,0.12)",
             }}
-          >
-            <div>
-              <div
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: "2rem",
-                  fontWeight: 700,
-                  color: "#fff",
-                  lineHeight: 1,
-                }}
-              >
-                {avgRating}
-              </div>
-              <div style={{ display: "flex", gap: 2, marginTop: 4 }}>
-                {[1, 2, 3, 4, 5].map((s) => (
-                  <span
-                    key={s}
-                    style={{ color: "#C9A84C", fontSize: "0.75rem" }}
-                  >
-                    ★
-                  </span>
-                ))}
-              </div>
+          />
+          <div>
+            <div
+              style={{ fontSize: "0.78rem", fontWeight: 700, color: "#fff" }}
+            >
+              {reviews.length || STATIC_REVIEWS.length} Reviews
             </div>
             <div
               style={{
-                width: 1,
-                height: 36,
-                background: "rgba(255,255,255,0.12)",
+                fontSize: "0.65rem",
+                color: "rgba(255,255,255,0.4)",
+                marginTop: 2,
               }}
-            />
-            <div>
-              <div
-                style={{ fontSize: "0.78rem", fontWeight: 700, color: "#fff" }}
-              >
-                {totalReviews} Reviews
-              </div>
-              <div
-                style={{
-                  fontSize: "0.65rem",
-                  color: "rgba(255,255,255,0.4)",
-                  marginTop: 2,
-                }}
-              >
-                Verified Guests
-              </div>
+            >
+              Verified Guests
             </div>
           </div>
         </div>
       </div>
 
-      {/* Reviews Grid — max height with scroll on mobile */}
+      {/* 3 Cards */}
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-          gap: 20,
+          gap: 24,
         }}
       >
         {displayReviews.map((t, i) => (
@@ -163,15 +158,14 @@ export default function Testimonials() {
               background: "#fff",
               border: "1px solid var(--gray-200)",
               borderRadius: 16,
-              padding: "24px",
+              padding: "28px 24px",
               boxShadow: "0 2px 12px rgba(15,25,35,0.06)",
               display: "flex",
               flexDirection: "column",
-              gap: 14,
-              transition: "transform 0.2s, box-shadow 0.2s",
-              cursor: "default",
+              gap: 16,
               position: "relative",
               overflow: "hidden",
+              transition: "transform 0.2s, box-shadow 0.2s",
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = "translateY(-4px)";
@@ -184,7 +178,7 @@ export default function Testimonials() {
                 "0 2px 12px rgba(15,25,35,0.06)";
             }}
           >
-            {/* Gold accent top bar */}
+            {/* Gold top bar */}
             <div
               style={{
                 position: "absolute",
@@ -192,90 +186,69 @@ export default function Testimonials() {
                 left: 0,
                 right: 0,
                 height: 3,
-                background: `linear-gradient(90deg, var(--gold), var(--gold-light))`,
-                opacity: t.isReal ? 1 : 0.4,
+                background:
+                  "linear-gradient(90deg, var(--gold), var(--gold-light))",
               }}
             />
 
-            {/* Stars */}
-            <div style={{ display: "flex", gap: 3, paddingTop: 4 }}>
-              {[1, 2, 3, 4, 5].map((s) => (
-                <span
-                  key={s}
-                  style={{
-                    color: s <= t.rating ? "#C9A84C" : "#E9ECEF",
-                    fontSize: "0.9rem",
-                  }}
-                >
-                  ★
-                </span>
-              ))}
-            </div>
-
-            {/* Review text — max height with clamp */}
+            {/* Quote + Stars */}
             <div
               style={{
-                maxHeight: expanded === i ? "none" : "80px",
-                overflow: "hidden",
-                position: "relative",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingTop: 4,
               }}
             >
-              <p
+              <span
                 style={{
-                  fontSize: "0.85rem",
-                  color: "var(--gray-600)",
-                  lineHeight: 1.75,
-                  fontStyle: "italic",
-                  margin: 0,
+                  fontFamily: "var(--font-display)",
+                  fontSize: "3rem",
+                  color: "var(--gold-light)",
+                  lineHeight: 0.8,
+                  userSelect: "none",
                 }}
               >
-                "{t.text}"
-              </p>
-              {/* Fade out if text is long */}
-              {t.text.length > 120 && expanded !== i && (
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: 32,
-                    background: "linear-gradient(transparent, #fff)",
-                  }}
-                />
-              )}
+                "
+              </span>
+              <div style={{ display: "flex", gap: 2 }}>
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <span
+                    key={s}
+                    style={{
+                      color: s <= t.rating ? "#C9A84C" : "#E9ECEF",
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    ★
+                  </span>
+                ))}
+              </div>
             </div>
 
-            {/* Read more / less */}
-            {t.text.length > 120 && (
-              <button
-                onClick={() => setExpanded(expanded === i ? null : i)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--gold-dark)",
-                  fontSize: "0.72rem",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  padding: 0,
-                  textAlign: "left",
-                  fontFamily: "var(--font-body)",
-                  letterSpacing: "0.5px",
-                }}
-              >
-                {expanded === i ? "Show less ↑" : "Read more ↓"}
-              </button>
-            )}
+            {/* Review text */}
+            <p
+              style={{
+                fontSize: "0.875rem",
+                color: "var(--gray-600)",
+                lineHeight: 1.75,
+                fontStyle: "italic",
+                flex: 1,
+                margin: 0,
+              }}
+            >
+              {t.text}
+            </p>
 
             {/* Divider */}
             <div style={{ height: 1, background: "var(--gray-100)" }} />
 
             {/* Author */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div
                 style={{
-                  width: 38,
-                  height: 38,
+                  width: 40,
+                  height: 40,
                   borderRadius: "50%",
                   background: "var(--navy)",
                   display: "flex",
@@ -293,12 +266,9 @@ export default function Testimonials() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: "0.85rem",
+                    fontSize: "0.875rem",
                     fontWeight: 700,
                     color: "var(--navy)",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
                   }}
                 >
                   {t.name}
@@ -308,7 +278,7 @@ export default function Testimonials() {
                     display: "flex",
                     alignItems: "center",
                     gap: 6,
-                    marginTop: 2,
+                    marginTop: 3,
                     flexWrap: "wrap",
                   }}
                 >
@@ -333,8 +303,8 @@ export default function Testimonials() {
                         fontSize: "0.6rem",
                         fontWeight: 700,
                         color: "var(--navy)",
-                        letterSpacing: "0.5px",
                         textTransform: "uppercase",
+                        letterSpacing: "0.5px",
                       }}
                     >
                       {t.room_type}
@@ -343,7 +313,7 @@ export default function Testimonials() {
                 </div>
               </div>
               {t.isReal && (
-                <div
+                <span
                   style={{
                     flexShrink: 0,
                     fontSize: "0.6rem",
@@ -353,30 +323,15 @@ export default function Testimonials() {
                     padding: "3px 8px",
                     borderRadius: 4,
                     border: "1px solid #BBF0D6",
-                    letterSpacing: "0.3px",
                   }}
                 >
                   ✓ Verified
-                </div>
+                </span>
               )}
             </div>
           </div>
         ))}
       </div>
-
-      {/* Show count if more than 5 */}
-      {reviews.length > 5 && (
-        <div
-          style={{
-            textAlign: "center",
-            marginTop: 28,
-            fontSize: "0.82rem",
-            color: "var(--gray-400)",
-          }}
-        >
-          Showing 5 most recent reviews · {reviews.length} total
-        </div>
-      )}
     </div>
   );
 }
