@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
-import { StarIcon, MapPinIcon } from "./Icons";
-
+import { MapPinIcon } from "./Icons";
 const API = process.env.REACT_APP_API_URL;
 
 const STATIC_REVIEWS = [
