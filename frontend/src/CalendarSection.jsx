@@ -4,8 +4,7 @@ import "react-calendar/dist/Calendar.css";
 import "./App.css";
 import { CalendarIcon, SearchIcon, CheckIcon } from "./Icons";
 
-const API = "http://localhost:5000";
-
+const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
 export default function CalendarSection() {
   const [checkIn, setCheckIn] = useState(null);
   const [checkOut, setCheckOut] = useState(null);
