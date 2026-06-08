@@ -1,10 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { SearchIcon, UserIcon, ArrowRightIcon } from "./Icons";
 
-
-const API =
-  process.env.REACT_APP_API_URL;
-
 const FALLBACK = {
   Standard:
     "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=700",

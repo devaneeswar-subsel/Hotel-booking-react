@@ -7,7 +7,6 @@ import {
   CalendarIcon,
   ArrowRightIcon,
   UserIcon,
-  SearchIcon,
   CheckIcon,
 } from "./Icons";
 
@@ -1330,7 +1329,7 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
   const [tab, setTab] = useState("bookings");
   const [bookings, setBookings] = useState([]);
   const [rooms, setRooms] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [bookingRoom, setBookingRoom] = useState(null);
