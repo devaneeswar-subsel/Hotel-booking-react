@@ -24,7 +24,7 @@ const facilities = [
 export default function Facilities() {
   return (
     <section
-      id="gallery"
+      id="facilities"
       className="mx-auto max-w-7xl px-6 md:px-8 lg:px-12 pt-20"
     >
       <div className="section-eyebrow">

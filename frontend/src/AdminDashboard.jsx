@@ -1185,10 +1185,6 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
       method: "PATCH",
       body: JSON.stringify(payload),
     });
-    const res = await apiFetch(`/api/admin/rooms/${room.room_id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
     const data = await res.json();
     setLoading(false);
     if (!res.ok) return showToast(data.error, "error");

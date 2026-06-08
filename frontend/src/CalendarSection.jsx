@@ -103,7 +103,7 @@ export default function CalendarSection() {
       `}</style>
 
       <section
-        // id="calendar"
+        id="calendar"
         className="bg-[var(--navy)] px-4 md:px-8 lg:px-12  py-20"
       >
         <div className="mx-auto grid max-w-[1100px] grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-[60px]">

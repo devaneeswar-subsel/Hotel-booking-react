@@ -49,30 +49,33 @@ export default function Rooms({
   useEffect(() => {
     fetchRooms();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+/* Fixed Fetch Function */
+async function fetchRooms(currentFilters = filters) {
+  setLoading(true);
+  setError("");
 
-  async function fetchRooms() {
-    setLoading(true);
-    setError("");
+  try {
+    const p = new URLSearchParams();
 
-    try {
-      const p = new URLSearchParams();
+    // Safely reads the explicit values passed into the argument 
+    if (currentFilters.type) p.set("type", currentFilters.type);
+    if (currentFilters.minPrice) p.set("min_price", currentFilters.minPrice);
+    if (currentFilters.maxPrice) p.set("max_price", currentFilters.maxPrice);
 
-      if (filters.type) p.set("type", filters.type);
-      if (filters.minPrice) p.set("min_price", filters.minPrice);
-      if (filters.maxPrice) p.set("max_price", filters.maxPrice);
+    // FIXED: Appended the stringified search parameters to your fetch target URL 
+    const queryString = p.toString() ? `?${p.toString()}` : "";
+    const res = await fetch(`http://localhost:5000/api/rooms${queryString}`);
 
-      const res = await fetch(`http://localhost:5000/api/rooms`);
+    if (!res.ok) throw new Error("Server error");
 
-      if (!res.ok) throw new Error("Server error");
-
-      const data = await res.json();
-      setRooms(Array.isArray(data) ? data : []);
-    } catch {
-      setError("Could not load rooms. Is the backend running?");
-    } finally {
-      setLoading(false);
-    }
+    const data = await res.json();
+    setRooms(Array.isArray(data) ? data : []);
+  } catch {
+    setError("Could not load rooms. Is the backend running?");
+  } finally {
+    setLoading(false);
   }
+}
 
   function handleBook(e, room) {
     e.stopPropagation();
@@ -96,75 +99,59 @@ export default function Rooms({
         Choose Your <em className="text-amber-500">Perfect Room</em>
       </h2>
 
-      {/* Filters */}
-      <div className="mb-10 flex flex-wrap items-center gap-3">
-        <select
-          className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-          value={filters.type}
-          onChange={(e) =>
-            setFilters({ ...filters, type: e.target.value })
-          }
-        >
-          <option value="">All Room Types</option>
-          <option>Standard</option>
-          <option>Deluxe</option>
-          <option>Suite</option>
-          <option>Luxury</option>
-          <option>Presidential</option>
-        </select>
 
-        <input
-          className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-          type="number"
-          placeholder="Min price ₹"
-          value={filters.minPrice}
-          onChange={(e) =>
-            setFilters({
-              ...filters,
-              minPrice: e.target.value,
-            })
-          }
-        />
+    {/* Filters UI */}
+<div className="mb-10 flex flex-wrap items-center gap-3">
+  <select
+    className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+    value={filters.type}
+    onChange={(e) => setFilters({ ...filters, type: e.target.value })}
+  >
+    <option value="">All Room Types</option>
+    <option>Standard</option>
+    <option>Deluxe</option>
+    <option>Suite</option>
+    <option>Luxury</option>
+    <option>Presidential</option>
+  </select>
 
-        <input
-          className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-          type="number"
-          placeholder="Max price ₹"
-          value={filters.maxPrice}
-          onChange={(e) =>
-            setFilters({
-              ...filters,
-              maxPrice: e.target.value,
-            })
-          }
-        />
+  <input
+    className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+    type="number"
+    placeholder="Min price ₹"
+    value={filters.minPrice}
+    onChange={(e) => setFilters({ ...filters, minPrice: e.target.value })}
+  />
 
-        <button
-          onClick={fetchRooms}
-          className="flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-        >
-          <SearchIcon size={15} />
-          Search
-        </button>
+  <input
+    className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+    type="number"
+    placeholder="Max price ₹"
+    value={filters.maxPrice}
+    onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })}
+  />
 
-        {(filters.type ||
-          filters.minPrice ||
-          filters.maxPrice) && (
-          <button
-            onClick={() => {
-              setFilters({
-                type: "",
-                minPrice: "",
-                maxPrice: "",
-              });
-              setTimeout(fetchRooms, 0);
-            }}
-            className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-gray-50"
-          >
-            Clear
-          </button>
-        )}
-      </div>
+  <button
+    onClick={() => fetchRooms(filters)} // Pass current active filters
+    className="flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
+  >
+    <SearchIcon size={15} />
+    Search
+  </button>
+
+  {(filters.type || filters.minPrice || filters.maxPrice) && (
+    <button
+      onClick={() => {
+        const clearedFilters = { type: "", minPrice: "", maxPrice: "" };
+        setFilters(clearedFilters); // Update the input UI boxes
+        fetchRooms(clearedFilters); // Immediately pass empty parameters to api query
+      }}
+      className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-gray-50"
+    >
+      Clear
+    </button>
+  )}
+</div>
 
       {/* Error */}
       {error && (
