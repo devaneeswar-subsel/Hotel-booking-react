@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
-import { StarIcon, MapPinIcon } from "./Icons";
+import { MapPinIcon } from "./Icons";
 
 const API = process.env.REACT_APP_API_URL;
 
@@ -40,7 +40,7 @@ export default function Testimonials() {
       .catch(() => {});
   }, []);
 
-  const displayReviews =
+  const displayReviews = (
     reviews.length > 0
       ? reviews.map((r) => ({
           initials: r.guest_name
@@ -56,78 +56,255 @@ export default function Testimonials() {
           room_type: r.room_type,
           isReal: true,
         }))
-      : STATIC_REVIEWS;
+      : STATIC_REVIEWS
+  ).slice(0, 3); // only 3 most recent
+
+  const avgRating =
+    reviews.length > 0
+      ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1)
+      : "5.0";
 
   return (
     <div className="section">
-      <div className="section-eyebrow">
-        <span>Guest Reviews</span>
-      </div>
-      <h2 className="section-title">
-        Words from <em>Our Guests</em>
-      </h2>
-
-      {reviews.length > 0 && (
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 16,
+          marginBottom: 40,
+        }}
+      >
+        <div>
+          <div className="section-eyebrow">
+            <span>Guest Reviews</span>
+          </div>
+          <h2 className="section-title" style={{ marginBottom: 0 }}>
+            Words from <em>Our Guests</em>
+          </h2>
+        </div>
+        {/* Rating badge */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            marginBottom: 32,
+            gap: 12,
+            background: "var(--navy)",
+            padding: "12px 20px",
+            borderRadius: 12,
+            flexShrink: 0,
           }}
         >
-          <div style={{ display: "flex", gap: 3 }}>
-            {[1, 2, 3, 4, 5].map((s) => (
-              <span key={s} style={{ color: "#C9A84C", fontSize: "1.1rem" }}>
-                ★
-              </span>
-            ))}
+          <div>
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: "2rem",
+                fontWeight: 700,
+                color: "#fff",
+                lineHeight: 1,
+              }}
+            >
+              {avgRating}
+            </div>
+            <div style={{ display: "flex", gap: 2, marginTop: 4 }}>
+              {[1, 2, 3, 4, 5].map((s) => (
+                <span key={s} style={{ color: "#C9A84C", fontSize: "0.75rem" }}>
+                  ★
+                </span>
+              ))}
+            </div>
           </div>
-          <span
+          <div
             style={{
-              fontSize: "0.85rem",
-              color: "var(--gray-600)",
-              fontWeight: 500,
+              width: 1,
+              height: 36,
+              background: "rgba(255,255,255,0.12)",
+            }}
+          />
+          <div>
+            <div
+              style={{ fontSize: "0.78rem", fontWeight: 700, color: "#fff" }}
+            >
+              {reviews.length || STATIC_REVIEWS.length} Reviews
+            </div>
+            <div
+              style={{
+                fontSize: "0.65rem",
+                color: "rgba(255,255,255,0.4)",
+                marginTop: 2,
+              }}
+            >
+              Verified Guests
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3 Cards */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+          gap: 24,
+        }}
+      >
+        {displayReviews.map((t, i) => (
+          <div
+            key={i}
+            style={{
+              background: "#fff",
+              border: "1px solid var(--gray-200)",
+              borderRadius: 16,
+              padding: "28px 24px",
+              boxShadow: "0 2px 12px rgba(15,25,35,0.06)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+              position: "relative",
+              overflow: "hidden",
+              transition: "transform 0.2s, box-shadow 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translateY(-4px)";
+              e.currentTarget.style.boxShadow =
+                "0 8px 28px rgba(15,25,35,0.12)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translateY(0)";
+              e.currentTarget.style.boxShadow =
+                "0 2px 12px rgba(15,25,35,0.06)";
             }}
           >
-            {(
-              reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
-            ).toFixed(1)}{" "}
-            · {reviews.length} verified review{reviews.length > 1 ? "s" : ""}
-          </span>
-        </div>
-      )}
+            {/* Gold top bar */}
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                background:
+                  "linear-gradient(90deg, var(--gold), var(--gold-light))",
+              }}
+            />
 
-      <div className="testimonials-grid">
-        {displayReviews.map((t, i) => (
-          <div className="testimonial-card" key={i}>
-            <div className="testimonial-quote">"</div>
-            <div className="testimonial-stars">
-              {Array(t.rating)
-                .fill(0)
-                .map((_, j) => (
-                  <StarIcon key={j} size={14} filled color="var(--gold)" />
+            {/* Quote + Stars */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingTop: 4,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "3rem",
+                  color: "var(--gold-light)",
+                  lineHeight: 0.8,
+                  userSelect: "none",
+                }}
+              >
+                "
+              </span>
+              <div style={{ display: "flex", gap: 2 }}>
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <span
+                    key={s}
+                    style={{
+                      color: s <= t.rating ? "#C9A84C" : "#E9ECEF",
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    ★
+                  </span>
                 ))}
+              </div>
             </div>
-            <p className="testimonial-text">{t.text}</p>
-            <div className="testimonial-author">
-              <div className="author-avatar">{t.initials}</div>
-              <div>
-                <div className="author-name">{t.name}</div>
-                <div className="author-location">
-                  <MapPinIcon size={11} color="var(--gray-400)" />
-                  {t.location}
+
+            {/* Review text */}
+            <p
+              style={{
+                fontSize: "0.875rem",
+                color: "var(--gray-600)",
+                lineHeight: 1.75,
+                fontStyle: "italic",
+                flex: 1,
+                margin: 0,
+              }}
+            >
+              {t.text}
+            </p>
+
+            {/* Divider */}
+            <div style={{ height: 1, background: "var(--gray-100)" }} />
+
+            {/* Author */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: "50%",
+                  background: "var(--navy)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "var(--gold-light)",
+                  fontWeight: 700,
+                  fontSize: "0.8rem",
+                  fontFamily: "var(--font-display)",
+                  flexShrink: 0,
+                }}
+              >
+                {t.initials}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: "0.875rem",
+                    fontWeight: 700,
+                    color: "var(--navy)",
+                  }}
+                >
+                  {t.name}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    marginTop: 3,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "0.68rem",
+                      color: "var(--gray-400)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 3,
+                    }}
+                  >
+                    <MapPinIcon size={10} color="var(--gray-400)" />
+                    {t.location}
+                  </span>
                   {t.room_type && (
                     <span
                       style={{
-                        marginLeft: 6,
                         background: "var(--gray-100)",
-                        padding: "1px 6px",
+                        padding: "1px 7px",
                         borderRadius: 3,
-                        fontSize: "0.65rem",
-                        fontWeight: 600,
+                        fontSize: "0.6rem",
+                        fontWeight: 700,
                         color: "var(--navy)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px",
                       }}
                     >
                       {t.room_type}
@@ -138,13 +315,14 @@ export default function Testimonials() {
               {t.isReal && (
                 <span
                   style={{
-                    marginLeft: "auto",
-                    fontSize: "0.65rem",
+                    flexShrink: 0,
+                    fontSize: "0.6rem",
                     color: "#2D9A6E",
                     fontWeight: 700,
                     background: "#E8F8F0",
-                    padding: "2px 8px",
-                    borderRadius: 3,
+                    padding: "3px 8px",
+                    borderRadius: 4,
+                    border: "1px solid #BBF0D6",
                   }}
                 >
                   ✓ Verified

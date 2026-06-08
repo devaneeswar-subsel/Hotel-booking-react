@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";import {
+import React, { useState, useEffect, useRef } from "react";
+import {
   TrendingUpIcon,
   BedIcon,
   UsersIcon,
@@ -954,46 +955,25 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
 // STEP 3: Paste EVERYTHING below this comment block in its place.
 // ═══════════════════════════════════════════════════════════════════
 
-/* ── helpers: file → base64 ── */
-function fileToBase64(file, maxSize = 800, quality = 0.7) {
+async function uploadToCloudinary(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
-    reader.onerror = () => reject(new Error("Failed to read file"));
-
     reader.onload = (e) => {
       const img = new Image();
-
-      img.onerror = () => reject(new Error("Failed to load image"));
-
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        let w = img.width;
-        let h = img.height;
-
-        // Cap both dimensions, preserving aspect ratio
-        if (w > maxSize || h > maxSize) {
-          if (w >= h) {
-            h = Math.round((h * maxSize) / w);
-            w = maxSize;
-          } else {
-            w = Math.round((w * maxSize) / h);
-            h = maxSize;
-          }
+        const MAX = 800;
+        let w = img.width,
+          h = img.height;
+        if (w > MAX) {
+          h = (h * MAX) / w;
+          w = MAX;
         }
-
         canvas.width = w;
         canvas.height = h;
-
-        const ctx = canvas.getContext("2d");
-        // Fill white so transparent PNGs don't go black
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
       };
-
       img.src = e.target.result;
     };
 
@@ -1010,8 +990,8 @@ function ImageSlot({ index, value, onChange, isMain }) {
 
   async function handleFile(file) {
     if (!file || !file.type.startsWith("image/")) return;
-    const b64 = await fileToBase64(file);
-    onChange(b64);
+    const url = await uploadToCloudinary(file);
+    onChange(url);
     setMode("idle");
   }
 
@@ -1049,7 +1029,11 @@ function ImageSlot({ index, value, onChange, isMain }) {
           ${dragging ? "border-2 border-dashed border-gold" : "border-[1.5px] border-gray-200"}`}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
-        onDrop={async (e) => { e.preventDefault(); setDragging(false); await handleFile(e.dataTransfer.files[0]); }}
+        onDrop={async (e) => {
+          e.preventDefault();
+          setDragging(false);
+          await handleFile(e.dataTransfer.files[0]);
+        }}
       >
 
         {/* PREVIEW */}
@@ -1172,15 +1156,19 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
   });
   const [images, setImages] = useState([
     room.image_url || "",
-    room.image2    || "",
-    room.image3    || "",
-    room.image4    || "",
-    room.image5    || "",
+    room.image2 || "",
+    room.image3 || "",
+    room.image4 || "",
+    room.image5 || "",
   ]);
   const [loading, setLoading] = useState(false);
 
   function setImage(i, val) {
-    setImages((prev) => { const n = [...prev]; n[i] = val; return n; });
+    setImages((prev) => {
+      const n = [...prev];
+      n[i] = val;
+      return n;
+    });
   }
 
   async function save() {
@@ -1188,11 +1176,15 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
     const payload = {
       ...form,
       image_url: images[0],
-      image2:    images[1],
-      image3:    images[2],
-      image4:    images[3],
-      image5:    images[4],
+      image2: images[1],
+      image3: images[2],
+      image4: images[3],
+      image5: images[4],
     };
+    const res = await apiFetch(`/api/admin/rooms/${room.room_id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
     const res = await apiFetch(`/api/admin/rooms/${room.room_id}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
@@ -1247,7 +1239,13 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
             {/* 4 thumbnails */}
             <div className="grid grid-cols-4 gap-2">
               {[1, 2, 3, 4].map((i) => (
-                <ImageSlot key={i} index={i} value={images[i]} onChange={(v) => setImage(i, v)} isMain={false} />
+                <ImageSlot
+                  key={i}
+                  index={i}
+                  value={images[i]}
+                  onChange={(v) => setImage(i, v)}
+                  isMain={false}
+                />
               ))}
             </div>
 
