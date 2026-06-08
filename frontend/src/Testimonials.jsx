@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import "./App.css";
 import { MapPinIcon } from "./Icons";
 
 const API = process.env.REACT_APP_API_URL;
@@ -66,159 +65,67 @@ export default function Testimonials() {
 
   return (
     <div className="section">
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-end",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: 16,
-          marginBottom: 40,
-        }}
-      >
+      {/* Header Container */}
+      <div className="flex items-end justify-between flex-wrap gap-4 mb-10">
         <div>
           <div className="section-eyebrow">
             <span>Guest Reviews</span>
           </div>
-          <h2 className="section-title" style={{ marginBottom: 0 }}>
-            Words from <em>Our Guests</em>
+          <h2 className="section-title !mb-0">
+            Words from <em className="not-italic">Our Guests</em>
           </h2>
         </div>
-        {/* Rating badge */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            background: "var(--navy)",
-            padding: "12px 20px",
-            borderRadius: 12,
-            flexShrink: 0,
-          }}
-        >
+        
+        {/* Rating Badge */}
+        <div className="flex items-center gap-3 bg-[var(--navy)] px-5 py-3 rounded-xl shrink-0">
           <div>
-            <div
-              style={{
-                fontFamily: "var(--font-display)",
-                fontSize: "2rem",
-                fontWeight: 700,
-                color: "#fff",
-                lineHeight: 1,
-              }}
-            >
+            <div className="font-[var(--font-display)] text-3xl font-bold text-white leading-none">
               {avgRating}
             </div>
-            <div style={{ display: "flex", gap: 2, marginTop: 4 }}>
+            <div className="flex gap-0.5 mt-1">
               {[1, 2, 3, 4, 5].map((s) => (
-                <span key={s} style={{ color: "#C9A84C", fontSize: "0.75rem" }}>
+                <span key={s} className="text-[#C9A84C] text-[0.75rem]">
                   ★
                 </span>
               ))}
             </div>
           </div>
-          <div
-            style={{
-              width: 1,
-              height: 36,
-              background: "rgba(255,255,255,0.12)",
-            }}
-          />
+          
+          {/* Vertical Divider */}
+          <div className="w-[1px] h-9 bg-white/10" />
+          
           <div>
-            <div
-              style={{ fontSize: "0.78rem", fontWeight: 700, color: "#fff" }}
-            >
+            <div className="text-[0.78rem] font-bold text-white">
               {reviews.length || STATIC_REVIEWS.length} Reviews
             </div>
-            <div
-              style={{
-                fontSize: "0.65rem",
-                color: "rgba(255,255,255,0.4)",
-                marginTop: 2,
-              }}
-            >
+            <div className="text-[0.65rem] text-white/40 mt-0.5">
               Verified Guests
             </div>
           </div>
         </div>
       </div>
 
-      {/* 3 Cards */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-          gap: 24,
-        }}
-      >
+      {/* 3 Cards Grid */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6">
         {displayReviews.map((t, i) => (
           <div
             key={i}
-            style={{
-              background: "#fff",
-              border: "1px solid var(--gray-200)",
-              borderRadius: 16,
-              padding: "28px 24px",
-              boxShadow: "0 2px 12px rgba(15,25,35,0.06)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-              position: "relative",
-              overflow: "hidden",
-              transition: "transform 0.2s, box-shadow 0.2s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-4px)";
-              e.currentTarget.style.boxShadow =
-                "0 8px 28px rgba(15,25,35,0.12)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow =
-                "0 2px 12px rgba(15,25,35,0.06)";
-            }}
+            className="relative overflow-hidden flex flex-col gap-4 bg-white border border-[var(--gray-200)] rounded-2xl px-6 py-7 shadow-[0_2px_12px_rgba(15,25,35,0.06)] transition-all duration-200 ease-in-out hover:-translate-y-1 hover:shadow-[0_8px_28px_rgba(15,25,35,0.12)]"
           >
-            {/* Gold top bar */}
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 3,
-                background:
-                  "linear-gradient(90deg, var(--gold), var(--gold-light))",
-              }}
-            />
+            {/* Top Border Accent Decorator */}
+            <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-[var(--gold)] to-[var(--gold-light)]" />
 
-            {/* Quote + Stars */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                paddingTop: 4,
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: "3rem",
-                  color: "var(--gold-light)",
-                  lineHeight: 0.8,
-                  userSelect: "none",
-                }}
-              >
+            {/* Card Header: Quote + Stars */}
+            <div className="flex justify-between items-center pt-1">
+              <span className="font-[var(--font-display)] text-5xl text-[var(--gold-light)] leading-[0.8] select-none">
                 "
               </span>
-              <div style={{ display: "flex", gap: 2 }}>
+              <div className="flex gap-0.5">
                 {[1, 2, 3, 4, 5].map((s) => (
                   <span
                     key={s}
-                    style={{
-                      color: s <= t.rating ? "#C9A84C" : "#E9ECEF",
-                      fontSize: "0.9rem",
-                    }}
+                    className="text-[0.9rem]"
+                    style={{ color: s <= t.rating ? "#C9A84C" : "#E9ECEF" }}
                   >
                     ★
                   </span>
@@ -226,105 +133,42 @@ export default function Testimonials() {
               </div>
             </div>
 
-            {/* Review text */}
-            <p
-              style={{
-                fontSize: "0.875rem",
-                color: "var(--gray-600)",
-                lineHeight: 1.75,
-                fontStyle: "italic",
-                flex: 1,
-                margin: 0,
-              }}
-            >
+            {/* Review text snippet block */}
+            <p className="text-[0.875rem] text-[var(--gray-600)] leading-[1.75] italic flex-1 m-0">
               {t.text}
             </p>
 
-            {/* Divider */}
-            <div style={{ height: 1, background: "var(--gray-100)" }} />
+            {/* Internal Card Row Separator */}
+            <div className="h-[1px] bg-[var(--gray-100)]" />
 
-            {/* Author */}
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: "50%",
-                  background: "var(--navy)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "var(--gold-light)",
-                  fontWeight: 700,
-                  fontSize: "0.8rem",
-                  fontFamily: "var(--font-display)",
-                  flexShrink: 0,
-                }}
-              >
+            {/* Profile Meta Area */}
+            <div className="flex items-center gap-3">
+              {/* Initials Circle */}
+              <div className="w-10 h-10 rounded-full bg-[var(--navy)] flex items-center justify-center text-[var(--gold-light)] font-bold text-[0.8rem] font-[var(--font-display)] shrink-0">
                 {t.initials}
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: "0.875rem",
-                    fontWeight: 700,
-                    color: "var(--navy)",
-                  }}
-                >
+              
+              {/* Name and Geolocation details column */}
+              <div className="flex-1 min-w-0">
+                <div className="text-[0.875rem] font-bold text-[var(--navy)] truncate">
                   {t.name}
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    marginTop: 3,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "0.68rem",
-                      color: "var(--gray-400)",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 3,
-                    }}
-                  >
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  <span className="text-[0.68rem] text-[var(--gray-400)] flex items-center gap-0.5">
                     <MapPinIcon size={10} color="var(--gray-400)" />
                     {t.location}
                   </span>
                   {t.room_type && (
-                    <span
-                      style={{
-                        background: "var(--gray-100)",
-                        padding: "1px 7px",
-                        borderRadius: 3,
-                        fontSize: "0.6rem",
-                        fontWeight: 700,
-                        color: "var(--navy)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.5px",
-                      }}
-                    >
+                    <span className="bg-[var(--gray-100)] px-1.5 py-[1px] rounded-[3px] text-[0.6rem] font-bold text-[var(--navy)] uppercase tracking-[0.5px]">
                       {t.room_type}
                     </span>
                   )}
                 </div>
               </div>
+
+              {/* Verified Pill Badge alignment element */}
               {t.isReal && (
-                <span
-                  style={{
-                    flexShrink: 0,
-                    fontSize: "0.6rem",
-                    color: "#2D9A6E",
-                    fontWeight: 700,
-                    background: "#E8F8F0",
-                    padding: "3px 8px",
-                    borderRadius: 4,
-                    border: "1px solid #BBF0D6",
-                  }}
-                >
+                <span className="shrink-0 text-[0.6rem] text-[#2D9A6E] font-bold bg-[#E8F8F0] px-2 py-[3px] rounded border border-[#BBF0D6]">
                   ✓ Verified
                 </span>
               )}

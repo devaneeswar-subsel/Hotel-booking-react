@@ -28,6 +28,7 @@ export default function CalendarSection() {
 
   function fmt(d) {
     if (!d) return "—";
+
     return d.toLocaleDateString("en-IN", {
       day: "numeric",
       month: "short",
@@ -36,20 +37,27 @@ export default function CalendarSection() {
   }
 
   const nights =
-    checkIn && checkOut ? Math.ceil((checkOut - checkIn) / 86400000) : 0;
+    checkIn && checkOut
+      ? Math.ceil((checkOut - checkIn) / 86400000)
+      : 0;
 
   async function checkAvailability() {
     if (!checkIn || !checkOut) return;
+
     setLoading(true);
     setResults(null);
+
     try {
       const p = new URLSearchParams({
         check_in: checkIn.toISOString().split("T")[0],
         check_out: checkOut.toISOString().split("T")[0],
       });
+
       if (roomType) p.set("type", roomType);
+
       const res = await fetch(`${API}/api/rooms?${p}`);
       const data = await res.json();
+
       setResults(Array.isArray(data) ? data : []);
     } catch {
       setResults([]);
@@ -60,74 +68,93 @@ export default function CalendarSection() {
 
   function tileClass({ date, view }) {
     if (view !== "month") return null;
+
     if (checkIn && date.toDateString() === checkIn.toDateString())
       return "cal-checkin";
+
     if (checkOut && date.toDateString() === checkOut.toDateString())
       return "cal-checkout";
+
     if (checkIn && checkOut && date > checkIn && date < checkOut)
       return "cal-range";
+
     return null;
   }
 
   return (
     <>
       <style>{`
-        .cal-checkin  { background: var(--navy) !important; color: #fff !important; border-radius: 6px !important; }
-        .cal-checkout { background: var(--gold) !important; color: var(--navy) !important; border-radius: 6px !important; }
-        .cal-range    { background: rgba(15,25,35,0.08) !important; color: var(--navy) !important; border-radius: 0 !important; }
+        .cal-checkin{
+          background: var(--navy) !important;
+          color:#fff !important;
+          border-radius:6px !important;
+        }
+
+        .cal-checkout{
+          background: var(--gold) !important;
+          color:var(--navy) !important;
+          border-radius:6px !important;
+        }
+
+        .cal-range{
+          background: rgba(15,25,35,.08) !important;
+          color: var(--navy) !important;
+        }
       `}</style>
 
-      <div className="calendar-section" id="calendar">
-        <div className="calendar-inner">
+      <section
+        id="calendar"
+        className="bg-[var(--navy)] px-4 md:px-8 lg:px-12  py-20"
+      >
+        <div className="mx-auto grid max-w-[1100px] grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-[60px]">
           {/* INFO */}
-          <div className="calendar-info">
+          <div>
             <div className="section-eyebrow">
-              <span>Availability</span>
+              <span className="text-[var(--gold-light)]">
+                Availability
+              </span>
             </div>
-            <h2>
+
+            <h2 className="mb-4 font-[var(--font-display)] text-[clamp(1.8rem,3vw,2.4rem)] font-semibold leading-tight text-white">
               Check Your
               <br />
               Available Dates
             </h2>
-            <p>
-              Select your check-in date first, then your check-out date. We'll
-              show you available rooms for your stay.
+
+            <p className="mb-6 text-[0.88rem] leading-[1.75] text-white/55">
+              Select your check-in date first, then your check-out date.
+              We'll show you available rooms for your stay.
             </p>
 
-            {checkIn && (
-              <div className="date-card">
-                <div className="date-card-label">Check-in</div>
-                <div className="date-card-value">{fmt(checkIn)}</div>
+            {/* Check In */}
+            <div className="mb-3 rounded-[var(--radius-md)] border border-[rgba(201,168,76,0.2)] bg-white/5 px-[18px] py-[14px]">
+              <div className="mb-1 text-[0.65rem] uppercase tracking-[2px] text-[var(--gold)]">
+                Check-in
               </div>
-            )}
-            {!checkIn && (
-              <div className="date-card">
-                <div className="date-card-label">Check-in</div>
-                <div
-                  className="date-card-value"
-                  style={{
-                    color: "rgba(255,255,255,0.35)",
-                    fontSize: "0.9rem",
-                  }}
-                >
-                  Select on calendar →
-                </div>
-              </div>
-            )}
 
+              <div className="font-[var(--font-display)] text-[1.05rem] font-medium text-white">
+                {checkIn ? (
+                  fmt(checkIn)
+                ) : (
+                  <span className="text-[0.9rem] text-white/35">
+                    Select on calendar →
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Check Out */}
             {checkIn && (
-              <div className="date-card">
-                <div className="date-card-label">Check-out</div>
-                <div className="date-card-value">
+              <div className="mb-3 rounded-[var(--radius-md)] border border-[rgba(201,168,76,0.2)] bg-white/5 px-[18px] py-[14px]">
+                <div className="mb-1 text-[0.65rem] uppercase tracking-[2px] text-[var(--gold)]">
+                  Check-out
+                </div>
+
+                <div className="font-[var(--font-display)] text-[1.05rem] font-medium text-white">
                   {checkOut ? (
                     fmt(checkOut)
                   ) : (
-                    <span
-                      style={{
-                        color: "rgba(255,255,255,0.35)",
-                        fontSize: "0.9rem",
-                      }}
-                    >
+                    <span className="text-[0.9rem] text-white/35">
                       Select on calendar →
                     </span>
                   )}
@@ -136,95 +163,96 @@ export default function CalendarSection() {
             )}
 
             {nights > 0 && (
-              <p
-                style={{
-                  fontSize: "0.78rem",
-                  color: "rgba(255,255,255,0.4)",
-                  margin: "4px 0 16px",
-                }}
-              >
+              <p className="mb-4 mt-1 text-[0.78rem] text-white/40">
                 {nights} night{nights > 1 ? "s" : ""} selected
               </p>
             )}
 
-            <div style={{ marginBottom: "16px" }}>
+            {/* Room Type */}
+            <div className="mb-4">
               <select
                 value={roomType}
                 onChange={(e) => setRoomType(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  borderRadius: "6px",
-                  border: "1px solid rgba(201,168,76,0.25)",
-                  background: "rgba(255,255,255,0.07)",
-                  color: "rgba(255,255,255,0.75)",
-                  fontFamily: "var(--font-body)",
-                  fontSize: "0.85rem",
-                  cursor: "pointer",
-                }}
+                className="w-full rounded-md border border-[rgba(201,168,76,0.25)] bg-white/10 px-4 py-2.5 text-[0.85rem] text-white/75 outline-none"
               >
-                <option value="" style={{ color: "#000" }}>
+                <option value="" className="text-black">
                   All Room Types
                 </option>
-                {["Standard", "Deluxe", "Suite", "Luxury", "Presidential"].map(
-                  (t) => (
-                    <option key={t} value={t} style={{ color: "#000" }}>
-                      {t}
-                    </option>
-                  ),
-                )}
+
+                {[
+                  "Standard",
+                  "Deluxe",
+                  "Suite",
+                  "Luxury",
+                  "Presidential",
+                ].map((t) => (
+                  <option
+                    key={t}
+                    value={t}
+                    className="text-black"
+                  >
+                    {t}
+                  </option>
+                ))}
               </select>
             </div>
 
+            {/* Button */}
             <button
-              className="btn btn-gold"
               onClick={checkAvailability}
               disabled={!checkIn || !checkOut || loading}
-              style={{
-                opacity: !checkIn || !checkOut ? 0.5 : 1,
-                pointerEvents: !checkIn || !checkOut ? "none" : "auto",
-              }}
+              className={`flex w-full items-center justify-center gap-2 rounded-md bg-[var(--gold)] px-5 py-3 font-medium text-[var(--navy)] transition ${
+                !checkIn || !checkOut
+                  ? "pointer-events-none opacity-50"
+                  : "hover:brightness-105"
+              }`}
             >
               <SearchIcon size={15} />
               {loading ? "Checking..." : "Check Availability"}
             </button>
 
-            {/* RESULTS */}
+            {/* Results */}
             {results !== null && (
-              <div className="avail-result" style={{ marginTop: "20px" }}>
+              <div className="mt-5 rounded-[var(--radius-md)] border border-[rgba(201,168,76,0.2)] bg-white/5 px-[18px] py-[14px] text-white">
                 {results.length === 0 ? (
-                  <div
-                    className="avail-result-title"
-                    style={{ color: "rgba(255,255,255,0.5)" }}
-                  >
+                  <div className="text-[0.88rem] text-white/50">
                     No rooms available for these dates.
                   </div>
                 ) : (
                   <>
-                    <div className="avail-result-title">
-                      <CheckIcon size={15} color="var(--gold)" />
-                      {results.length} room{results.length > 1 ? "s" : ""}{" "}
-                      available
+                    <div className="mb-2 flex items-center gap-1.5 text-[0.88rem] font-semibold text-[var(--gold-light)]">
+                      <CheckIcon
+                        size={15}
+                        color="var(--gold)"
+                      />
+                      {results.length} room
+                      {results.length > 1 ? "s" : ""} available
                     </div>
+
                     {results.slice(0, 4).map((r) => (
-                      <div className="avail-item" key={r.room_id}>
+                      <div
+                        key={r.room_id}
+                        className="flex justify-between border-t border-white/5 py-1.5 text-[0.78rem] text-white/60"
+                      >
                         <span>
-                          {r.room_type} — Room {r.room_number || r.room_id}
+                          {r.room_type} — Room{" "}
+                          {r.room_number || r.room_id}
                         </span>
-                        <span>
-                          ₹{Number(r.price_per_night).toLocaleString()}/night
+
+                        <span className="font-semibold text-white">
+                          ₹
+                          {Number(
+                            r.price_per_night
+                          ).toLocaleString()}
+                          /night
                         </span>
                       </div>
                     ))}
+
                     {results.length > 4 && (
-                      <div
-                        style={{
-                          fontSize: "0.72rem",
-                          color: "rgba(255,255,255,0.35)",
-                          marginTop: "6px",
-                        }}
-                      >
-                        +{results.length - 4} more — scroll to rooms above
+                      <div className="mt-1.5 text-[0.72rem] text-white/35">
+                        +{results.length - 4} more — scroll to rooms
+                        above
                       </div>
                     )}
                   </>
@@ -233,18 +261,20 @@ export default function CalendarSection() {
             )}
           </div>
 
-          {/* CALENDAR */}
-          <div className="calendar-widget">
-            <div className="calendar-widget-header">
-              <div
-                className="calendar-widget-title"
-                style={{ display: "flex", alignItems: "center", gap: "8px" }}
-              >
-                <CalendarIcon size={16} color="var(--navy)" />
+          {/* Calendar */}
+          <div className="rounded-[var(--radius-lg)] bg-white p-7 shadow-[var(--shadow-lg)]">
+            <div className="mb-[14px] flex items-center justify-between">
+              <div className="flex items-center gap-2 font-[var(--font-display)] text-[0.9rem] font-semibold text-[var(--navy)]">
+                <CalendarIcon
+                  size={16}
+                  color="var(--navy)"
+                />
+
                 {step === "checkin"
                   ? "Select Check-in Date"
                   : "Select Check-out Date"}
               </div>
+
               {(checkIn || checkOut) && (
                 <button
                   onClick={() => {
@@ -253,31 +283,27 @@ export default function CalendarSection() {
                     setStep("checkin");
                     setResults(null);
                   }}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "var(--gray-400)",
-                    fontSize: "0.78rem",
-                    cursor: "pointer",
-                    fontFamily: "var(--font-body)",
-                  }}
+                  className="text-[0.78rem] text-[var(--gray-400)] transition hover:text-[var(--navy)]"
                 >
                   Reset
                 </button>
               )}
             </div>
+
             <Calendar
               onChange={handleDateChange}
               value={checkIn}
               minDate={new Date()}
               tileClassName={tileClass}
               tileDisabled={({ date }) =>
-                step === "checkout" && checkIn && date <= checkIn
+                step === "checkout" &&
+                checkIn &&
+                date <= checkIn
               }
             />
           </div>
         </div>
-      </div>
+      </section>
     </>
   );
 }
