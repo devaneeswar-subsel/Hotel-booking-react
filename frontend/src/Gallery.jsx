@@ -1,5 +1,4 @@
 import React from "react";
-import "./App.css";
 
 const images = [
   {
@@ -26,24 +25,43 @@ const images = [
 
 export default function Gallery() {
   return (
-    <div className="section" id="gallery">
-      <div className="section-eyebrow">
-        <span>Photo Tour</span>
+    <section
+      id="gallery"
+      className="mx-auto max-w-7xl px-6 md:px-8 lg:px-12 py-20"
+    >
+      <div className="section-eyebrow mb-3">
+        <span className="text-sm font-medium uppercase tracking-[3px] text-amber-500">
+          Photo Tour
+        </span>
       </div>
-      <h2 className="section-title">
-        Experience the <em>Glamour</em>
+
+      <h2 className=" section-title mb-12 font-serif text-4xl font-bold text-slate-900">
+        Experience the <em className="text-amber-500">Glamour</em>
       </h2>
 
-      <div className="gallery-grid">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_1fr_1fr] md:grid-rows-2">
         {images.map((img, i) => (
-          <div className="gallery-item" key={i}>
-            <img src={img.src} alt={img.label} loading="lazy" />
-            <div className="gallery-overlay">
-              <span className="gallery-label">{img.label}</span>
+          <div
+            key={i}
+           className={`group relative overflow-hidden rounded-2xl ${
+  i === 0 ? "md:row-span-2" : ""
+}`}
+          >
+            <img
+              src={img.src}
+              alt={img.label}
+              loading="lazy"
+              className="block h-full w-full object-cover transition-transform duration-700 ease-in-out group-hover:scale-105"
+            />
+
+            <div className="absolute inset-0 flex items-end bg-gradient-to-t from-[rgba(15,25,35,0.6)] to-transparent p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+              <span className="text-sm font-semibold text-white">
+                {img.label}
+              </span>
             </div>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }

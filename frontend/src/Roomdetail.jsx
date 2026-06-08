@@ -309,540 +309,250 @@ export default function RoomDetail({
   ];
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "var(--c-bg)",
-        fontFamily: "var(--font-body)",
-      }}
-    >
-      <style>{`
-        .rd-layout {
-          display: grid;
-          grid-template-columns: 1fr 360px;
-          gap: 2rem;
-          align-items: start;
-        }
-        .rd-sticky { position: sticky; top: 80px; }
-        .rd-main-img { height: 460px; }
-        .rd-policies-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px 16px;
-        }
-        .rd-nav { padding: 0 2rem; }
-        .rd-book-btn {
-          width: 100%;
-          padding: 15px;
-          background: #1a1a2e;
-          color: #ffffff;
-          border: none;
-          border-radius: 10px;
-          font-size: 1rem;
-          font-weight: 700;
-          cursor: pointer;
-          letter-spacing: 0.3px;
-          transition: background 0.2s, transform 0.15s;
-          font-family: var(--font-body);
-        }
-        .rd-book-btn:hover { background: #2d2d4e; transform: translateY(-1px); }
-        .rd-book-btn:active { transform: translateY(0); }
-        .rd-price-row:not(:last-child) { border-bottom: 1px solid var(--c-border); }
-        @media (max-width: 768px) {
-          .rd-layout { grid-template-columns: 1fr; }
-          .rd-sticky { position: static; order: -1; }
-          .rd-main-img { height: 260px; }
-          .rd-policies-grid { grid-template-columns: 1fr; }
-          .rd-nav { padding: 0 1rem; }
-          .rd-content { padding: 1rem !important; }
-        }
-        @media (max-width: 480px) {
-          .rd-main-img { height: 210px; }
-        }
-      `}</style>
-
-      {/* ── TOP NAV ── */}
-      <div
-        className="rd-nav"
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 100,
-          background: "#fff",
-          borderBottom: "1px solid var(--c-border)",
-          height: "64px",
-          display: "flex",
-          alignItems: "center",
-          gap: "12px",
-        }}
+  <div className="min-h-screen bg-[var(--c-bg)] font-[var(--font-body)]">
+    
+    {/* TOP NAV */}
+    <div className="sticky top-0 z-[100] flex h-16 items-center gap-3 border-b border-[var(--c-border)] bg-white px-8 max-md:px-4">
+      <button
+        onClick={onBack}
+        className="flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-[var(--c-border)] px-3.5 py-2 text-sm text-[var(--c-dark)] transition-all hover:bg-gray-50"
       >
-        <button
-          onClick={onBack}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            background: "none",
-            border: "1.5px solid var(--c-border)",
-            borderRadius: "8px",
-            padding: "8px 14px",
-            cursor: "pointer",
-            fontFamily: "var(--font-body)",
-            fontSize: "0.85rem",
-            color: "var(--c-dark)",
-            transition: "all 0.2s",
-            whiteSpace: "nowrap",
-          }}
-        >
-          <IconArrowLeft /> Back to Rooms
-        </button>
-        <div
-          style={{
-            fontFamily: "var(--font-display)",
-            fontWeight: 700,
-            fontSize: "1rem",
-            color: "var(--c-dark)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {room.room_type} — Room {room.room_number || room.room_id}
-        </div>
+        <IconArrowLeft />
+        Back to Rooms
+      </button>
+
+      <div className="overflow-hidden text-ellipsis whitespace-nowrap font-[var(--font-display)] text-base font-bold text-[var(--c-dark)]">
+        {room.room_type} — Room {room.room_number || room.room_id}
       </div>
+    </div>
 
-      {/* ── MAIN CONTENT ── */}
-      <div
-        className="rd-content"
-        style={{ maxWidth: "1100px", margin: "0 auto", padding: "2rem" }}
-      >
-        <div className="rd-layout">
-          {/* ── LEFT: IMAGES + INFO ── */}
-          <div>
-            {/* Main image */}
-            <div
-              className="rd-main-img"
-              style={{
-                borderRadius: "14px",
-                overflow: "hidden",
-                marginBottom: "10px",
-                position: "relative",
-              }}
-            >
-              <img
-                src={images[activeImg]}
-                alt={room.room_type}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  top: "14px",
-                  left: "14px",
-                  background: "var(--c-primary)",
-                  color: "#fff",
-                  padding: "4px 14px",
-                  borderRadius: "20px",
-                  fontSize: "0.78rem",
-                  fontWeight: 700,
-                }}
-              >
-                {room.room_type}
-              </div>
+    {/* MAIN CONTENT */}
+    <div className="mx-auto max-w-[1100px] p-8 max-md:p-4">
+      <div className="grid grid-cols-[1fr_360px] gap-8 items-start max-md:grid-cols-1">
+
+        {/* LEFT SECTION */}
+        <div>
+
+          {/* Main Image */}
+          <div className="relative mb-2.5 h-[460px] overflow-hidden rounded-[14px] max-md:h-[260px] max-[480px]:h-[210px]">
+            <img
+              src={images[activeImg]}
+              alt={room.room_type}
+              className="h-full w-full object-cover"
+            />
+
+            <div className="absolute left-3.5 top-3.5 rounded-full bg-[var(--c-primary)] px-3.5 py-1 text-xs font-bold text-white">
+              {room.room_type}
             </div>
+          </div>
 
-            {/* Thumbnails */}
-            <div
-              style={{
-                display: "flex",
-                gap: "8px",
-                overflowX: "auto",
-                paddingBottom: "4px",
-              }}
-            >
-              {images.map((img, i) => (
+          {/* Thumbnails */}
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {images.map((img, i) => (
+              <div
+                key={i}
+                onClick={() => setActiveImg(i)}
+                className={`h-[58px] w-[78px] flex-shrink-0 cursor-pointer overflow-hidden rounded-lg transition-all ${
+                  activeImg === i
+                    ? "border-[2.5px] border-[var(--c-primary)] opacity-100"
+                    : "border-2 border-transparent opacity-60"
+                }`}
+              >
+                <img
+                  src={img}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Title & Description */}
+          <div className="mt-8">
+            <h2 className="mb-2 font-[var(--font-display)] text-2xl font-bold text-[var(--c-dark)]">
+              Room {room.room_number || room.room_id} — {room.room_type}
+            </h2>
+
+            <p className="mb-7 text-[0.92rem] leading-7 text-[var(--c-muted)]">
+              {room.description ||
+                "A beautifully furnished room combining modern aesthetics with premium comfort. Every detail has been carefully curated to ensure an unforgettable stay."}
+            </p>
+
+            {/* Amenities */}
+            <h3 className="mb-3.5 font-[var(--font-display)] text-base font-bold text-[var(--c-dark)]">
+              Room Amenities
+            </h3>
+
+            <div className="flex flex-wrap gap-2">
+              {extra.amenities.map((a, i) => (
                 <div
                   key={i}
-                  onClick={() => setActiveImg(i)}
-                  style={{
-                    width: "78px",
-                    height: "58px",
-                    borderRadius: "8px",
-                    overflow: "hidden",
-                    cursor: "pointer",
-                    flexShrink: 0,
-                    border:
-                      activeImg === i
-                        ? "2.5px solid var(--c-primary)"
-                        : "2px solid transparent",
-                    opacity: activeImg === i ? 1 : 0.6,
-                    transition: "all 0.2s",
-                  }}
+                  className="flex items-center gap-1.5 rounded-lg border border-[#E0E1FF] bg-[#F3F4FF] px-3.5 py-2 text-[0.8rem] font-semibold text-[var(--c-primary)]"
                 >
-                  <img
-                    src={img}
-                    alt=""
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                    }}
-                  />
+                  <IconCheck />
+                  {a}
                 </div>
               ))}
             </div>
 
-            {/* Room title + desc */}
-            <div style={{ marginTop: "2rem" }}>
-              <h2
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: "1.5rem",
-                  fontWeight: 700,
-                  marginBottom: "8px",
-                  color: "var(--c-dark)",
-                }}
-              >
-                Room {room.room_number || room.room_id} — {room.room_type}
-              </h2>
-              <p
-                style={{
-                  color: "var(--c-muted)",
-                  lineHeight: 1.75,
-                  marginBottom: "1.75rem",
-                  fontSize: "0.92rem",
-                }}
-              >
-                {room.description ||
-                  "A beautifully furnished room combining modern aesthetics with premium comfort. Every detail has been carefully curated to ensure an unforgettable stay."}
-              </p>
-
-              {/* Amenities */}
-              <h3
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontWeight: 700,
-                  fontSize: "1rem",
-                  marginBottom: "14px",
-                  color: "var(--c-dark)",
-                }}
-              >
-                Room Amenities
+            {/* Policies */}
+            <div className="mt-8 rounded-xl border border-[var(--c-border)] bg-white p-5">
+              <h3 className="mb-3.5 font-[var(--font-display)] text-base font-bold text-[var(--c-dark)]">
+                Hotel Policies
               </h3>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                {extra.amenities.map((a, i) => (
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 max-md:grid-cols-1">
+                {policies.map((p, i) => (
                   <div
                     key={i}
-                    style={{
-                      background: "#F3F4FF",
-                      color: "var(--c-primary)",
-                      padding: "7px 14px",
-                      borderRadius: "8px",
-                      fontSize: "0.8rem",
-                      fontWeight: 600,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      border: "1px solid #E0E1FF",
-                    }}
+                    className="flex items-start gap-2 text-[0.83rem] text-[var(--c-muted)]"
                   >
-                    <span style={{ color: "var(--c-primary)" }}>
-                      <IconCheck />
+                    <span className="mt-px flex-shrink-0 text-[var(--c-primary)]">
+                      {p.icon}
                     </span>
-                    {a}
+                    {p.text}
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
 
-              {/* Policies */}
-              <div
+        {/* RIGHT SIDEBAR */}
+        <div className="sticky top-20 max-md:static max-md:order-first">
+
+          <div className="overflow-hidden rounded-2xl border border-[var(--c-border)] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)]">
+
+            {/* Price Header */}
+            <div className="bg-[#1a1a2e] px-6 py-6">
+              <div className="mb-1.5 text-[0.72rem] font-semibold uppercase tracking-wider text-white/50">
+                Starting from
+              </div>
+
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-[var(--font-display)] text-[2.4rem] font-extrabold leading-none text-white">
+                  ₹{Number(room.price_per_night).toLocaleString()}
+                </span>
+
+                <span className="text-sm text-white/50">
+                  /night
+                </span>
+              </div>
+
+              <div className="mt-2.5 flex items-center gap-1.5 text-[0.78rem] text-white/60">
+                <IconUsers />
+                Up to {room.capacity || 2} guests
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-3 border-b border-[var(--c-border)]">
+              {[
+                { icon: <IconBed />, label: "Type", val: room.room_type },
+                {
+                  icon: <IconUsers />,
+                  label: "Guests",
+                  val: room.capacity || 2,
+                },
+                { icon: <IconStar />, label: "Rating", val: "4.9" },
+              ].map((s, i) => (
+                <div
+                  key={i}
+                  className={`p-3 text-center ${
+                    i < 2 ? "border-r border-[var(--c-border)]" : ""
+                  }`}
+                >
+                  <div className="mb-1 flex justify-center text-[var(--c-primary)]">
+                    {s.icon}
+                  </div>
+
+                  <div className="text-[0.67rem] uppercase tracking-wide text-[var(--c-muted)]">
+                    {s.label}
+                  </div>
+
+                  <div className="mt-0.5 text-[0.82rem] font-bold text-[var(--c-dark)]">
+                    {s.val}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Book Button */}
+            <div className="px-5 pt-5 pb-3">
+              <button
+                onClick={() => {
+                  if (!user) {
+                    onAuthPrompt();
+                    return;
+                  }
+                  onBook(room);
+                }}
+                className="w-full rounded-xl py-4 text-base font-bold transition-all hover:-translate-y-[1px]"
                 style={{
-                  marginTop: "2rem",
-                  background: "#fff",
-                  borderRadius: "12px",
-                  border: "1px solid var(--c-border)",
-                  padding: "1.25rem",
+                  backgroundColor: "#0f1923",
+                  color: "white",
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = "#c9a84c";
+                  e.target.style.color = "black";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = "#0f1923";
+                  e.target.style.color = "white";
                 }}
               >
-                <h3
-                  style={{
-                    fontFamily: "var(--font-display)",
-                    fontWeight: 700,
-                    fontSize: "1rem",
-                    marginBottom: "14px",
-                    color: "var(--c-dark)",
-                  }}
-                >
-                  Hotel Policies
-                </h3>
-                <div className="rd-policies-grid">
-                  {policies.map((p, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: "8px",
-                        fontSize: "0.83rem",
-                        color: "var(--c-muted)",
-                      }}
-                    >
-                      <span
-                        style={{
-                          color: "var(--c-primary)",
-                          marginTop: "1px",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {p.icon}
-                      </span>
-                      {p.text}
-                    </div>
-                  ))}
+                Book Now
+              </button>
+
+              <p className="mt-2 text-center text-xs text-[var(--c-muted)]">
+                Free cancellation · No hidden charges
+              </p>
+            </div>
+
+            {/* Price Estimate */}
+            <div className="px-5 pb-5">
+              <div className="overflow-hidden rounded-xl border border-[var(--c-border)] bg-[#F8F9FF]">
+                <div className="border-b border-[var(--c-border)] bg-[#F0F1FA] px-3.5 py-2.5 text-[0.7rem] font-bold uppercase tracking-wide text-[var(--c-muted)]">
+                  Price Estimate
                 </div>
+
+                {[1, 2, 3, 5, 7].map((n) => (
+                  <div
+                    key={n}
+                    className="flex items-center justify-between border-b border-[var(--c-border)] px-3.5 py-2.5 text-[0.82rem] last:border-b-0"
+                  >
+                    <span className="text-[var(--c-muted)]">
+                      {n} night{n > 1 ? "s" : ""}
+                    </span>
+
+                    <span className="font-bold text-[var(--c-dark)]">
+                      ₹{(room.price_per_night * n).toLocaleString()}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
 
-          {/* ── RIGHT: BOOKING CARD ── */}
-          <div className="rd-sticky">
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: "16px",
-                border: "1px solid var(--c-border)",
-                boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
-                overflow: "hidden",
-              }}
-            >
-              {/* Price block — dark background so text is always visible */}
+          {/* Trust Badges */}
+          <div className="mt-3.5 flex justify-center gap-5">
+            {[
+              { icon: <IconShield />, label: "Secure" },
+              { icon: <IconBadge />, label: "Verified" },
+              { icon: <IconTag />, label: "Best Price" },
+            ].map((b, i) => (
               <div
-                style={{
-                  background: "#1a1a2e",
-                  padding: "1.5rem 1.5rem 1.25rem",
-                }}
+                key={i}
+                className="flex items-center gap-1 text-xs font-medium text-[var(--c-muted)]"
               >
-                <div
-                  style={{
-                    fontSize: "0.72rem",
-                    fontWeight: 600,
-                    color: "rgba(255,255,255,0.5)",
-                    letterSpacing: "0.8px",
-                    textTransform: "uppercase",
-                    marginBottom: "6px",
-                  }}
-                >
-                  Starting from
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "baseline",
-                    gap: "6px",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: "var(--font-display)",
-                      fontSize: "2.4rem",
-                      fontWeight: 800,
-                      color: "#fff",
-                      lineHeight: 1,
-                    }}
-                  >
-                    ₹{Number(room.price_per_night).toLocaleString()}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: "0.85rem",
-                      color: "rgba(255,255,255,0.5)",
-                      fontWeight: 400,
-                    }}
-                  >
-                    /night
-                  </span>
-                </div>
-                <div
-                  style={{
-                    marginTop: "10px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    color: "rgba(255,255,255,0.55)",
-                    fontSize: "0.78rem",
-                  }}
-                >
-                  <IconUsers />
-                  Up to {room.capacity || 2} guests
-                </div>
+                <span className="text-[var(--c-primary)]">{b.icon}</span>
+                {b.label}
               </div>
-
-              {/* Quick Stats */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr",
-                  borderBottom: "1px solid var(--c-border)",
-                }}
-              >
-                {[
-                  { icon: <IconBed />, label: "Type", val: room.room_type },
-                  {
-                    icon: <IconUsers />,
-                    label: "Guests",
-                    val: room.capacity || 2,
-                  },
-                  { icon: <IconStar />, label: "Rating", val: "4.9" },
-                ].map((s, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      padding: "14px 10px",
-                      textAlign: "center",
-                      borderRight: i < 2 ? "1px solid var(--c-border)" : "none",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "center",
-                        color: "var(--c-primary)",
-                        marginBottom: "4px",
-                      }}
-                    >
-                      {s.icon}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "0.67rem",
-                        color: "var(--c-muted)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.4px",
-                      }}
-                    >
-                      {s.label}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "0.82rem",
-                        fontWeight: 700,
-                        color: "var(--c-dark)",
-                        marginTop: "2px",
-                      }}
-                    >
-                      {s.val}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Book button */}
-              <div style={{ padding: "1.25rem 1.25rem 0.75rem" }}>
-                <button
-                  className="rd-book-btn"
-                  onClick={() => {
-                    if (!user) {
-                      onAuthPrompt();
-                      return;
-                    }
-                    onBook(room);
-                  }}
-                >
-                  Book Now
-                </button>
-                <p
-                  style={{
-                    textAlign: "center",
-                    fontSize: "0.73rem",
-                    color: "var(--c-muted)",
-                    marginTop: "8px",
-                  }}
-                >
-                  Free cancellation · No hidden charges
-                </p>
-              </div>
-
-              {/* Price Estimate */}
-              <div style={{ padding: "0 1.25rem 1.25rem" }}>
-                <div
-                  style={{
-                    background: "#F8F9FF",
-                    borderRadius: "10px",
-                    overflow: "hidden",
-                    border: "1px solid var(--c-border)",
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: "10px 14px",
-                      borderBottom: "1px solid var(--c-border)",
-                      fontSize: "0.7rem",
-                      fontWeight: 700,
-                      color: "var(--c-muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.6px",
-                      background: "#F0F1FA",
-                    }}
-                  >
-                    Price Estimate
-                  </div>
-                  {[1, 2, 3, 5, 7].map((n) => (
-                    <div
-                      key={n}
-                      className="rd-price-row"
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "9px 14px",
-                        fontSize: "0.82rem",
-                      }}
-                    >
-                      <span style={{ color: "var(--c-muted)" }}>
-                        {n} night{n > 1 ? "s" : ""}
-                      </span>
-                      <span style={{ fontWeight: 700, color: "var(--c-dark)" }}>
-                        ₹{(room.price_per_night * n).toLocaleString()}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Trust Badges */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                gap: "20px",
-                marginTop: "14px",
-              }}
-            >
-              {[
-                { icon: <IconShield />, label: "Secure" },
-                { icon: <IconBadge />, label: "Verified" },
-                { icon: <IconTag />, label: "Best Price" },
-              ].map((b, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    fontSize: "0.73rem",
-                    color: "var(--c-muted)",
-                    fontWeight: 500,
-                  }}
-                >
-                  <span style={{ color: "var(--c-primary)" }}>{b.icon}</span>
-                  {b.label}
-                </div>
-              ))}
-            </div>
+            ))}
           </div>
         </div>
       </div>
     </div>
-  );
+  </div>
+);
 }
