@@ -5,14 +5,14 @@ import "./App.css";
 import { CalendarIcon, SearchIcon, CheckIcon } from "./Icons";
 
 const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
-export default function CalendarSection() {
+export default function CalendarSection({ onViewRooms }) {
   const [checkIn, setCheckIn] = useState(null);
   const [checkOut, setCheckOut] = useState(null);
   const [step, setStep] = useState("checkin");
   const [roomType, setRoomType] = useState("");
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
-
+  const [showAllRooms, setShowAllRooms] = useState(false);
   function handleDateChange(date) {
     if (step === "checkin") {
       setCheckIn(date);
@@ -43,28 +43,35 @@ export default function CalendarSection() {
 
   async function checkAvailability() {
     if (!checkIn || !checkOut) return;
-
     setLoading(true);
     setResults(null);
 
     try {
-      const p = new URLSearchParams({
-        check_in: checkIn.toISOString().split("T")[0],
-        check_out: checkOut.toISOString().split("T")[0],
-      });
+      const formatLocalDate = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
 
+        return `${year}-${month}-${day}`;
+      };
+      const p = new URLSearchParams({
+        check_in: formatLocalDate(checkIn),
+        check_out: formatLocalDate(checkOut),
+      });
       if (roomType) p.set("type", roomType);
 
       const res = await fetch(`${API}/api/rooms?${p}`);
       const data = await res.json();
-
-      setResults(Array.isArray(data) ? data : []);
+      const available = Array.isArray(data) ? data : [];
+      setResults(available);
+      setShowAllRooms(false);
+      onViewRooms?.(available.map((r) => r.room_id));
     } catch {
       setResults([]);
     } finally {
       setLoading(false);
     }
-  }
+  }   // <-- Missing brace
 
   function tileClass({ date, view }) {
     if (view !== "month") return null;
@@ -201,18 +208,17 @@ export default function CalendarSection() {
             <button
               onClick={checkAvailability}
               disabled={!checkIn || !checkOut || loading}
-              className={`flex w-full items-center justify-center gap-2 rounded-md bg-[var(--gold)] px-5 py-3 font-medium text-[var(--navy)] transition ${
-                !checkIn || !checkOut
-                  ? "pointer-events-none opacity-50"
-                  : "hover:brightness-105"
-              }`}
+              className={`flex w-full items-center justify-center gap-2 rounded-md bg-[var(--gold)] px-5 py-3 font-medium text-[var(--navy)] transition ${!checkIn || !checkOut
+                ? "pointer-events-none opacity-50"
+                : "hover:brightness-105"
+                }`}
             >
               <SearchIcon size={15} />
               {loading ? "Checking..." : "Check Availability"}
             </button>
 
             {/* Results */}
-            {results !== null && (
+            {/* {results !== null && (
               <div className="mt-5 rounded-[var(--radius-md)] border border-[rgba(201,168,76,0.2)] bg-white/5 px-[18px] py-[14px] text-white">
                 {results.length === 0 ? (
                   <div className="text-[0.88rem] text-white/50">
@@ -229,7 +235,7 @@ export default function CalendarSection() {
                       {results.length > 1 ? "s" : ""} available
                     </div>
 
-                    {results.slice(0, 4).map((r) => (
+                    {results.slice(0, 6).map((r) => (
                       <div
                         key={r.room_id}
                         className="flex justify-between border-t border-white/5 py-1.5 text-[0.78rem] text-white/60"
@@ -248,16 +254,94 @@ export default function CalendarSection() {
                         </span>
                       </div>
                     ))}
-
-                    {results.length > 4 && (
-                      <div className="mt-1.5 text-[0.72rem] text-white/35">
-                        +{results.length - 4} more — scroll to rooms
-                        above
-                      </div>
+                    {results.length > 4  && (
+                      <button
+                        onClick={() =>
+                          document
+                            .getElementById("rooms-section")
+                            ?.scrollIntoView({ behavior: "smooth" })
+                        }
+                        className="mt-2 text-[0.72rem] text-[var(--gold)] underline underline-offset-2 cursor-pointer bg-transparent border-0 p-0 font-inherit hover:text-white transition"
+                      >
+                        +{results.length - 4} more available — view all rooms ↓
+                      </button>
                     )}
                   </>
                 )}
               </div>
+            )} */}
+            {loading ? (
+              <div className="mt-5 rounded-[var(--radius-md)] border border-[rgba(201,168,76,0.2)] bg-white/5 px-[18px] py-[16px]">
+                <div className="flex items-center gap-3">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--gold)] border-t-transparent" />
+                  <span className="text-[0.88rem] text-white/70">
+                    Checking room availability...
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {[1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="animate-pulse flex justify-between border-t border-white/5 py-2"
+                    >
+                      <div className="h-3 w-32 rounded bg-white/10" />
+                      <div className="h-3 w-20 rounded bg-white/10" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              results !== null && (
+                <div className="mt-5 rounded-[var(--radius-md)] border border-[rgba(201,168,76,0.2)] bg-white/5 px-[18px] py-[14px] text-white">
+                  {results.length === 0 ? (
+                    <div className="text-[0.88rem] text-white/50">
+                      No rooms available for these dates.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mb-2 flex items-center gap-1.5 text-[0.88rem] font-semibold text-[var(--gold-light)]">
+                        <CheckIcon
+                          size={15}
+                          color="var(--gold)"
+                        />
+                        {results.length} room
+                        {results.length > 1 ? "s" : ""} available
+                      </div>
+
+                      {(showAllRooms ? results : results.slice(0, 2)).map((r) => (
+                        <div
+                          key={r.room_id}
+                          className="flex justify-between border-t border-white/5 py-1.5 text-[0.78rem] text-white/60"
+                        >
+                          <span>
+                            {r.room_type} — Room{" "}
+                            {r.room_number || r.room_id}
+                          </span>
+
+                          <span className="font-semibold text-white">
+                            ₹
+                            {Number(
+                              r.price_per_night
+                            ).toLocaleString()}
+                            /night
+                          </span>
+                        </div>
+                      ))}
+                      {results.length > 2 && (
+                        <button
+                          onClick={() => setShowAllRooms(!showAllRooms)}
+                          className="mt-2 text-[0.72rem] text-[var(--gold)] underline underline-offset-2 cursor-pointer bg-transparent border-0 p-0 font-inherit hover:text-white transition"
+                        >
+                          {showAllRooms
+                            ? "Show Less ↑"
+                            : `+${results.length - 2} more available — View More ↓`}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
             )}
           </div>
 
