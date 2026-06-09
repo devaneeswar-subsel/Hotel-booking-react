@@ -73,6 +73,7 @@ function WriteReviewModal({
 
     try {
       const res = await apiFetch("/api/reviews", {
+        method: "POST",
         body: JSON.stringify({
           user_id: user.user_id,
           booking_id: booking.booking_id,
@@ -801,7 +802,7 @@ function AuthModal({ onClose, onLogin }) {
     </div>
   );
 }
-function MyBookingsModal({ user, onClose, showToast }) {
+function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reviewedBookings, setReviewedBookings] = useState([]);
@@ -809,21 +810,17 @@ function MyBookingsModal({ user, onClose, showToast }) {
 
   const fetchData = useCallback(() => {
     setLoading(true);
-
     Promise.all([
       apiFetch(`/api/bookings/user/${user.user_id}`)
         .then((r) => r.json())
         .catch(() => []),
-
       apiFetch(`/api/reviews/user/${user.user_id}`)
         .then((r) => r.json())
         .catch(() => []),
     ])
       .then(([b, r]) => {
         setBookings(Array.isArray(b) ? b : []);
-        setReviewedBookings(
-          Array.isArray(r) ? r.map((x) => x.booking_id) : [],
-        );
+        setReviewedBookings(Array.isArray(r) ? r.map((x) => x.booking_id) : []);
       })
       .finally(() => setLoading(false));
   }, [user]);
@@ -832,122 +829,263 @@ function MyBookingsModal({ user, onClose, showToast }) {
     fetchData();
   }, [fetchData]);
 
+  const statusConfig = {
+    confirmed: {
+      pill: "bg-emerald-100 text-emerald-800",
+      dot: "bg-emerald-500",
+      label: "Confirmed",
+    },
+    completed: {
+      pill: "bg-blue-100 text-blue-800",
+      dot: "bg-blue-500",
+      label: "Completed",
+    },
+    cancelled: {
+      pill: "bg-red-100 text-red-700",
+      dot: "bg-red-500",
+      label: "Cancelled",
+    },
+    pending: {
+      pill: "bg-yellow-100 text-yellow-800",
+      dot: "bg-yellow-400",
+      label: "Pending",
+    },
+  };
+
+  const getNights = (checkIn, checkOut) => {
+    if (!checkIn || !checkOut) return null;
+    const diff = (new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24);
+    return diff > 0 ? diff : null;
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return "";
+    return new Date(dateStr).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
   return (
     <>
-      <div className="modal-bg">
-        <div className="modal max-w-[600px]">
-          <div className="modal-header">
-            <h2>My Bookings</h2>
+      {/* ── Overlay ── */}
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(10,16,24,0.65)] backdrop-blur-sm"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+      >
+        {/* ── Modal shell ── */}
+        <div className="relative w-full max-w-[640px] max-h-[88vh] flex flex-col overflow-hidden rounded-[20px] bg-white shadow-2xl ring-1 ring-white/10">
 
-            <button className="modal-close" onClick={onClose}>
-              <XIcon size={14} color="#495057" />
-            </button>
+          {/* ── Header ── */}
+          <div className="relative flex-shrink-0 bg-gradient-to-br from-[#0F1923] to-[#1C2B3A] px-5 sm:px-7 pt-5 sm:pt-6 pb-5">
+            {/* Decorative glow */}
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-44 rounded-tr-[20px] bg-[radial-gradient(ellipse_at_top_right,rgba(232,213,163,0.12)_0%,transparent_70%)]" />
+
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="mb-1 text-[0.7rem] font-bold uppercase tracking-[0.12em] text-[#E8D5A3] opacity-80">
+                  VV Grand Park
+                </p>
+                <h2 className="m-0 text-xl sm:text-[1.45rem] font-bold tracking-tight text-white">
+                  My Bookings
+                </h2>
+                {!loading && (
+                  <p className="mt-1 text-[0.78rem] text-white/40">
+                    {bookings.length === 0
+                      ? "No bookings yet"
+                      : `${bookings.length} booking${bookings.length > 1 ? "s" : ""} total`}
+                  </p>
+                )}
+              </div>
+
+              <button
+                onClick={onClose}
+                className="flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-[10px] border border-white/[0.12] bg-white/[0.08] text-[1.1rem] leading-none text-white/60 transition-colors hover:bg-white/[0.15]"
+              >
+                ✕
+              </button>
+            </div>
           </div>
 
-          <div className="modal-body max-h-[70vh] overflow-y-auto">
+          {/* ── Body ── */}
+          <div className="flex-1 overflow-y-auto bg-[#F7F8FA] p-3 sm:p-4">
             {loading ? (
-              <div className="loader">
-                Loading bookings...
+              /* Shimmer skeletons */
+              <div className="flex flex-col gap-3">
+                <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
+                {[1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="flex gap-3 sm:gap-3.5 rounded-[14px] border border-[#EAECEF] bg-white p-3 sm:p-4"
+                  >
+                    <div
+                      className="h-[80px] w-[80px] sm:h-[88px] sm:w-[88px] flex-shrink-0 rounded-[10px]"
+                      style={{
+                        background: "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
+                        backgroundSize: "200% 100%",
+                        animation: "shimmer 1.4s infinite",
+                      }}
+                    />
+                    <div className="flex flex-1 flex-col gap-2 justify-center">
+                      {[["55%", "0s"], ["75%", "0.1s"], ["40%", "0.2s"]].map(
+                        ([w, delay], idx) => (
+                          <div
+                            key={idx}
+                            className="h-3 rounded"
+                            style={{
+                              width: w,
+                              background: "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
+                              backgroundSize: "200% 100%",
+                              animation: `shimmer 1.4s ${delay} infinite`,
+                            }}
+                          />
+                        )
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : bookings.length === 0 ? (
-              <div className="empty">
-                <div className="empty-icon">
-                  <BookingIcon size={22} />
+              /* Empty state */
+              <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-[16px] bg-gradient-to-br from-[#EEF1F5] to-[#E4E8EF] text-[1.8rem]">
+                  🏨
                 </div>
-
-                <p>No confirmed bookings yet.</p>
+                <p className="m-0 text-base font-bold text-[#1C2B3A]">
+                  No bookings yet
+                </p>
+                <p className="m-0 max-w-[240px] text-[0.82rem] leading-relaxed text-[#8A95A3]">
+                  Ready for your next stay? Browse our rooms and make a reservation.
+                </p>
+                <button
+                  onClick={() => { onClose(); onNavigateToRooms?.(); }}
+                  className="mt-2 cursor-pointer rounded-[10px] border-0 bg-[#0F1923] px-[22px] py-2.5 font-inherit text-[0.82rem] font-bold text-[#E8D5A3] transition-opacity hover:opacity-85"
+                >
+                  Browse Rooms →
+                </button>
               </div>
             ) : (
-              bookings.map((b) => (
-                <div
-                  className="booking-card flex-wrap gap-2"
-                  key={b.booking_id}
-                >
-                  <img
-                    src={
-                      b.image_url ||
-                      "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=200"
-                    }
-                    alt={b.room_type}
-                  />
+              /* Booking cards */
+              <div className="flex flex-col gap-3">
+                {bookings.map((b) => {
+                  const cfg = statusConfig[b.status] || statusConfig.pending;
+                  const nights = getNights(b.check_in_date, b.check_out_date);
+                  const isReviewed = reviewedBookings.includes(b.booking_id);
+                  const canReview =
+                    (b.status === "confirmed" || b.status === "completed") && !isReviewed;
 
-                  <div className="booking-info flex-1">
-                    <h4>{b.room_type}</h4>
-
-                    <p>
-                      {b.check_in_date?.slice(0, 10)} →{" "}
-                      {b.check_out_date?.slice(0, 10)}
-                    </p>
-
-                    <p className="mt-[6px]">
-                      <strong className="text-[var(--navy)] font-[var(--font-display)] text-[0.95rem]">
-                        Rs.
-                        {Number(
-                          b.final_total || b.total_price,
-                        ).toLocaleString()}
-                      </strong>
-
-                      <span className="ml-[10px]">
-                        <span
-                          className={`badge badge-${b.status}`}
-                        >
-                          {b.status}
-                        </span>
-                      </span>
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col gap-[6px] items-end">
-                    {b.status === "confirmed" && (
-                      <div className="bg-[#FFF3CD] border border-[#FFC107] rounded-lg px-3 py-2 max-w-[200px] text-[0.72rem] text-[#856404] leading-[1.5]">
-                        <div className="font-bold mb-[3px]">
-                          Need to cancel?
+                  return (
+                    <div
+                      key={b.booking_id}
+                      className="group overflow-hidden rounded-[14px] border border-[#EAECEF] bg-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-lg"
+                    >
+                      {/* ── Clickable room section ── */}
+                      <div
+                        className="flex cursor-pointer"
+                        onClick={() => { onClose(); onNavigateToRooms?.(b.room_id); }}
+                        title="View this room"
+                      >
+                        {/* Room image */}
+                        <div className="relative w-[100px] sm:w-[120px] flex-shrink-0">
+                          <img
+                            src={
+                              b.image_url ||
+                              "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=300"
+                            }
+                            alt={b.room_type}
+                            className="block h-full min-h-[100px] sm:min-h-[110px] w-full object-cover"
+                          />
+                          {/* Hover overlay */}
+                          <div className="absolute inset-0 flex items-center justify-center bg-[rgba(15,25,35,0)] transition-colors duration-200 group-hover:bg-[rgba(15,25,35,0.35)]">
+                            <span className="rounded-lg bg-[rgba(15,25,35,0.7)] px-2.5 py-1 text-[0.72rem] font-bold text-white opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover:opacity-100">
+                              View Room →
+                            </span>
+                          </div>
                         </div>
 
-                        <div>📞 +91 12345 67890</div>
-                        <div>✉️ hello@vvgrandpark.com</div>
+                        {/* Info block */}
+                        <div className="flex-1 px-3 sm:px-4 py-3 sm:py-3.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <h4 className="m-0 text-[0.88rem] sm:text-[0.92rem] font-bold leading-snug text-[#0F1923]">
+                              {b.room_type}
+                            </h4>
+                            {/* Status pill */}
+                            <span
+                              className={`inline-flex flex-shrink-0 items-center gap-1 sm:gap-1.5 rounded-full px-2 sm:px-2.5 py-[3px] text-[0.65rem] sm:text-[0.68rem] font-bold tracking-wide ${cfg.pill}`}
+                            >
+                              <span className={`inline-block h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
+                              {cfg.label}
+                            </span>
+                          </div>
+
+                          {/* Dates */}
+                          <div className="mt-2 flex flex-wrap items-center gap-1 sm:gap-1.5">
+                            <span className="rounded-[7px] bg-[#F0F3F7] px-2 sm:px-2.5 py-1 text-[0.68rem] sm:text-[0.72rem] font-semibold text-[#3A4A5C]">
+                              {formatDate(b.check_in_date)}
+                            </span>
+                            <span className="text-[0.75rem] text-[#B0B8C4]">→</span>
+                            <span className="rounded-[7px] bg-[#F0F3F7] px-2 sm:px-2.5 py-1 text-[0.68rem] sm:text-[0.72rem] font-semibold text-[#3A4A5C]">
+                              {formatDate(b.check_out_date)}
+                            </span>
+                            {nights && (
+                              <span className="text-[0.68rem] sm:text-[0.7rem] text-[#8A95A3]">
+                                · {nights}n
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Price + hint */}
+                          <div className="mt-2 sm:mt-2.5 flex items-center justify-between">
+                            <div>
+                              <span className="text-[0.98rem] sm:text-[1.05rem] font-extrabold tracking-tight text-[#0F1923]">
+                                ₹{Number(b.final_total || b.total_price).toLocaleString("en-IN")}
+                              </span>
+                              {nights && (
+                                <span className="ml-1 text-[0.68rem] sm:text-[0.7rem] text-[#8A95A3]">total</span>
+                              )}
+                            </div>
+                            <span className="hidden sm:inline text-[0.7rem] text-[#C4CAD4]">View room ↗</span>
+                          </div>
+                        </div>
                       </div>
-                    )}
 
-                    {(b.status === "confirmed" ||
-                      b.status === "completed") &&
-                      !reviewedBookings.includes(
-                        b.booking_id,
-                      ) && (
-                        <button
-                          onClick={() =>
-                            setReviewBooking(b)
-                          }
-                          className="
-                            bg-[#0F1923]
-                            text-[#E8D5A3]
-                            border-0
-                            rounded-md
-                            px-[14px]
-                            py-[6px]
-                            text-[0.75rem]
-                            font-semibold
-                            cursor-pointer
-                            font-inherit
-                            flex
-                            items-center
-                            gap-[5px]
-                          "
-                        >
-                          ★ Review
-                        </button>
+                      {/* ── Action footer ── */}
+                      {(b.status === "confirmed" || canReview || isReviewed) && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#F0F3F7] bg-[#FAFBFC] px-3 sm:px-3.5 py-2.5">
+                          {b.status === "confirmed" ? (
+                            <p className="m-0 flex items-center gap-1.5 text-[0.68rem] sm:text-[0.71rem] text-[#6B7785]">
+                              <span className="text-sm">📞</span>
+                              To cancel:{" "}
+                              <a
+                                href="tel:+911234567890"
+                                className="font-semibold text-blue-800 no-underline"
+                              >
+                                +91 12345 67890
+                              </a>
+                            </p>
+                          ) : (
+                            <div />
+                          )}
+
+                          {canReview ? (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setReviewBooking(b); }}
+                              className="flex flex-shrink-0 cursor-pointer items-center gap-[5px] rounded-lg border-0 bg-[#0F1923] px-3 sm:px-4 py-[6px] sm:py-[7px] font-inherit text-[0.72rem] sm:text-[0.74rem] font-bold text-[#E8D5A3] transition-opacity hover:opacity-85"
+                            >
+                              ★ Write a Review
+                            </button>
+                          ) : isReviewed ? (
+                            <span className="flex flex-shrink-0 items-center gap-1 text-[0.72rem] font-bold text-emerald-600">
+                              ✅ Review submitted
+                            </span>
+                          ) : null}
+                        </div>
                       )}
-
-                    {reviewedBookings.includes(
-                      b.booking_id,
-                    ) && (
-                      <span className="text-[0.72rem] text-[#2D9A6E] font-semibold">
-                        ✅ Reviewed
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
@@ -966,6 +1104,7 @@ function MyBookingsModal({ user, onClose, showToast }) {
   );
 }
 
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -976,11 +1115,11 @@ export default function App() {
   const [showManager, setShowManager] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [toast, setToast] = useState(null);
-
+const [availableRoomIds, setAvailableRoomIds] = useState(null);
+// null = no filter active, [] = none available, [1,2,3] = filter active
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
   }, []);
-
   useEffect(() => {
     apiFetch("/api/auth/me")
       .then((r) => r.json())
@@ -1040,13 +1179,18 @@ export default function App() {
 if (selectedRoom) {
   return (
     <>
-      <RoomDetail
-        room={selectedRoom}
-        user={user}
-        onBack={() => setSelectedRoom(null)}
-        onBook={(room) => setBookingRoom(room)}
-        onAuthPrompt={() => setShowAuth(true)}
-      />
+       <RoomDetail
+      room={selectedRoom}
+      user={user}
+      onBack={() => setSelectedRoom(null)}
+      onBook={(room) => {
+  setSelectedRoom(null);
+  setBookingRoom(room);
+}}
+      onAuthPrompt={() => {
+        setSelectedRoom(null);
+        setShowAuth(true);
+      }}/>
 
       {bookingRoom && user && (
         <BookingModal
@@ -1131,13 +1275,23 @@ return (
     />
 
     <Rooms
-      user={user}
-      onBookClick={(room) => setBookingRoom(room)}
-      onCardClick={(room) => setSelectedRoom(room)}
-      onAuthPrompt={() => setShowAuth(true)}
-    />
+  user={user}
+  availableRoomIds={availableRoomIds}          // ← add this
+  onBookClick={(room) => setBookingRoom(room)}
+  onCardClick={(room) => setSelectedRoom(room)}
+  onAuthPrompt={() => setShowAuth(true)}
+/>
 
-    <CalendarSection />
+    <CalendarSection
+  onViewRooms={(ids) => {
+    setAvailableRoomIds(ids);
+    setTimeout(() => {
+      document
+        .getElementById("rooms-section")
+        ?.scrollIntoView({ behavior: "smooth" });
+    }, 300);
+  }}
+/>
     <Facilities />
     <Gallery />
     <Testimonials />
@@ -1160,15 +1314,30 @@ return (
     )}
 
     {showBookings &&
-      user &&
-      user.role !== "admin" &&
-      user.role !== "manager" && (
-        <MyBookingsModal
-          user={user}
-          onClose={() => setShowBookings(false)}
-          showToast={showToast}
-        />
-      )}
+  user &&
+  user.role !== "admin" &&
+  user.role !== "manager" && (
+    <MyBookingsModal
+      user={user}
+      onClose={() => setShowBookings(false)}
+      showToast={showToast}
+     onNavigateToRooms={(roomId) => {
+  setShowBookings(false);
+  if (roomId) {
+    apiFetch(`/api/rooms/${roomId}`)
+      .then((r) => r.json())
+      .then((room) => {
+        if (room?.room_id) setSelectedRoom(room);
+      })
+      .catch(() => {});
+  } else {
+    document
+      .getElementById("rooms-section")
+      ?.scrollIntoView({ behavior: "smooth" });
+  }
+}}
+    />
+  )}
 
     {toast && (
       <Toast

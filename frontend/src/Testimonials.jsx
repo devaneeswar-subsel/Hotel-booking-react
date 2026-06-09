@@ -29,34 +29,64 @@ const STATIC_REVIEWS = [
 
 export default function Testimonials() {
   const [reviews, setReviews] = useState([]);
+  const [expandedCards, setExpandedCards] = useState({});
+  const [overflowingCards, setOverflowingCards] = useState({});
+
+  const toggleExpand = (index) => {
+    setExpandedCards((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
 
   useEffect(() => {
     fetch(`${API}/api/reviews`)
       .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) setReviews(data);
+        if (Array.isArray(data) && data.length > 0) {
+          setReviews(data);
+        }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const displayReviews = (
     reviews.length > 0
       ? reviews.map((r) => ({
-          initials: r.guest_name
-            ?.split(" ")
-            .map((w) => w[0])
-            .join("")
-            .slice(0, 2)
-            .toUpperCase(),
-          name: r.guest_name,
-          location: "India",
-          rating: r.rating,
-          text: r.review_text,
-          room_type: r.room_type,
-          isReal: true,
-        }))
+        initials: r.guest_name
+          ?.split(" ")
+          .map((w) => w[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase(),
+        name: r.guest_name,
+        location: "India",
+        rating: r.rating,
+        text: r.review_text,
+        room_type: r.room_type,
+        isReal: true,
+      }))
       : STATIC_REVIEWS
   ).slice(0, 3); // only 3 most recent
+
+  useEffect(() => {
+    const checkOverflow = () => {
+      const newOverflow = {};
+      document.querySelectorAll(".review-text").forEach((el, index) => {
+        newOverflow[index] = el.scrollHeight > el.clientHeight;
+      });
+      setOverflowingCards(newOverflow);
+    };
+
+    // Small delay ensures the DOM elements have rendered completely with styles applied
+    const timer = setTimeout(checkOverflow, 100);
+
+    window.addEventListener("resize", checkOverflow);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", checkOverflow);
+    };
+  }, [displayReviews]);
 
   const avgRating =
     reviews.length > 0
@@ -75,7 +105,7 @@ export default function Testimonials() {
             Words from <em className="not-italic">Our Guests</em>
           </h2>
         </div>
-        
+
         {/* Rating Badge */}
         <div className="flex items-center gap-3 bg-[var(--navy)] px-5 py-3 rounded-xl shrink-0">
           <div>
@@ -90,10 +120,10 @@ export default function Testimonials() {
               ))}
             </div>
           </div>
-          
+
           {/* Vertical Divider */}
           <div className="w-[1px] h-9 bg-white/10" />
-          
+
           <div>
             <div className="text-[0.78rem] font-bold text-white">
               {reviews.length || STATIC_REVIEWS.length} Reviews
@@ -110,7 +140,7 @@ export default function Testimonials() {
         {displayReviews.map((t, i) => (
           <div
             key={i}
-            className="relative overflow-hidden flex flex-col gap-4 bg-white border border-[var(--gray-200)] rounded-2xl px-6 py-7 shadow-[0_2px_12px_rgba(15,25,35,0.06)] transition-all duration-200 ease-in-out hover:-translate-y-1 hover:shadow-[0_8px_28px_rgba(15,25,35,0.12)]"
+            className="relative overflow-hidden flex flex-col h-full gap-4 bg-white border border-[var(--gray-200)] rounded-2xl px-6 py-7 shadow-[0_2px_12px_rgba(15,25,35,0.06)] transition-all duration-200 ease-in-out hover:-translate-y-1 hover:shadow-[0_8px_28px_rgba(15,25,35,0.12)]"
           >
             {/* Top Border Accent Decorator */}
             <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-[var(--gold)] to-[var(--gold-light)]" />
@@ -134,44 +164,62 @@ export default function Testimonials() {
             </div>
 
             {/* Review text snippet block */}
-            <p className="text-[0.875rem] text-[var(--gray-600)] leading-[1.75] italic flex-1 m-0">
-              {t.text}
-            </p>
+            <div className="flex-1">
+              <p
+                className={`review-text text-[0.875rem] text-[var(--gray-600)] leading-[1.75] italic m-0 text-justify ${
+                  !expandedCards[i] ? "line-clamp-5" : ""
+                }`}
+              >
+                {t.text}
+              </p>
 
-            {/* Internal Card Row Separator */}
-            <div className="h-[1px] bg-[var(--gray-100)]" />
-
-            {/* Profile Meta Area */}
-            <div className="flex items-center gap-3">
-              {/* Initials Circle */}
-              <div className="w-10 h-10 rounded-full bg-[var(--navy)] flex items-center justify-center text-[var(--gold-light)] font-bold text-[0.8rem] font-[var(--font-display)] shrink-0">
-                {t.initials}
-              </div>
-              
-              {/* Name and Geolocation details column */}
-              <div className="flex-1 min-w-0">
-                <div className="text-[0.875rem] font-bold text-[var(--navy)] truncate">
-                  {t.name}
-                </div>
-                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  <span className="text-[0.68rem] text-[var(--gray-400)] flex items-center gap-0.5">
-                    <MapPinIcon size={10} color="var(--gray-400)" />
-                    {t.location}
-                  </span>
-                  {t.room_type && (
-                    <span className="bg-[var(--gray-100)] px-1.5 py-[1px] rounded-[3px] text-[0.6rem] font-bold text-[var(--navy)] uppercase tracking-[0.5px]">
-                      {t.room_type}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Verified Pill Badge alignment element */}
-              {t.isReal && (
-                <span className="shrink-0 text-[0.6rem] text-[#2D9A6E] font-bold bg-[#E8F8F0] px-2 py-[3px] rounded border border-[#BBF0D6]">
-                  ✓ Verified
-                </span>
+              {/* Show button if the text naturally overflows 5 lines OR if it's already expanded */}
+              {(overflowingCards[i] || expandedCards[i]) && (
+                <button
+                  onClick={() => toggleExpand(i)}
+                  className="mt-2 text-sm font-medium text-[#0f1923] hover:underline"
+                >
+                  {expandedCards[i] ? "Show Less" : "Show More"}
+                </button>
               )}
+            </div>
+
+            {/* Push footer to bottom */}
+            <div className="mt-auto">
+              <div className="h-[1px] bg-[var(--gray-100)] mb-4" />
+
+              <div className="flex items-center gap-3">
+                {/* Initials Circle */}
+                <div className="w-10 h-10 rounded-full bg-[var(--navy)] flex items-center justify-center text-[var(--gold-light)] font-bold text-[0.8rem] font-[var(--font-display)] shrink-0">
+                  {t.initials}
+                </div>
+
+                {/* Name and Location */}
+                <div className="flex-1 min-w-0">
+                  <div className="text-[0.875rem] font-bold text-[var(--navy)] truncate">
+                    {t.name}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    <span className="text-[0.68rem] text-[var(--gray-400)] flex items-center gap-0.5">
+                      <MapPinIcon size={10} color="var(--gray-400)" />
+                      {t.location}
+                    </span>
+
+                    {t.room_type && (
+                      <span className="bg-[var(--gray-100)] px-1.5 py-[1px] rounded-[3px] text-[0.6rem] font-bold text-[var(--navy)] uppercase tracking-[0.5px]">
+                        {t.room_type}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {t.isReal && (
+                  <span className="shrink-0 text-[0.6rem] text-[#2D9A6E] font-bold bg-[#E8F8F0] px-2 py-[3px] rounded border border-[#BBF0D6]">
+                    ✓ Verified
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         ))}
