@@ -192,17 +192,17 @@ const fadeUp = (delay = 0) => ({
                 <div className="room-type-badge">{room.room_type}</div>
               </div>
               <div className="room-card-body">
-                <h3>Room {room.room_number || `#${room.room_id}`}</h3>
+                <div className="font-body">Room {room.room_number || `#${room.room_id}`}</div>
                 <p>
                   {room.description ||
                     "A beautifully furnished room with modern amenities and premium comfort."}
                 </p>
-                <div className="room-card-footer">
-                  <div className="room-price">
+                <div className=" room-card-footer">
+                  <div className="font-body ">
                     ₹{Number(room.price_per_night).toLocaleString()}
                     <span> /night</span>
                   </div>
-                  <div className="room-capacity">
+                  <div className="font-body room-capacity">
                     <UserIcon size={13} color="var(--gray-400)" />
                     {room.capacity || 2} guests
                   </div>
