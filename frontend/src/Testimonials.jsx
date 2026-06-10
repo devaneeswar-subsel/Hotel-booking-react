@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { MapPinIcon } from "./Icons";
-
+import { motion } from "framer-motion";
 const API = process.env.REACT_APP_API_URL;
 
 const STATIC_REVIEWS = [
@@ -31,7 +31,12 @@ export default function Testimonials() {
   const [reviews, setReviews] = useState([]);
   const [expandedCards, setExpandedCards] = useState({});
   const [overflowingCards, setOverflowingCards] = useState({});
-
+const fadeUp = (delay = 0) => ({
+  initial: { opacity: 0, y: 24 },
+  whileInView: { opacity: 1, y: 0 },
+  viewport: { once: true, amount: 0.3 },
+  transition: { duration: 0.6, delay, ease: "easeOut" },
+})
   const toggleExpand = (index) => {
     setExpandedCards((prev) => ({
       ...prev,
@@ -98,13 +103,14 @@ export default function Testimonials() {
       {/* Header Container */}
       <div className="flex items-end justify-between flex-wrap gap-4 mb-10">
         <div>
-          <div className="section-eyebrow">
-            <span>Guest Reviews</span>
-          </div>
-          <h2 className="section-title !mb-0">
-            Words from <em className="not-italic">Our Guests</em>
-          </h2>
-        </div>
+  <motion.div {...fadeUp(0)} className="section-eyebrow">
+    <span>Guest Reviews</span>
+  </motion.div>
+
+  <motion.h2 {...fadeUp(0.15)} className="section-title !mb-0">
+    Words from <em className="not-italic">Our Guests</em>
+  </motion.h2>
+</div>
 
         {/* Rating Badge */}
         <div className="flex items-center gap-3 bg-[var(--navy)] px-5 py-3 rounded-xl shrink-0">
@@ -138,10 +144,26 @@ export default function Testimonials() {
       {/* 3 Cards Grid */}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6">
         {displayReviews.map((t, i) => (
-          <div
-            key={i}
-            className="relative overflow-hidden flex flex-col h-full gap-4 bg-white border border-[var(--gray-200)] rounded-2xl px-6 py-7 shadow-[0_2px_12px_rgba(15,25,35,0.06)] transition-all duration-200 ease-in-out hover:-translate-y-1 hover:shadow-[0_8px_28px_rgba(15,25,35,0.12)]"
-          >
+          <motion.div
+  key={i}
+  className="relative overflow-hidden flex flex-col h-full gap-4 bg-white border border-[var(--gray-200)] rounded-2xl px-6 py-7 shadow-[0_2px_12px_rgba(15,25,35,0.06)]"
+  initial={{ opacity: 0, y: 40 }}
+  whileInView={{ opacity: 1, y: 0 }}
+  viewport={{ once: true, amount: 0.2 }}
+  transition={{
+    duration: 0.6,
+    delay: i * 0.2,
+    type: "spring",
+    stiffness: 80,
+  }}
+  whileHover={{
+    y: -6,
+    transition: {
+      type: "spring",
+      stiffness: 300,
+    },
+  }}
+>
             {/* Top Border Accent Decorator */}
             <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-[var(--gold)] to-[var(--gold-light)]" />
 
@@ -221,7 +243,7 @@ export default function Testimonials() {
                 )}
               </div>
             </div>
-          </div>
+          </motion.div>
         ))}
       </div>
     </div>
