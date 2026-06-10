@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState,useRef,useEffect } from "react";
 import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import "./App.css";
@@ -41,6 +41,37 @@ export default function CalendarSection({ onViewRooms }) {
       ? Math.ceil((checkOut - checkIn) / 86400000)
       : 0;
 
+
+function useFadeSlide(direction = "left") {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    const offset = direction === "left" ? "-40px" : "40px";
+
+    el.style.opacity = "0";
+    el.style.transform = `translateX(${offset})`;
+    el.style.transition = "opacity 600ms ease, transform 600ms ease";
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.style.opacity = "1";
+          el.style.transform = "translateX(0)";
+        } else {
+          el.style.opacity = "0";
+          el.style.transform = `translateX(${offset})`;
+        }
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [direction]);
+
+  return ref;
+}
   async function checkAvailability() {
     if (!checkIn || !checkOut) return;
     setLoading(true);
@@ -87,7 +118,8 @@ export default function CalendarSection({ onViewRooms }) {
 
     return null;
   }
-
+const leftRef  = useFadeSlide("left");
+  const rightRef = useFadeSlide("right");
   return (
     <>
       <style>{`
@@ -113,8 +145,10 @@ export default function CalendarSection({ onViewRooms }) {
         id="calendar"
         className="bg-[var(--navy)] px-4 md:px-8 lg:px-12  py-20"
       >
-        <div className="mx-auto grid max-w-[1100px] grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-[60px]">
+         <div className="mx-auto grid max-w-[1100px] grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-[60px]">
           {/* INFO */}
+            <div ref={leftRef}>
+        {/* ...all your info/form content unchanged... */}
           <div>
             <div className="section-eyebrow">
               <span className="text-[var(--gold-light)]">
@@ -344,8 +378,14 @@ export default function CalendarSection({ onViewRooms }) {
               )
             )}
           </div>
+      </div>
 
           {/* Calendar */}
+           <div
+        ref={rightRef}
+        className="rounded-[var(--radius-lg)] bg-white p-7 shadow-[var(--shadow-lg)]"
+      >
+        {/* ...calendar content unchanged... */}
           <div className="rounded-[var(--radius-lg)] bg-white p-7 shadow-[var(--shadow-lg)]">
             <div className="mb-[14px] flex items-center justify-between">
               <div className="flex items-center gap-2 font-[var(--font-display)] text-[0.9rem] font-semibold text-[var(--navy)]">
@@ -386,6 +426,7 @@ export default function CalendarSection({ onViewRooms }) {
               }
             />
           </div>
+      </div>
         </div>
       </section>
     </>

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
+import { useEffect } from "react";
 import "./App.css";
-
+import { motion } from "framer-motion";
 // ── SVG Icons ──────────────────────────────────────────────────────────────
 const IconBed = () => (
   <svg
@@ -294,11 +295,14 @@ export default function RoomDetail({
   onAuthPrompt,
 }) {
   const [activeImg, setActiveImg] = useState(0);
+  const [imgLoading, setImgLoading] = useState(false);
   const extra = ROOM_EXTRAS[room.room_type] || ROOM_EXTRAS.Standard;
   const images = room.image_url
     ? [room.image_url, ...extra.images.slice(1)]
     : extra.images;
-
+ useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, []);
   const policies = [
     { icon: <IconClock />, text: "Check-in from 2:00 PM" },
     { icon: <IconClock />, text: "Check-out by 11:00 AM" },
@@ -308,40 +312,68 @@ export default function RoomDetail({
     { icon: <IconCoffee />, text: "Breakfast available (extra charge)" },
   ];
 
+  const handleThumbClick = (i) => {
+    if (i === activeImg) return;
+    setImgLoading(true);
+    setActiveImg(i);
+  };
   return (
   <div className="min-h-screen bg-[var(--c-bg)] font-[var(--font-body)]">
-    
-    {/* TOP NAV */}
-    <div className="sticky top-0 z-[100] flex h-16 items-center gap-3 border-b border-[var(--c-border)] bg-white px-8 max-md:px-4">
-      <button
-        onClick={onBack}
-        className="flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-[var(--c-border)] px-3.5 py-2 text-sm text-[var(--c-dark)] transition-all hover:bg-gray-50"
-      >
-        <IconArrowLeft />
-        Back to Rooms
-      </button>
 
-      <div className="overflow-hidden text-ellipsis whitespace-nowrap font-[var(--font-display)] text-base font-bold text-[var(--c-dark)]">
-        {room.room_type} — Room {room.room_number || room.room_id}
+    {/* TOP NAV */}
+    <div className="sticky top-0 z-[100] flex h-16 items-center justify-between gap-3 border-b border-[var(--gold)]/15 bg-[var(--navy)] px-4 md:px-8">
+      <div className="flex min-w-0 items-center gap-3">
+        <button
+          onClick={onBack}
+          className="flex flex-shrink-0 items-center gap-1.5 rounded-xl border border-[var(--gold)] bg-[var(--gold)]/10 px-3.5 py-2 text-sm font-medium text-[var(--gold)] transition-all hover:bg-[var(--gold)] hover:text-[var(--navy)]"
+        >
+          <IconArrowLeft />
+          <span className="hidden sm:inline">Back to Rooms</span>
+        </button>
+
+        <div className="h-4 w-px flex-shrink-0 bg-[var(--gold)]/20" />
+
+        <div className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-[var(--font-display)] text-base font-bold text-white">
+          {room.room_type}
+          <span className="ml-1.5 text-[0.85rem] font-normal text-white/40">
+            — Room {room.room_number || room.room_id}
+          </span>
+        </div>
+      </div>
+
+      <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-[var(--gold)] bg-[var(--gold)]/8 px-3 py-1.5">
+        <div className="h-1.5 w-1.5 rounded-full bg-[var(--gold)]" />
+        <span className="text-[0.68rem] font-semibold uppercase tracking-[1.5px] text-[var(--gold)]">
+          Premium Room
+        </span>
       </div>
     </div>
 
     {/* MAIN CONTENT */}
-    <div className="mx-auto max-w-[1100px] p-8 max-md:p-4">
-      <div className="grid grid-cols-[1fr_360px] gap-8 items-start max-md:grid-cols-1">
-
+    <div className="mx-auto max-w-[1280px] px-4 py-6 md:p-8">
+      <div className="grid grid-cols-1 gap-8 items-start lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_360px]">
         {/* LEFT SECTION */}
-        <div>
+        <div className="w-full min-w-0">
 
           {/* Main Image */}
-          <div className="relative mb-2.5 h-[460px] overflow-hidden rounded-[14px] max-md:h-[260px] max-[480px]:h-[210px]">
+          <div className="relative mb-2.5 h-[240px] overflow-hidden rounded-[14px] sm:h-[320px] md:h-[380px] lg:h-[420px]">
             <img
               src={images[activeImg]}
               alt={room.room_type}
-              className="h-full w-full object-cover"
+              onLoad={() => setImgLoading(false)}
+              className={`h-full w-full object-cover transition-opacity duration-300 ${
+                imgLoading ? "opacity-0" : "opacity-100"
+              }`}
             />
-
-            <div className="absolute left-3.5 top-3.5 rounded-full bg-[var(--c-primary)] px-3.5 py-1 text-xs font-bold text-white">
+            {imgLoading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-[var(--navy)]/60 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-2">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--gold)]/30 border-t-[var(--gold)]" />
+                  <span className="text-[0.7rem] uppercase tracking-[2px] text-[var(--gold)]/70">Loading</span>
+                </div>
+              </div>
+            )}
+            <div className="absolute left-3.5 top-3.5 rounded-full border border-[var(--gold)] bg-[var(--navy)] px-3.5 py-1 text-xs font-bold text-[var(--gold)]">
               {room.room_type}
             </div>
           </div>
@@ -351,186 +383,222 @@ export default function RoomDetail({
             {images.map((img, i) => (
               <div
                 key={i}
-                onClick={() => setActiveImg(i)}
-                className={`h-[58px] w-[78px] flex-shrink-0 cursor-pointer overflow-hidden rounded-lg transition-all ${
+                onClick={() => handleThumbClick(i)}
+                className={`relative h-[58px] w-[78px] flex-shrink-0 cursor-pointer overflow-hidden rounded-lg transition-all ${
                   activeImg === i
-                    ? "border-[2.5px] border-[var(--c-primary)] opacity-100"
-                    : "border-2 border-transparent opacity-60"
+                    ? "border-[2.5px] border-[var(--gold)] opacity-100"
+                    : "border-2 border-transparent opacity-50 hover:opacity-80"
                 }`}
               >
-                <img
-                  src={img}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
+                <img src={img} alt="" className="h-full w-full object-cover" />
+                {activeImg === i && <div className="absolute inset-0 bg-[var(--gold)]/10" />}
               </div>
             ))}
           </div>
 
           {/* Title & Description */}
           <div className="mt-8">
-            <h2 className="mb-2 font-[var(--font-display)] text-2xl font-bold text-[var(--c-dark)]">
-              Room {room.room_number || room.room_id} — {room.room_type}
-            </h2>
-
-            <p className="mb-7 text-[0.92rem] leading-7 text-[var(--c-muted)]">
-              {room.description ||
-                "A beautifully furnished room combining modern aesthetics with premium comfort. Every detail has been carefully curated to ensure an unforgettable stay."}
-            </p>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.2 }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+            >
+              <div className="mb-1 flex items-center gap-2">
+                <div className="h-4 w-1 rounded-full bg-[var(--gold)]" />
+                <h2 className="font-[var(--font-display)] text-2xl font-bold text-[var(--c-dark)]">
+                  Room {room.room_number || room.room_id} — {room.room_type}
+                </h2>
+              </div>
+              <p className="mb-7 mt-3 text-[0.92rem] leading-7 text-[var(--c-muted)]">
+                {room.description || "A beautifully furnished room combining modern aesthetics with premium comfort. Every detail has been carefully curated to ensure an unforgettable stay."}
+              </p>
+            </motion.div>
 
             {/* Amenities */}
-            <h3 className="mb-3.5 font-[var(--font-display)] text-base font-bold text-[var(--c-dark)]">
-              Room Amenities
-            </h3>
-
-            <div className="flex flex-wrap gap-2">
-              {extra.amenities.map((a, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-1.5 rounded-lg border border-[#E0E1FF] bg-[#F3F4FF] px-3.5 py-2 text-[0.8rem] font-semibold text-[var(--c-primary)]"
-                >
-                  <IconCheck />
-                  {a}
-                </div>
-              ))}
-            </div>
-
-            {/* Policies */}
-            <div className="mt-8 rounded-xl border border-[var(--c-border)] bg-white p-5">
-              <h3 className="mb-3.5 font-[var(--font-display)] text-base font-bold text-[var(--c-dark)]">
-                Hotel Policies
-              </h3>
-
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 max-md:grid-cols-1">
-                {policies.map((p, i) => (
-                  <div
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.2 }}
+              transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
+            >
+              <div className="mb-3.5 flex items-center gap-2">
+                <div className="h-4 w-1 rounded-full bg-[var(--gold)]" />
+                <h3 className="font-[var(--font-display)] text-base font-bold text-[var(--c-dark)]">
+                  Room Amenities
+                </h3>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {extra.amenities.map((a, i) => (
+                  <motion.div
                     key={i}
-                    className="flex items-start gap-2 text-[0.83rem] text-[var(--c-muted)]"
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    whileInView={{ opacity: 1, scale: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.3, delay: i * 0.05, ease: "easeOut" }}
+                    whileHover={{ scale: 1.05 }}
+                    className="flex cursor-default items-center gap-1.5 rounded-xl border border-[var(--gold)]/25 bg-[var(--navy)] px-3.5 py-2 text-[0.8rem] font-semibold text-[var(--gold)]"
                   >
-                    <span className="mt-px flex-shrink-0 text-[var(--c-primary)]">
-                      {p.icon}
-                    </span>
-                    {p.text}
-                  </div>
+                    <IconCheck />
+                    {a}
+                  </motion.div>
                 ))}
               </div>
-            </div>
+            </motion.div>
+
+            {/* Policies */}
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.2 }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+              className="mt-8 rounded-2xl border border-[var(--gold)]/20 bg-[var(--navy)] p-5"
+            >
+              <div className="mb-4 flex items-center gap-2">
+                <div className="h-4 w-1 rounded-full bg-[var(--gold)]" />
+                <h3 className="font-[var(--font-display)] text-base font-bold text-white">
+                  Hotel Policies
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                {policies.map((p, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: -16 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    viewport={{ once: true, amount: 0.3 }}
+                    transition={{ duration: 0.4, delay: i * 0.07, ease: "easeOut" }}
+                    whileHover={{ scale: 1.02 }}
+                    className="flex cursor-default items-center gap-3 rounded-xl border border-[var(--gold)] bg-white/5 px-3.5 py-2.5 transition-colors hover:border-[var(--gold)]/40 hover:bg-[var(--gold)]/10"
+                  >
+                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--gold)]/15 text-[var(--gold)]">
+                      {p.icon}
+                    </span>
+                    <span className="text-[0.8rem] leading-snug text-white/70">
+                      {p.text}
+                    </span>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
           </div>
         </div>
 
         {/* RIGHT SIDEBAR */}
-        <div className="sticky top-20 max-md:static max-md:order-first">
-
-          <div className="overflow-hidden rounded-2xl border border-[var(--c-border)] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)]">
+        <div className="order-first w-full self-start xl:sticky xl:top-20 xl:order-last">
+          <div className="overflow-hidden rounded-2xl border border-[var(--gold)]/20 shadow-[0_4px_24px_rgba(0,0,0,0.08)]">
 
             {/* Price Header */}
-            <div className="bg-[#1a1a2e] px-6 py-6">
-              <div className="mb-1.5 text-[0.72rem] font-semibold uppercase tracking-wider text-white/50">
-                Starting from
+            <div className="relative overflow-hidden bg-[var(--navy)] px-6 py-6">
+              <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-[var(--gold)]/10 blur-2xl" />
+              <div className="mb-1.5 flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-[var(--gold)]" />
+                <span className="text-[0.68rem] font-semibold uppercase tracking-[2px] text-white/40">
+                  Starting from
+                </span>
               </div>
-
               <div className="flex items-baseline gap-1.5">
                 <span className="font-[var(--font-display)] text-[2.4rem] font-extrabold leading-none text-white">
                   ₹{Number(room.price_per_night).toLocaleString()}
                 </span>
-
-                <span className="text-sm text-white/50">
-                  /night
-                </span>
+                <span className="text-sm text-white/40">/night</span>
               </div>
-
-              <div className="mt-2.5 flex items-center gap-1.5 text-[0.78rem] text-white/60">
-                <IconUsers />
-                Up to {room.capacity || 2} guests
+              <div className="mt-3 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[0.78rem] text-white/50">
+                  <IconUsers />
+                  Up to {room.capacity || 2} guests
+                </div>
+                <div className="rounded-full border border-[var(--gold)] bg-[var(--gold)]/10 px-2.5 py-1 text-[0.68rem] font-semibold text-[var(--gold)]">
+                  Best Price
+                </div>
               </div>
+              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[var(--gold)]/30 to-transparent" />
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-3 border-b border-[var(--c-border)]">
+            <div className="grid grid-cols-3 border-b border-[var(--c-border)] bg-white">
               {[
                 { icon: <IconBed />, label: "Type", val: room.room_type },
-                {
-                  icon: <IconUsers />,
-                  label: "Guests",
-                  val: room.capacity || 2,
-                },
+                { icon: <IconUsers />, label: "Guests", val: room.capacity || 2 },
                 { icon: <IconStar />, label: "Rating", val: "4.9" },
               ].map((s, i) => (
                 <div
                   key={i}
-                  className={`p-3 text-center ${
+                  className={`flex min-w-0 flex-col items-center gap-1.5 px-2 py-4 ${
                     i < 2 ? "border-r border-[var(--c-border)]" : ""
                   }`}
                 >
-                  <div className="mb-1 flex justify-center text-[var(--c-primary)]">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gold)]/10 text-[var(--gold)]">
                     {s.icon}
                   </div>
-
-                  <div className="text-[0.67rem] uppercase tracking-wide text-[var(--c-muted)]">
-                    {s.label}
-                  </div>
-
-                  <div className="mt-0.5 text-[0.82rem] font-bold text-[var(--c-dark)]">
+                  <div className="w-full truncate text-center text-[0.82rem] font-bold text-[var(--navy)]">
                     {s.val}
+                  </div>
+                  <div className="text-[0.63rem] uppercase tracking-[1.5px] text-[var(--c-muted)]">
+                    {s.label}
                   </div>
                 </div>
               ))}
             </div>
 
             {/* Book Button */}
-            <div className="px-5 pt-5 pb-3">
+            <div className="bg-white px-5 pb-3 pt-5">
               <button
-                onClick={() => {
-                  if (!user) {
-                    onAuthPrompt();
-                    return;
-                  }
-                  onBook(room);
-                }}
+                onClick={() => { if (!user) { onAuthPrompt(); return; } onBook(room); }}
                 className="w-full rounded-xl py-4 text-base font-bold transition-all hover:-translate-y-[1px]"
-                style={{
-                  backgroundColor: "#0f1923",
-                  color: "white",
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = "#c9a84c";
-                  e.target.style.color = "black";
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = "#0f1923";
-                  e.target.style.color = "white";
-                }}
+                style={{ backgroundColor: "#0f1923", color: "white" }}
+                onMouseEnter={(e) => { e.target.style.backgroundColor = "#c9a84c"; e.target.style.color = "black"; }}
+                onMouseLeave={(e) => { e.target.style.backgroundColor = "#0f1923"; e.target.style.color = "white"; }}
               >
                 Book Now
               </button>
-
               <p className="mt-2 text-center text-xs text-[var(--c-muted)]">
                 Free cancellation · No hidden charges
               </p>
             </div>
 
             {/* Price Estimate */}
-            <div className="px-5 pb-5">
-              <div className="overflow-hidden rounded-xl border border-[var(--c-border)] bg-[#F8F9FF]">
-                <div className="border-b border-[var(--c-border)] bg-[#F0F1FA] px-3.5 py-2.5 text-[0.7rem] font-bold uppercase tracking-wide text-[var(--c-muted)]">
-                  Price Estimate
-                </div>
-
-                {[1, 2, 3, 5, 7].map((n) => (
-                  <div
-                    key={n}
-                    className="flex items-center justify-between border-b border-[var(--c-border)] px-3.5 py-2.5 text-[0.82rem] last:border-b-0"
-                  >
-                    <span className="text-[var(--c-muted)]">
-                      {n} night{n > 1 ? "s" : ""}
-                    </span>
-
-                    <span className="font-bold text-[var(--c-dark)]">
-                      ₹{(room.price_per_night * n).toLocaleString()}
+            <div className="bg-white px-5 pb-5">
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.2 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className="overflow-hidden rounded-2xl border border-[var(--gold)]/20"
+              >
+                <div className="flex items-center justify-between bg-[var(--gold)] px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <div className="h-3.5 w-1 rounded-full bg-[var(--navy)]" />
+                    <span className="text-[0.7rem] font-bold uppercase tracking-[2px] text-[var(--navy)]">
+                      Price Estimate
                     </span>
                   </div>
-                ))}
-              </div>
+                  <span className="text-[0.68rem] font-medium text-[var(--navy)]/60">per room</span>
+                </div>
+                <div className="divide-y divide-[var(--gold)]/10 bg-[var(--navy)]">
+                  {[1, 2, 3, 5, 7].map((n, i) => (
+                    <motion.div
+                      key={n}
+                      initial={{ opacity: 0, x: -12 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.35, delay: i * 0.06, ease: "easeOut" }}
+                      whileHover={{ backgroundColor: "rgba(201,168,76,0.08)" }}
+                      className="flex items-center justify-between px-4 py-3"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-[var(--gold)]/15 text-[0.68rem] font-bold text-[var(--gold)]">
+                          {n}
+                        </div>
+                        <span className="text-[0.82rem] text-white/50">night{n > 1 ? "s" : ""}</span>
+                      </div>
+                      <span className="text-[0.88rem] font-bold text-[var(--gold)]">
+                        ₹{(room.price_per_night * n).toLocaleString()}
+                      </span>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
             </div>
           </div>
 
@@ -541,16 +609,14 @@ export default function RoomDetail({
               { icon: <IconBadge />, label: "Verified" },
               { icon: <IconTag />, label: "Best Price" },
             ].map((b, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-1 text-xs font-medium text-[var(--c-muted)]"
-              >
-                <span className="text-[var(--c-primary)]">{b.icon}</span>
+              <div key={i} className="flex items-center gap-1 text-xs font-medium text-[var(--c-muted)]">
+                <span className="text-[var(--gold)]">{b.icon}</span>
                 {b.label}
               </div>
             ))}
           </div>
         </div>
+
       </div>
     </div>
   </div>
