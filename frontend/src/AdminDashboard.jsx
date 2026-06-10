@@ -122,7 +122,7 @@ function LineChart({ data, color = "#C9A84C", height = 80 }) {
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <polygon points={filled} fill="url(#lg)" />
+      <polygon  points={filled} fill="url(#lg)" />
       <polyline
         points={pts.join(" ")}
         fill="none"
@@ -215,7 +215,7 @@ function StatCard({
             {label}
           </div>
 
-          <div className="font-['Playfair_Display'] text-[1.5rem] font-semibold text-[#0F1923] leading-none">
+          <div className="font-body text-[1.5rem] font-semibold text-[#0F1923] leading-none">
             {value}
           </div>
 
@@ -638,7 +638,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
         {/* ── Header ── */}
         <div className="bg-navy px-7 py-5 flex items-center justify-between shrink-0">
           <div>
-            <div className="font-display text-[1.05rem] font-semibold text-white">
+            <div className="font-body text-[1.05rem] font-semibold text-white">
               Booking #{booking.booking_id} — {booking.guest_name}
             </div>
             <div className="text-xs text-white/45 mt-0.5">
@@ -890,8 +890,8 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
 
             {/* Grand total */}
             <div className="flex justify-between items-center">
-              <span className="font-display font-bold text-gold text-[1rem]">Grand Total</span>
-              <span className="font-display font-bold text-white text-[1.4rem]">
+              <span className="font-body font-bold text-gold text-[1rem]">Grand Total</span>
+              <span className="font-body font-bold text-white text-[1.4rem]">
                 Rs.{Math.round(finalTotal).toLocaleString()}
               </span>
             </div>
@@ -2004,7 +2004,7 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                   <div className="flex items-center justify-between mb-4">
                     <div>
                       <div className="text-[0.65rem] tracking-[1.5px] uppercase text-gray-400 mb-0.5">Bookings This Week</div>
-                      <div className="font-display text-[1.4rem] font-semibold text-navy">
+                      <div className="font-body text-[1.4rem] font-semibold text-navy">
                         {last7.reduce((s, d) => s + d.value, 0)}
                       </div>
                     </div>
@@ -2023,7 +2023,7 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                   <div className="flex items-center justify-between mb-4">
                     <div>
                       <div className="text-[0.65rem] tracking-[1.5px] uppercase text-gray-400 mb-0.5">Revenue by Room</div>
-                      <div className="font-display text-[1.4rem] font-semibold text-navy">
+                      <div className="font-body text-[1.4rem] font-semibold text-navy">
                         Rs.{Number(stats.total_revenue).toLocaleString()}
                       </div>
                     </div>
@@ -2115,7 +2115,7 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
               <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
                 <div className="font-display text-[1rem] font-semibold text-navy">
                   All Bookings{" "}
-                  <span className="text-[0.78rem] font-normal text-gray-400 ml-2">({bookings.length} total)</span>
+                  <span className="text-[0.78rem] font-body font-normal text-gray-400 ml-2">({bookings.length} total)</span>
                 </div>
                 <div className="flex items-center gap-2 bg-gray-50 border-[1.5px] border-gray-200 rounded-lg px-3 py-2 min-w-[200px] flex-[0_1_240px]">
                   <SearchIcon size={14} color="#868E96" />
@@ -2344,11 +2344,14 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                             </button>
                             {r.is_available && (
                               <button
-                                onClick={() => { setBookingRoom(r); setTab("book"); }}
-                                className="px-2.5 py-1 rounded bg-navy text-white border-none text-[0.72rem] font-semibold cursor-pointer hover:bg-navy/90 transition-colors"
-                              >
-                                Book
-                              </button>
+  onClick={() => {
+    setBookingRoom(r);
+    setTab("book");
+  }}
+  className="px-2.5 py-1 rounded bg-[#0F1923] text-white border-none text-[0.72rem] font-semibold cursor-pointer transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
+>
+  Book
+</button>
                             )}
                             <button
                               onClick={() => deleteRoom(r.room_id)}
@@ -2410,11 +2413,11 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                           <td className={tdCls}>
                             <div className="flex gap-1.5">
                               <button
-                                onClick={() => setSelectedUserId(u.user_id)}
-                                className="px-2.5 py-1 rounded bg-navy text-white border-none text-[0.72rem] font-semibold cursor-pointer hover:bg-navy/90 transition-colors"
-                              >
-                                View
-                              </button>
+  onClick={() => setSelectedUserId(u.user_id)}
+  className="px-2.5 py-1 rounded bg-[#0F1923] text-white border-none text-[0.72rem] font-semibold cursor-pointer transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
+>
+  View
+</button>
                               <button
                                 onClick={() => setResetPasswordUser(u)}
                                 className="px-2.5 py-1 rounded bg-none border-[1.5px] border-gold text-[#9A7A2E] text-[0.72rem] font-semibold cursor-pointer hover:bg-gold/10 transition-colors"
@@ -2455,7 +2458,7 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                         </span>
                         <span className="text-[0.72rem] text-gray-400">👥 {r.capacity || 2}</span>
                       </div>
-                      <div className="font-display text-[0.95rem] font-semibold text-navy mb-0.5">
+                      <div className="font-body text-[0.95rem] font-semibold text-navy mb-0.5">
                         Room {r.room_number || r.room_id}
                       </div>
                       <div className="text-[0.78rem] text-gray-400 mb-3">
@@ -2463,18 +2466,18 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                       </div>
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className="font-display text-[1rem] font-semibold text-navy">
+                          <div className="font-body text-[1rem] font-semibold text-navy">
                             Rs.{Number(r.price_per_night).toLocaleString()}{" "}
-                            <span className="text-[0.65rem] font-normal text-gray-400">/night</span>
+                            <span className="text-[0.65rem] font-body font-normal text-gray-400">/night</span>
                           </div>
-                          <div className="text-[0.62rem] text-gray-400">+18% GST</div>
+                          <div className="text-[0.62rem] font-body text-red-500">+18% GST</div>
                         </div>
                         <button
-                          onClick={() => setBookingRoom(r)}
-                          className="bg-navy text-white border-none rounded-md px-3.5 py-1.5 text-[0.75rem] font-semibold cursor-pointer hover:bg-navy/90 transition-colors"
-                        >
-                          Book
-                        </button>
+  onClick={() => setBookingRoom(r)}
+  className="bg-[#0f1923] text-white border-none rounded-md px-3.5 py-1.5 text-[0.75rem] font-semibold cursor-pointer transition-all hover:bg-[#c9a84c] hover:text-black hover:-translate-y-[1px]"
+>
+  Book
+</button>
                       </div>
                     </div>
                   </div>

@@ -3,6 +3,7 @@ import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import "./App.css";
 import { CalendarIcon, SearchIcon, CheckIcon } from "./Icons";
+import { motion } from "framer-motion";
 
 const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
 export default function CalendarSection({ onViewRooms }) {
@@ -13,6 +14,12 @@ export default function CalendarSection({ onViewRooms }) {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showAllRooms, setShowAllRooms] = useState(false);
+  const fadeUp = (delay = 0) => ({
+  initial: { opacity: 0, y: 24 },
+  whileInView: { opacity: 1, y: 0 },
+  viewport: { once: true, amount: 0.3 },
+  transition: { duration: 0.6, delay, ease: "easeOut" },
+});
   function handleDateChange(date) {
     if (step === "checkin") {
       setCheckIn(date);
@@ -150,17 +157,18 @@ const leftRef  = useFadeSlide("left");
             <div ref={leftRef}>
         {/* ...all your info/form content unchanged... */}
           <div>
-            <div className="section-eyebrow">
-              <span className="text-[var(--gold-light)]">
-                Availability
-              </span>
-            </div>
+            <motion.div {...fadeUp(0)} className="section-eyebrow">
+  <span className="text-[var(--gold-light)]">Availability</span>
+</motion.div>
 
-            <h2 className="mb-4 font-[var(--font-display)] text-[clamp(1.8rem,3vw,2.4rem)] font-semibold leading-tight text-white">
-              Check Your
-              <br />
-              Available Dates
-            </h2>
+<motion.h2
+  {...fadeUp(0.15)}
+  className="mb-4 font-[var(--font-display)] text-[clamp(1.8rem,3vw,2.4rem)] font-semibold leading-tight text-white"
+>
+  Check Your
+  <br />
+  Available Dates
+</motion.h2>
 
             <p className="mb-6 text-[0.88rem] leading-[1.75] text-white/55">
               Select your check-in date first, then your check-out date.
@@ -388,7 +396,7 @@ const leftRef  = useFadeSlide("left");
         {/* ...calendar content unchanged... */}
           <div className="rounded-[var(--radius-lg)] bg-white p-7 shadow-[var(--shadow-lg)]">
             <div className="mb-[14px] flex items-center justify-between">
-              <div className="flex items-center gap-2 font-[var(--font-display)] text-[0.9rem] font-semibold text-[var(--navy)]">
+              <div className="flex items-center gap-2 font-[var(--font-body)] text-[0.9rem] font-semibold text-[var(--navy)]">
                 <CalendarIcon
                   size={16}
                   color="var(--navy)"
@@ -400,17 +408,17 @@ const leftRef  = useFadeSlide("left");
               </div>
 
               {(checkIn || checkOut) && (
-                <button
-                  onClick={() => {
-                    setCheckIn(null);
-                    setCheckOut(null);
-                    setStep("checkin");
-                    setResults(null);
-                  }}
-                  className="text-[0.78rem] text-[var(--gray-400)] transition hover:text-[var(--navy)]"
-                >
-                  Reset
-                </button>
+              <button
+  onClick={() => {
+    setCheckIn(null);
+    setCheckOut(null);
+    setStep("checkin");
+    setResults(null);
+  }}
+  className="text-[0.78rem] text-[#DC2626] transition hover:text-[#B91C1C]"
+>
+  Reset
+</button>
               )}
             </div>
 
