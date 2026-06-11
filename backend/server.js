@@ -5,6 +5,7 @@ const mysql = require("mysql2/promise");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const { Resend } = require("resend");
+const nodemailer = require("nodemailer");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const bcrypt = require("bcryptjs");
@@ -89,7 +90,13 @@ if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
 
 // ─── RESEND EMAIL ─────────────────────────────────────────────────────────────
 const resend = new Resend(process.env.RESEND_API_KEY);
-
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD,
+  },
+});
 // ─── AUTO MIGRATE ────────────────────────────────────────────────────────────
 async function runMigrations() {
   try {
@@ -556,10 +563,68 @@ app.post("/api/payment/verify", async (req, res) => {
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number, r.price_per_night, r.image_url FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.booking_id=?`,
       [booking_id],
     );
+    const booking = rows[0];
+
+    // Send booking confirmation email
+    try {
+      const nights = Math.ceil(
+        (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
+          86400000,
+      );
+      const gst = Math.round(Number(booking.total_price) * 0.18 * 100) / 100;
+      const total = Math.round((Number(booking.total_price) + gst) * 100) / 100;
+
+      await transporter.sendMail({
+        from: `"VV Grand Park Residency" <${process.env.GMAIL_USER}>`,
+        to: booking.email,
+        subject: `Booking Confirmed! #${booking.booking_id} — VV Grand Park Residency`,
+        html: `
+  <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid #e9ecef">
+    <div style="background:#0F1923;padding:28px 32px;text-align:center">
+      <h1 style="color:#C9A84C;font-size:1.4rem;margin:0;letter-spacing:2px">VV GRAND PARK</h1>
+      <p style="color:rgba(255,255,255,0.5);font-size:0.75rem;margin:4px 0 0;letter-spacing:3px">RESIDENCY</p>
+    </div>
+    <div style="padding:32px;background:#fff">
+      <div style="text-align:center;margin-bottom:24px">
+        <div style="text-align:center;margin-bottom:16px">
+  <div style="width:64px;height:64px;background:#E8F8F0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin:0 auto">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2D9A6E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  </div>
+</div>
+        <h2 style="color:#0F1923;margin:12px 0 4px">Booking Confirmed!</h2>
+        <p style="color:#868E96;font-size:0.9rem">Thank you, ${booking.guest_name}. Your reservation is confirmed.</p>
+      </div>
+      <div style="background:#F8F9FA;border-radius:10px;padding:20px;margin-bottom:20px">
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Booking ID</td><td style="text-align:right;font-weight:700;color:#0F1923">#${booking.booking_id}</td></tr>
+          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Room</td><td style="text-align:right;font-weight:700;color:#0F1923">${booking.room_type} — Room ${booking.room_number || booking.room_id}</td></tr>
+          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Check-in</td><td style="text-align:right;font-weight:700;color:#0F1923">${new Date(booking.check_in_date).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</td></tr>
+          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Check-out</td><td style="text-align:right;font-weight:700;color:#0F1923">${new Date(booking.check_out_date).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</td></tr>
+          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Room Charges</td><td style="text-align:right;color:#0F1923">Rs.${Number(booking.total_price).toLocaleString()}</td></tr>
+          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">GST (18%)</td><td style="text-align:right;color:#0F1923">Rs.${Math.round(Number(booking.total_price) * 0.18).toLocaleString()}</td></tr>
+          <tr style="border-top:2px solid #C9A84C"><td style="font-weight:700;color:#0F1923;padding:8px 0;font-size:1rem">Total Paid</td><td style="text-align:right;font-weight:700;color:#C9A84C;font-size:1.1rem">Rs.${Math.round(Number(booking.total_price) * 1.18).toLocaleString()}</td></tr>
+        </table>
+      </div>
+      <p style="color:#868E96;font-size:0.82rem;text-align:center;line-height:1.6">
+        Please carry a valid ID proof at check-in.<br/>
+        For queries: <a href="mailto:vvgrandpark.hotel@gmail.com" style="color:#C9A84C">vvgrandpark.hotel@gmail.com</a>
+      </p>
+    </div>
+    <div style="background:#0F1923;padding:16px;text-align:center">
+      <p style="color:rgba(255,255,255,0.3);font-size:0.72rem;margin:0">VV Grand Park Residency · vvgrandpark.com</p>
+    </div>
+  </div>`,
+      });
+    } catch (emailErr) {
+      console.error("Booking email error:", emailErr.message);
+    }
+
     res.json({
       success: true,
       message: "Payment verified. Booking confirmed!",
-      booking: rows[0],
+      booking,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
