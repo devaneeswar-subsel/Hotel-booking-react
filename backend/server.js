@@ -98,14 +98,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
-
 // Verify connection
 transporter.verify((error) => {
   if (error) console.error("Gmail transporter error:", error);
