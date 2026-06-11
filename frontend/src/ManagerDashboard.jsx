@@ -857,15 +857,15 @@ function ManagerBookingForm({
               className="flex justify-between text-[0.82rem] mb-1"
             >
               <span className="text-[#868E96]">{label}</span>
-              <span className="font-semibold">{val}</span>
+              <span className=" font-body font-semibold">{val}</span>
             </div>
           ))}
 
           <div className="flex justify-between text-[0.9rem] border-t border-[#E9ECEF] pt-2 mt-1">
-            <span className="font-serif font-semibold text-[#0F1923]">
+            <span className="font-body font-semibold text-[#0F1923]">
               Total
             </span>
-            <strong className="font-serif text-[#0F1923]">
+            <strong className="font-body text-[#0F1923]">
               Rs.{Math.round(total).toLocaleString()}
             </strong>
           </div>
@@ -1176,10 +1176,10 @@ function ReportsTab({ showToast }) {
                 key={label}
                 className={`bg-white border border-[#E9ECEF] border-l-4 ${color} px-[18px] py-4 rounded-xl`}
               >
-                <div className="text-[0.62rem] font-bold text-[#868E96] tracking-[1px] uppercase mb-1.5">
+                <div className="text-[0.62rem]  font-bold text-[#868E96] tracking-[1px] uppercase mb-1.5">
                   {label}
                 </div>
-                <div className="font-serif text-[1.4rem] font-semibold text-[#0F1923]">
+                <div className="font-body text-[1.4rem] font-semibold text-[#0F1923]">
                   {val}
                 </div>
               </div>
@@ -1201,7 +1201,7 @@ function ReportsTab({ showToast }) {
 
           {/* Detailed Data Table container */}
           <div className="bg-white rounded-[14px] px-[22px] py-5 border border-[#E9ECEF]">
-            <div className="font-serif text-[1rem] font-semibold text-[#0F1923] mb-4">
+            <div className="font-body text-[1rem] font-semibold text-[#0F1923] mb-4">
               Bookings ({reportData.startDate} → {reportData.endDate})
               <span className="text-[0.78rem] font-normal text-[#868E96] ml-2">
                 ({reportData.bookings.length} records)
@@ -1552,11 +1552,11 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
                     className="px-3 py-2 rounded-md border border-[#E9ECEF] text-[0.9rem] w-full sm:w-[320px]"
                   />
                   <button
-                    onClick={fetchAll}
-                    className="px-4 py-2 bg-[#C9A84C] text-white rounded-md w-full sm:w-auto"
-                  >
-                    Refresh
-                  </button>
+  onClick={fetchAll}
+  className="px-4 py-2 bg-[#0F1923] text-white rounded-md w-full sm:w-auto transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
+>
+  Refresh
+</button>
                 </div>
               </div>
 
@@ -1598,7 +1598,12 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
                             <span className={`inline-block px-2 py-0.5 rounded-[3px] text-[0.6rem] font-bold uppercase tracking-wide ${b.status === "confirmed" ? "bg-[#E8F8F0] text-[#2D9A6E]" : b.status === "cancelled" ? "bg-[#FDECEA] text-[#C0392B]" : "bg-[#EAF2FB] text-[#2471A3]"}`}>{b.status}</span>
                           </td>
                           <td className="px-3 py-3">
-                            <button onClick={() => setSelectedBookingId(b.booking_id)} className="px-3 py-1 bg-[#0F1923] text-white rounded-md">Details</button>
+                            <button
+  onClick={() => setSelectedBookingId(b.booking_id)}
+  className="px-3 py-1 bg-[#0F1923] text-white rounded-md transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
+>
+  Details
+</button>
                           </td>
                         </tr>
                       ))
@@ -1616,12 +1621,12 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
                   <div className="font-serif text-[1.05rem] font-semibold text-[#0F1923]">Currently Checked-in Guests</div>
                   <div className="text-sm text-[#868E96] mt-1">{checkedInBookings.length} guests currently on premises</div>
                 </div>
-                <button
-                  onClick={fetchAll}
-                  className="px-4 py-2 bg-[#C9A84C] text-white rounded-md w-full sm:w-auto"
-                >
-                  Refresh
-                </button>
+               <button
+  onClick={fetchAll}
+  className="px-4 py-2 bg-[#0F1923] text-white rounded-md w-full sm:w-auto transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
+>
+  Refresh
+</button>
               </div>
 
               {checkedInBookings.length === 0 ? (
@@ -1698,15 +1703,20 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
                         <div className="absolute right-3 top-3 bg-white/60 text-[#495057] text-[0.75rem] px-2 py-1 rounded-md">👥 {r.capacity || 2}</div>
                       </div>
                       <div className="px-4 py-3">
-                        <div className="text-[0.9rem] font-semibold text-[#0F1923]">Room {r.room_number || r.room_id}</div>
+                        <div className="text-[0.9rem] font-body font-semibold text-[#0F1923]">Room {r.room_number || r.room_id}</div>
                         <div className="text-[0.82rem] text-[#868E96] mb-3">{r.description || "Cozy room with city view"}</div>
                         <div className="flex items-center justify-between">
                           <div>
-                            <div className="text-[0.9rem] font-serif font-semibold">Rs.{Number(r.price_per_night || 0).toLocaleString()}</div>
-                            <div className="text-[0.68rem] text-[#868E96]">+18% GST</div>
+                            <div className="text-[0.9rem] font-body font-semibold">Rs.{Number(r.price_per_night || 0).toLocaleString()}</div>
+                            <div className="text-[0.68rem] text-red-600">+18% GST</div>
                           </div>
                           <div>
-                            <button onClick={() => setBookingRoom(r)} className="px-3 py-1.5 bg-[#0F1923] text-white rounded-md">Book</button>
+                              <button
+  onClick={() => setBookingRoom(r)}
+  className="px-3 py-1.5 bg-[#0F1923] text-white rounded-md transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
+>
+  Book
+</button>
                           </div>
                         </div>
                       </div>

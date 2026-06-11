@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
 import { SearchIcon, UserIcon, ArrowRightIcon } from "./Icons";
-
+import { motion } from "framer-motion";
 const API = process.env.REACT_APP_API_URL;
 
 const FALLBACK = {
@@ -61,15 +61,21 @@ export default function Rooms({
     }
     onBookClick(room);
   }
-
+const fadeUp = (delay = 0) => ({
+  initial: { opacity: 0, y: 24 },
+  whileInView: { opacity: 1, y: 0 },
+  viewport: { once: true, amount: 0.3 },
+  transition: { duration: 0.6, delay, ease: "easeOut" },
+})
   return (
     <section id="rooms" className="section">
-      <div className="section-eyebrow">
-        <span>Accommodations</span>
-      </div>
-      <h2 className="section-title">
-        Choose Your <em>Perfect Room</em>
-      </h2>
+      <motion.div {...fadeUp(0)} className="section-eyebrow">
+  <span>Accommodations</span>
+</motion.div>
+
+<motion.h2 {...fadeUp(0.15)} className="section-title">
+  Choose Your <em>Perfect Room</em>
+</motion.h2>
 
       {/* Filters */}
       <div className="rooms-filter-bar">
@@ -155,12 +161,21 @@ export default function Rooms({
             <p>No rooms found. Try adjusting your filters.</p>
           </div>
         ) : (
-          rooms.map((room) => (
-            <div
-              key={room.room_id}
-              className="room-card"
-              onClick={() => onCardClick?.(room)}
-            >
+          rooms.map((room, index) => (
+  <motion.div
+    key={room.room_id}
+    className="room-card"
+    onClick={() => onCardClick?.(room)}
+    initial={{ opacity: 0, y: 40 }}
+    whileInView={{ opacity: 1, y: 0 }}
+    viewport={{ once: true }}
+    transition={{
+      duration: 0.6,
+      delay: index * 0.1,
+      type: "spring",
+      stiffness: 80,
+    }}
+  >
               <div className="room-card-img">
                 <img
                   src={
@@ -177,17 +192,17 @@ export default function Rooms({
                 <div className="room-type-badge">{room.room_type}</div>
               </div>
               <div className="room-card-body">
-                <h3>Room {room.room_number || `#${room.room_id}`}</h3>
+                <div className="font-body">Room {room.room_number || `#${room.room_id}`}</div>
                 <p>
                   {room.description ||
                     "A beautifully furnished room with modern amenities and premium comfort."}
                 </p>
-                <div className="room-card-footer">
-                  <div className="room-price">
+                <div className=" room-card-footer">
+                  <div className="font-body ">
                     ₹{Number(room.price_per_night).toLocaleString()}
                     <span> /night</span>
                   </div>
-                  <div className="room-capacity">
+                  <div className="font-body room-capacity">
                     <UserIcon size={13} color="var(--gray-400)" />
                     {room.capacity || 2} guests
                   </div>
@@ -199,7 +214,7 @@ export default function Rooms({
                   Book Now <ArrowRightIcon size={15} color="#fff" />
                 </button>
               </div>
-            </div>
+            </motion.div>
           ))
         )}
       </div>

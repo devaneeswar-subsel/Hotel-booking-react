@@ -1,5 +1,5 @@
 import React from "react";
-
+import { motion } from "framer-motion";
 const images = [
   {
     src: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=900",
@@ -24,20 +24,26 @@ const images = [
 ];
 
 export default function Gallery() {
+  const fadeUp = (delay = 0) => ({
+  initial: { opacity: 0, y: 24 },
+  whileInView: { opacity: 1, y: 0 },
+  viewport: { once: true, amount: 0.3 },
+  transition: { duration: 0.6, delay, ease: "easeOut" },
+});
   return (
     <section
       id="gallery"
-      className="mx-auto max-w-7xl px-6 md:px-8 lg:px-12 py-20"
+      className="mx-auto max-w-7xl px-6 md:px-8 lg:px-12 pt-20"
     >
-      <div className="section-eyebrow mb-3">
-        <span className="text-sm font-medium uppercase tracking-[3px] text-amber-500">
-          Photo Tour
-        </span>
-      </div>
+      <motion.div {...fadeUp(0)} className="section-eyebrow mb-3">
+  <span className="text-sm font-medium uppercase tracking-[3px] text-amber-500">
+    Photo Tour
+  </span>
+</motion.div>
 
-      <h2 className=" section-title mb-12 font-serif text-4xl font-bold text-slate-900">
-        Experience the <em className="text-amber-500">Glamour</em>
-      </h2>
+<motion.h2 {...fadeUp(0.15)} className="section-title mb-12 font-serif text-4xl font-bold text-slate-900">
+  Experience the <em className="text-amber-500">Glamour</em>
+</motion.h2>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_1fr_1fr] md:grid-rows-2">
         {images.map((img, i) => (

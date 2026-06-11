@@ -1,18 +1,25 @@
-import React, { useState } from "react";
+import React, { useState,useRef,useEffect } from "react";
 import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import "./App.css";
 import { CalendarIcon, SearchIcon, CheckIcon } from "./Icons";
+import { motion } from "framer-motion";
 
 const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
-export default function CalendarSection() {
+export default function CalendarSection({ onViewRooms }) {
   const [checkIn, setCheckIn] = useState(null);
   const [checkOut, setCheckOut] = useState(null);
   const [step, setStep] = useState("checkin");
   const [roomType, setRoomType] = useState("");
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
-
+  const [showAllRooms, setShowAllRooms] = useState(false);
+  const fadeUp = (delay = 0) => ({
+  initial: { opacity: 0, y: 24 },
+  whileInView: { opacity: 1, y: 0 },
+  viewport: { once: true, amount: 0.3 },
+  transition: { duration: 0.6, delay, ease: "easeOut" },
+});
   function handleDateChange(date) {
     if (step === "checkin") {
       setCheckIn(date);
@@ -41,30 +48,68 @@ export default function CalendarSection() {
       ? Math.ceil((checkOut - checkIn) / 86400000)
       : 0;
 
+
+function useFadeSlide(direction = "left") {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    const offset = direction === "left" ? "-40px" : "40px";
+
+    el.style.opacity = "0";
+    el.style.transform = `translateX(${offset})`;
+    el.style.transition = "opacity 600ms ease, transform 600ms ease";
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.style.opacity = "1";
+          el.style.transform = "translateX(0)";
+        } else {
+          el.style.opacity = "0";
+          el.style.transform = `translateX(${offset})`;
+        }
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [direction]);
+
+  return ref;
+}
   async function checkAvailability() {
     if (!checkIn || !checkOut) return;
-
     setLoading(true);
     setResults(null);
 
     try {
-      const p = new URLSearchParams({
-        check_in: checkIn.toISOString().split("T")[0],
-        check_out: checkOut.toISOString().split("T")[0],
-      });
+      const formatLocalDate = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
 
+        return `${year}-${month}-${day}`;
+      };
+      const p = new URLSearchParams({
+        check_in: formatLocalDate(checkIn),
+        check_out: formatLocalDate(checkOut),
+      });
       if (roomType) p.set("type", roomType);
 
       const res = await fetch(`${API}/api/rooms?${p}`);
       const data = await res.json();
-
-      setResults(Array.isArray(data) ? data : []);
+      const available = Array.isArray(data) ? data : [];
+      setResults(available);
+      setShowAllRooms(false);
+      onViewRooms?.(available.map((r) => r.room_id));
     } catch {
       setResults([]);
     } finally {
       setLoading(false);
     }
-  }
+  }   // <-- Missing brace
 
   function tileClass({ date, view }) {
     if (view !== "month") return null;
@@ -80,7 +125,8 @@ export default function CalendarSection() {
 
     return null;
   }
-
+const leftRef  = useFadeSlide("left");
+  const rightRef = useFadeSlide("right");
   return (
     <>
       <style>{`
@@ -106,20 +152,23 @@ export default function CalendarSection() {
         id="calendar"
         className="bg-[var(--navy)] px-4 md:px-8 lg:px-12  py-20"
       >
-        <div className="mx-auto grid max-w-[1100px] grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-[60px]">
+         <div className="mx-auto grid max-w-[1100px] grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-[60px]">
           {/* INFO */}
+            <div ref={leftRef}>
+        {/* ...all your info/form content unchanged... */}
           <div>
-            <div className="section-eyebrow">
-              <span className="text-[var(--gold-light)]">
-                Availability
-              </span>
-            </div>
+            <motion.div {...fadeUp(0)} className="section-eyebrow">
+  <span className="text-[var(--gold-light)]">Availability</span>
+</motion.div>
 
-            <h2 className="mb-4 font-[var(--font-display)] text-[clamp(1.8rem,3vw,2.4rem)] font-semibold leading-tight text-white">
-              Check Your
-              <br />
-              Available Dates
-            </h2>
+<motion.h2
+  {...fadeUp(0.15)}
+  className="mb-4 font-[var(--font-display)] text-[clamp(1.8rem,3vw,2.4rem)] font-semibold leading-tight text-white"
+>
+  Check Your
+  <br />
+  Available Dates
+</motion.h2>
 
             <p className="mb-6 text-[0.88rem] leading-[1.75] text-white/55">
               Select your check-in date first, then your check-out date.
@@ -201,18 +250,17 @@ export default function CalendarSection() {
             <button
               onClick={checkAvailability}
               disabled={!checkIn || !checkOut || loading}
-              className={`flex w-full items-center justify-center gap-2 rounded-md bg-[var(--gold)] px-5 py-3 font-medium text-[var(--navy)] transition ${
-                !checkIn || !checkOut
-                  ? "pointer-events-none opacity-50"
-                  : "hover:brightness-105"
-              }`}
+              className={`flex w-full items-center justify-center gap-2 rounded-md bg-[var(--gold)] px-5 py-3 font-medium text-[var(--navy)] transition ${!checkIn || !checkOut
+                ? "pointer-events-none opacity-50"
+                : "hover:brightness-105"
+                }`}
             >
               <SearchIcon size={15} />
               {loading ? "Checking..." : "Check Availability"}
             </button>
 
             {/* Results */}
-            {results !== null && (
+            {/* {results !== null && (
               <div className="mt-5 rounded-[var(--radius-md)] border border-[rgba(201,168,76,0.2)] bg-white/5 px-[18px] py-[14px] text-white">
                 {results.length === 0 ? (
                   <div className="text-[0.88rem] text-white/50">
@@ -229,7 +277,7 @@ export default function CalendarSection() {
                       {results.length > 1 ? "s" : ""} available
                     </div>
 
-                    {results.slice(0, 4).map((r) => (
+                    {results.slice(0, 6).map((r) => (
                       <div
                         key={r.room_id}
                         className="flex justify-between border-t border-white/5 py-1.5 text-[0.78rem] text-white/60"
@@ -248,23 +296,107 @@ export default function CalendarSection() {
                         </span>
                       </div>
                     ))}
-
-                    {results.length > 4 && (
-                      <div className="mt-1.5 text-[0.72rem] text-white/35">
-                        +{results.length - 4} more — scroll to rooms
-                        above
-                      </div>
+                    {results.length > 4  && (
+                      <button
+                        onClick={() =>
+                          document
+                            .getElementById("rooms-section")
+                            ?.scrollIntoView({ behavior: "smooth" })
+                        }
+                        className="mt-2 text-[0.72rem] text-[var(--gold)] underline underline-offset-2 cursor-pointer bg-transparent border-0 p-0 font-inherit hover:text-white transition"
+                      >
+                        +{results.length - 4} more available — view all rooms ↓
+                      </button>
                     )}
                   </>
                 )}
               </div>
+            )} */}
+            {loading ? (
+              <div className="mt-5 rounded-[var(--radius-md)] border border-[rgba(201,168,76,0.2)] bg-white/5 px-[18px] py-[16px]">
+                <div className="flex items-center gap-3">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--gold)] border-t-transparent" />
+                  <span className="text-[0.88rem] text-white/70">
+                    Checking room availability...
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {[1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="animate-pulse flex justify-between border-t border-white/5 py-2"
+                    >
+                      <div className="h-3 w-32 rounded bg-white/10" />
+                      <div className="h-3 w-20 rounded bg-white/10" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              results !== null && (
+                <div className="mt-5 rounded-[var(--radius-md)] border border-[rgba(201,168,76,0.2)] bg-white/5 px-[18px] py-[14px] text-white">
+                  {results.length === 0 ? (
+                    <div className="text-[0.88rem] text-white/50">
+                      No rooms available for these dates.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mb-2 flex items-center gap-1.5 text-[0.88rem] font-semibold text-[var(--gold-light)]">
+                        <CheckIcon
+                          size={15}
+                          color="var(--gold)"
+                        />
+                        {results.length} room
+                        {results.length > 1 ? "s" : ""} available
+                      </div>
+
+                      {(showAllRooms ? results : results.slice(0, 2)).map((r) => (
+                        <div
+                          key={r.room_id}
+                          className="flex justify-between border-t border-white/5 py-1.5 text-[0.78rem] text-white/60"
+                        >
+                          <span>
+                            {r.room_type} — Room{" "}
+                            {r.room_number || r.room_id}
+                          </span>
+
+                          <span className="font-semibold text-white">
+                            ₹
+                            {Number(
+                              r.price_per_night
+                            ).toLocaleString()}
+                            /night
+                          </span>
+                        </div>
+                      ))}
+                      {results.length > 2 && (
+                        <button
+                          onClick={() => setShowAllRooms(!showAllRooms)}
+                          className="mt-2 text-[0.72rem] text-[var(--gold)] underline underline-offset-2 cursor-pointer bg-transparent border-0 p-0 font-inherit hover:text-white transition"
+                        >
+                          {showAllRooms
+                            ? "Show Less ↑"
+                            : `+${results.length - 2} more available — View More ↓`}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
             )}
           </div>
+      </div>
 
           {/* Calendar */}
+           <div
+        ref={rightRef}
+        className="rounded-[var(--radius-lg)] bg-white p-7 shadow-[var(--shadow-lg)]"
+      >
+        {/* ...calendar content unchanged... */}
           <div className="rounded-[var(--radius-lg)] bg-white p-7 shadow-[var(--shadow-lg)]">
             <div className="mb-[14px] flex items-center justify-between">
-              <div className="flex items-center gap-2 font-[var(--font-display)] text-[0.9rem] font-semibold text-[var(--navy)]">
+              <div className="flex items-center gap-2 font-[var(--font-body)] text-[0.9rem] font-semibold text-[var(--navy)]">
                 <CalendarIcon
                   size={16}
                   color="var(--navy)"
@@ -276,17 +408,17 @@ export default function CalendarSection() {
               </div>
 
               {(checkIn || checkOut) && (
-                <button
-                  onClick={() => {
-                    setCheckIn(null);
-                    setCheckOut(null);
-                    setStep("checkin");
-                    setResults(null);
-                  }}
-                  className="text-[0.78rem] text-[var(--gray-400)] transition hover:text-[var(--navy)]"
-                >
-                  Reset
-                </button>
+              <button
+  onClick={() => {
+    setCheckIn(null);
+    setCheckOut(null);
+    setStep("checkin");
+    setResults(null);
+  }}
+  className="text-[0.78rem] text-[#DC2626] transition hover:text-[#B91C1C]"
+>
+  Reset
+</button>
               )}
             </div>
 
@@ -302,6 +434,7 @@ export default function CalendarSection() {
               }
             />
           </div>
+      </div>
         </div>
       </section>
     </>
