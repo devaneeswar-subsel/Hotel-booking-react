@@ -97,6 +97,20 @@ const transporter = nodemailer.createTransport({
     pass: process.env.GMAIL_APP_PASSWORD,
   },
 });
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD,
+  },
+});
+
+// Verify connection
+transporter.verify((error) => {
+  if (error) console.error("Gmail transporter error:", error);
+  else console.log("✅ Gmail ready");
+});
 // ─── AUTO MIGRATE ────────────────────────────────────────────────────────────
 async function runMigrations() {
   try {
@@ -574,7 +588,7 @@ app.post("/api/payment/verify", async (req, res) => {
       const gst = Math.round(Number(booking.total_price) * 0.18 * 100) / 100;
       const total = Math.round((Number(booking.total_price) + gst) * 100) / 100;
 
-      await transporter.sendMail({
+      transporter.sendMail({
         from: `"VV Grand Park Residency" <${process.env.GMAIL_USER}>`,
         to: booking.email,
         subject: `Booking Confirmed! #${booking.booking_id} — VV Grand Park Residency`,
