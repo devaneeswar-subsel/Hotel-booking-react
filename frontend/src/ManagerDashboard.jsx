@@ -1353,7 +1353,6 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
       })
       .finally(() => setLoading(false));
   };
-
   useEffect(() => {
     fetchAll();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
