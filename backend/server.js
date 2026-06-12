@@ -9,7 +9,7 @@ const nodemailer = require("nodemailer");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const bcrypt = require("bcryptjs");
-
+const PDFDocument = require("pdfkit");
 const app = express();
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
@@ -580,49 +580,289 @@ app.post("/api/payment/verify", async (req, res) => {
       const gst = Math.round(Number(booking.total_price) * 0.18 * 100) / 100;
       const total = Math.round((Number(booking.total_price) + gst) * 100) / 100;
 
-      transporter.sendMail({
-        from: `"VV Grand Park Residency" <${process.env.GMAIL_USER}>`,
-        to: booking.email,
-        subject: `Booking Confirmed! #${booking.booking_id} — VV Grand Park Residency`,
-        html: `
-  <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid #e9ecef">
-    <div style="background:#0F1923;padding:28px 32px;text-align:center">
-      <h1 style="color:#C9A84C;font-size:1.4rem;margin:0;letter-spacing:2px">VV GRAND PARK</h1>
-      <p style="color:rgba(255,255,255,0.5);font-size:0.75rem;margin:4px 0 0;letter-spacing:3px">RESIDENCY</p>
-    </div>
-    <div style="padding:32px;background:#fff">
-      <div style="text-align:center;margin-bottom:24px">
-        <div style="text-align:center;margin-bottom:16px">
-  <div style="width:64px;height:64px;background:#E8F8F0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin:0 auto">
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2D9A6E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="20 6 9 17 4 12"/>
-    </svg>
-  </div>
+      // Generate PDF and send email in background
+      (async () => {
+        try {
+          const nights = Math.ceil(
+            (new Date(booking.check_out_date) -
+              new Date(booking.check_in_date)) /
+              86400000,
+          );
+          const basePrice = Number(booking.total_price);
+          const gst = Math.round(basePrice * 0.18 * 100) / 100;
+          const total = Math.round((basePrice + gst) * 100) / 100;
+          const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
+
+          // Generate PDF buffer
+          const pdfBuffer = await new Promise((resolve, reject) => {
+            const doc = new PDFDocument({ margin: 50, size: "A4" });
+            const chunks = [];
+            doc.on("data", (chunk) => chunks.push(chunk));
+            doc.on("end", () => resolve(Buffer.concat(chunks)));
+            doc.on("error", reject);
+
+            // Header
+            doc.rect(0, 0, 595, 100).fill("#0F1923");
+            doc
+              .fillColor("#C9A84C")
+              .font("Helvetica-Bold")
+              .fontSize(22)
+              .text("VV GRAND PARK", 50, 30);
+            doc
+              .fillColor("#C9A84C")
+              .font("Helvetica")
+              .fontSize(10)
+              .text("RESIDENCY", 50, 56);
+            doc
+              .fillColor("#ffffff")
+              .font("Helvetica-Bold")
+              .fontSize(22)
+              .text("INVOICE", 400, 30, { align: "right" });
+            doc
+              .fillColor("rgba(255,255,255,0.5)")
+              .font("Helvetica")
+              .fontSize(10)
+              .text(invNo, 400, 56, { align: "right" });
+            doc
+              .fillColor("rgba(255,255,255,0.5)")
+              .fontSize(9)
+              .text(
+                new Date().toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                }),
+                400,
+                72,
+                { align: "right" },
+              );
+
+            // Gold line
+            doc
+              .moveTo(50, 115)
+              .lineTo(545, 115)
+              .strokeColor("#C9A84C")
+              .lineWidth(1)
+              .stroke();
+
+            // Bill To
+            doc
+              .fillColor("#868E96")
+              .font("Helvetica-Bold")
+              .fontSize(8)
+              .text("BILL TO", 50, 130);
+            doc
+              .fillColor("#0F1923")
+              .font("Helvetica-Bold")
+              .fontSize(13)
+              .text(booking.guest_name || "Guest", 50, 145);
+            doc
+              .fillColor("#495057")
+              .font("Helvetica")
+              .fontSize(9)
+              .text(booking.email || "", 50, 162);
+            if (booking.phone) doc.text(booking.phone, 50, 175);
+
+            doc
+              .fillColor("#868E96")
+              .font("Helvetica-Bold")
+              .fontSize(8)
+              .text("FROM", 350, 130);
+            doc
+              .fillColor("#0F1923")
+              .font("Helvetica-Bold")
+              .fontSize(13)
+              .text("VV Grand Park Residency", 350, 145);
+            doc
+              .fillColor("#495057")
+              .font("Helvetica")
+              .fontSize(9)
+              .text("vvgrandpark.com", 350, 162)
+              .text("vvgrandpark.hotel@gmail.com", 350, 175);
+
+            // Table header
+            const tableTop = 210;
+            doc.rect(50, tableTop, 495, 25).fill("#0F1923");
+            doc
+              .fillColor("#C9A84C")
+              .font("Helvetica-Bold")
+              .fontSize(9)
+              .text("DESCRIPTION", 60, tableTop + 8)
+              .text("DETAILS", 280, tableTop + 8)
+              .text("AMOUNT", 490, tableTop + 8, { align: "right" });
+
+            // Table rows
+            const rows = [
+              [
+                `${booking.room_type} — Room ${booking.room_number || booking.room_id}`,
+                `${nights} night${nights > 1 ? "s" : ""}`,
+                `Rs.${basePrice.toLocaleString()}`,
+              ],
+              [
+                "Check-in",
+                new Date(booking.check_in_date).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                }),
+                "—",
+              ],
+              [
+                "Check-out",
+                new Date(booking.check_out_date).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                }),
+                "—",
+              ],
+              ["Guests", `${booking.guest_count || 1}`, "—"],
+              ["Payment ID", booking.payment_id || "—", "—"],
+            ];
+
+            let y = tableTop + 30;
+            rows.forEach((row, i) => {
+              if (i % 2 === 0) doc.rect(50, y - 5, 495, 22).fill("#F8F9FA");
+              doc
+                .fillColor("#0F1923")
+                .font("Helvetica")
+                .fontSize(9)
+                .text(row[0], 60, y)
+                .text(row[1], 280, y)
+                .text(row[2], 490, y, { align: "right" });
+              y += 22;
+            });
+
+            // Summary box
+            y += 15;
+            doc
+              .moveTo(50, y)
+              .lineTo(545, y)
+              .strokeColor("#E9ECEF")
+              .lineWidth(0.5)
+              .stroke();
+            y += 15;
+
+            const summaryRows = [
+              ["Room Charges", `Rs.${basePrice.toLocaleString()}`],
+              ["GST (18%)", `Rs.${Math.round(gst).toLocaleString()}`],
+            ];
+            summaryRows.forEach(([label, val]) => {
+              doc
+                .fillColor("#868E96")
+                .font("Helvetica")
+                .fontSize(10)
+                .text(label, 350, y);
+              doc
+                .fillColor("#0F1923")
+                .font("Helvetica-Bold")
+                .fontSize(10)
+                .text(val, 490, y, { align: "right" });
+              y += 20;
+            });
+
+            // Total box
+            y += 5;
+            doc.rect(350, y, 195, 36).fill("#0F1923");
+            doc
+              .fillColor("#C9A84C")
+              .font("Helvetica-Bold")
+              .fontSize(11)
+              .text("TOTAL PAID", 360, y + 5);
+            doc
+              .fillColor("#ffffff")
+              .font("Helvetica-Bold")
+              .fontSize(14)
+              .text(`Rs.${Math.round(total).toLocaleString()}`, 360, y + 18, {
+                width: 175,
+                align: "right",
+              });
+
+            // Footer
+            doc
+              .moveTo(50, 750)
+              .lineTo(545, 750)
+              .strokeColor("#C9A84C")
+              .lineWidth(0.5)
+              .stroke();
+            doc
+              .fillColor("#868E96")
+              .font("Helvetica-Oblique")
+              .fontSize(9)
+              .text(
+                "Thank you for choosing VV Grand Park Residency. We look forward to welcoming you!",
+                50,
+                758,
+                { align: "center" },
+              );
+            doc
+              .fillColor("#868E96")
+              .font("Helvetica")
+              .fontSize(8)
+              .text(
+                "vvgrandpark.com  |  vvgrandpark.hotel@gmail.com",
+                50,
+                772,
+                { align: "center" },
+              );
+
+            doc.end();
+          });
+
+          // Send email with PDF attachment
+          await transporter.sendMail({
+            from: `"VV Grand Park Residency" <${process.env.GMAIL_USER}>`,
+            to: booking.email,
+            subject: `Booking Confirmed! ${invNo} — VV Grand Park Residency`,
+            html: `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid #e9ecef">
+        <div style="background:#0F1923;padding:28px 32px;text-align:center">
+          <h1 style="color:#C9A84C;font-size:1.4rem;margin:0;letter-spacing:2px">VV GRAND PARK</h1>
+          <p style="color:rgba(255,255,255,0.5);font-size:0.75rem;margin:4px 0 0;letter-spacing:3px">RESIDENCY</p>
+        </div>
+        <div style="padding:32px;background:#fff">
+          <div style="text-align:center;margin-bottom:24px">
+            <div style="width:64px;height:64px;background:#E8F8F0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin:0 auto">
+  <span style="color:#2D9A6E;font-size:2rem;font-weight:bold">✓</span>
 </div>
-        <h2 style="color:#0F1923;margin:12px 0 4px">Booking Confirmed!</h2>
-        <p style="color:#868E96;font-size:0.9rem">Thank you, ${booking.guest_name}. Your reservation is confirmed.</p>
-      </div>
-      <div style="background:#F8F9FA;border-radius:10px;padding:20px;margin-bottom:20px">
-        <table style="width:100%;border-collapse:collapse">
-          <tr><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Booking ID</td><td style="text-align:right;font-weight:700;color:#0F1923">#${booking.booking_id}</td></tr>
-          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Room</td><td style="text-align:right;font-weight:700;color:#0F1923">${booking.room_type} — Room ${booking.room_number || booking.room_id}</td></tr>
-          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Check-in</td><td style="text-align:right;font-weight:700;color:#0F1923">${new Date(booking.check_in_date).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</td></tr>
-          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Check-out</td><td style="text-align:right;font-weight:700;color:#0F1923">${new Date(booking.check_out_date).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</td></tr>
-          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Room Charges</td><td style="text-align:right;color:#0F1923">Rs.${Number(booking.total_price).toLocaleString()}</td></tr>
-          <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">GST (18%)</td><td style="text-align:right;color:#0F1923">Rs.${Math.round(Number(booking.total_price) * 0.18).toLocaleString()}</td></tr>
-          <tr style="border-top:2px solid #C9A84C"><td style="font-weight:700;color:#0F1923;padding:8px 0;font-size:1rem">Total Paid</td><td style="text-align:right;font-weight:700;color:#C9A84C;font-size:1.1rem">Rs.${Math.round(Number(booking.total_price) * 1.18).toLocaleString()}</td></tr>
-        </table>
-      </div>
-      <p style="color:#868E96;font-size:0.82rem;text-align:center;line-height:1.6">
-        Please carry a valid ID proof at check-in.<br/>
-        For queries: <a href="mailto:vvgrandpark.hotel@gmail.com" style="color:#C9A84C">vvgrandpark.hotel@gmail.com</a>
-      </p>
-    </div>
-    <div style="background:#0F1923;padding:16px;text-align:center">
-      <p style="color:rgba(255,255,255,0.3);font-size:0.72rem;margin:0">VV Grand Park Residency · vvgrandpark.com</p>
-    </div>
-  </div>`,
-      });
+            <h2 style="color:#0F1923;margin:12px 0 4px">Booking Confirmed!</h2>
+            <p style="color:#868E96;font-size:0.9rem">Thank you, ${booking.guest_name}. Your reservation is confirmed.</p>
+          </div>
+          <div style="background:#F8F9FA;border-radius:10px;padding:20px;margin-bottom:20px">
+            <table style="width:100%;border-collapse:collapse">
+              <tr><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Booking ID</td><td style="text-align:right;font-weight:700;color:#0F1923">${invNo}</td></tr>
+              <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Room</td><td style="text-align:right;font-weight:700;color:#0F1923">${booking.room_type} — Room ${booking.room_number || booking.room_id}</td></tr>
+              <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Check-in</td><td style="text-align:right;font-weight:700;color:#0F1923">${new Date(booking.check_in_date).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</td></tr>
+              <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Check-out</td><td style="text-align:right;font-weight:700;color:#0F1923">${new Date(booking.check_out_date).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</td></tr>
+              <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Nights</td><td style="text-align:right;color:#0F1923">${nights}</td></tr>
+              <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Room Charges</td><td style="text-align:right;color:#0F1923">Rs.${basePrice.toLocaleString()}</td></tr>
+              <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">GST (18%)</td><td style="text-align:right;color:#0F1923">Rs.${Math.round(gst).toLocaleString()}</td></tr>
+              <tr style="border-top:2px solid #C9A84C"><td style="font-weight:700;color:#0F1923;padding:8px 0;font-size:1rem">Total Paid</td><td style="text-align:right;font-weight:700;color:#C9A84C;font-size:1.1rem">Rs.${Math.round(total).toLocaleString()}</td></tr>
+            </table>
+          </div>
+          <p style="color:#868E96;font-size:0.82rem;text-align:center;line-height:1.6">
+            📎 Invoice PDF attached to this email.<br/>
+            Please carry a valid ID proof at check-in.<br/>
+            For queries: <a href="mailto:vvgrandpark.hotel@gmail.com" style="color:#C9A84C">vvgrandpark.hotel@gmail.com</a>
+          </p>
+        </div>
+        <div style="background:#0F1923;padding:16px;text-align:center">
+          <p style="color:rgba(255,255,255,0.3);font-size:0.72rem;margin:0">VV Grand Park Residency · vvgrandpark.com</p>
+        </div>
+      </div>`,
+            attachments: [
+              {
+                filename: `${invNo}-${(booking.guest_name || "guest").replace(/\s+/g, "_")}.pdf`,
+                content: pdfBuffer,
+                contentType: "application/pdf",
+              },
+            ],
+          });
+          console.log(`✅ Booking email sent to ${booking.email}`);
+        } catch (emailErr) {
+          console.error("Booking email error:", emailErr.message);
+        }
+      })();
     } catch (emailErr) {
       console.error("Booking email error:", emailErr.message);
     }

@@ -122,7 +122,7 @@ function LineChart({ data, color = "#C9A84C", height = 80 }) {
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <polygon  points={filled} fill="url(#lg)" />
+      <polygon points={filled} fill="url(#lg)" />
       <polyline
         points={pts.join(" ")}
         fill="none"
@@ -229,7 +229,6 @@ function StatCard({
                 size={11}
                 color={trend > 0 ? "#2D9A6E" : "#C0392B"}
               />
-
               {trend > 0 ? "+" : ""}
               {trend}% this month
             </div>
@@ -242,27 +241,16 @@ function StatCard({
             background: accent || "#F1F3F5",
           }}
         >
-          <Icon
-            size={18}
-            color={accent ? "#fff" : "#0F1923"}
-          />
+          <Icon size={18} color={accent ? "#fff" : "#0F1923"} />
         </div>
       </div>
 
       {chartData && chartType === "bar" && (
-        <BarChart
-          data={chartData}
-          color="#C9A84C"
-          height={52}
-        />
+        <BarChart data={chartData} color="#C9A84C" height={52} />
       )}
 
       {chartData && chartType === "line" && (
-        <LineChart
-          data={chartData}
-          color="#C9A84C"
-          height={52}
-        />
+        <LineChart data={chartData} color="#C9A84C" height={52} />
       )}
     </div>
   );
@@ -309,7 +297,7 @@ function CancelWarningModal({ booking, onConfirm, onClose }) {
               {
                 label: "Total",
                 val: `₹${Number(
-                  booking.final_total || booking.total_price
+                  booking.final_total || booking.total_price,
                 ).toLocaleString("en-IN")}`,
               },
             ].map(({ label, val }) => (
@@ -324,8 +312,8 @@ function CancelWarningModal({ booking, onConfirm, onClose }) {
           </div>
 
           <p className="mb-5 text-sm leading-relaxed text-gray-600">
-            Are you sure you want to cancel this booking? The guest will need
-            to be notified separately.
+            Are you sure you want to cancel this booking? The guest will need to
+            be notified separately.
           </p>
 
           <div className="flex gap-3">
@@ -418,22 +406,15 @@ function UserDetailModal({ userId, onClose }) {
             },
             {
               label: "Total Spent",
-              val: `₹${Number(
-                user.total_spent || 0
-              ).toLocaleString("en-IN")}`,
+              val: `₹${Number(user.total_spent || 0).toLocaleString("en-IN")}`,
             },
           ].map(({ label, val }) => (
-            <div
-              key={label}
-              className="rounded-xl bg-gray-50 p-4"
-            >
+            <div key={label} className="rounded-xl bg-gray-50 p-4">
               <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
                 {label}
               </div>
 
-              <div className="text-sm font-semibold text-slate-900">
-                {val}
-              </div>
+              <div className="text-sm font-semibold text-slate-900">{val}</div>
             </div>
           ))}
         </div>
@@ -494,9 +475,9 @@ function UserDetailModal({ userId, onClose }) {
                       <span className="text-gray-500">Total: </span>
                       <strong>
                         ₹
-                        {Number(
-                          b.final_total || b.total_price
-                        ).toLocaleString("en-IN")}
+                        {Number(b.final_total || b.total_price).toLocaleString(
+                          "en-IN",
+                        )}
                       </strong>
                     </div>
                   </div>
@@ -521,7 +502,13 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const [paymentMode, setPaymentMode] = useState("Online");
   const [addonPaid, setAddonPaid] = useState(false);
 
-  const PRESET_ADDONS = ["Food & Beverages", "Laundry", "Spa/Massage", "Extra Bed", "Room Service"];
+  const PRESET_ADDONS = [
+    "Food & Beverages",
+    "Laundry",
+    "Spa/Massage",
+    "Extra Bed",
+    "Room Service",
+  ];
   const PAYMENT_MODES = ["Cash", "UPI", "Card", "Online", "Bank Transfer"];
 
   const fetchBooking = () => {
@@ -537,7 +524,9 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   }, [bookingId]); // eslint-disable-line
 
   async function handleCheckin() {
-    const res = await apiFetch(`/api/bookings/${bookingId}/checkin`, { method: "PATCH" });
+    const res = await apiFetch(`/api/bookings/${bookingId}/checkin`, {
+      method: "PATCH",
+    });
     const data = await res.json();
     if (!res.ok) return showToast(data.error, "error");
     showToast("Guest checked in!", "success");
@@ -546,17 +535,24 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   }
 
   async function handleCheckout() {
-    if (!window.confirm("Confirm checkout? This will calculate final bill.")) return;
-    const res = await apiFetch(`/api/bookings/${bookingId}/checkout`, { method: "PATCH" });
+    if (!window.confirm("Confirm checkout? This will calculate final bill."))
+      return;
+    const res = await apiFetch(`/api/bookings/${bookingId}/checkout`, {
+      method: "PATCH",
+    });
     const data = await res.json();
     if (!res.ok) return showToast(data.error, "error");
-    showToast(`Checked out! Total: Rs.${Number(data.final_total).toLocaleString()}`, "success");
+    showToast(
+      `Checked out! Total: Rs.${Number(data.final_total).toLocaleString()}`,
+      "success",
+    );
     fetchBooking();
     onRefresh();
   }
 
   async function addAddon() {
-    if (!addonLabel || !addonAmount) return showToast("Enter label and amount", "error");
+    if (!addonLabel || !addonAmount)
+      return showToast("Enter label and amount", "error");
     setAddonLoading(true);
     const res = await apiFetch(`/api/bookings/${bookingId}/addons`, {
       method: "POST",
@@ -573,14 +569,321 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   }
 
   async function removeAddon(addonId) {
-    await apiFetch(`/api/bookings/${bookingId}/addons/${addonId}`, { method: "DELETE" });
+    await apiFetch(`/api/bookings/${bookingId}/addons/${addonId}`, {
+      method: "DELETE",
+    });
     showToast("Addon removed", "success");
     fetchBooking();
     onRefresh();
   }
 
   async function downloadInvoice() {
-    // ... unchanged PDF generation logic ...
+    if (!booking) return;
+    const b = booking;
+    const selectedPaymentMode = paymentMode;
+    const isAddonPaid = addonPaid;
+    const ci = b.actual_checkin
+      ? new Date(b.actual_checkin).toLocaleString("en-IN")
+      : b.check_in_date?.slice(0, 10);
+    const co = b.actual_checkout
+      ? new Date(b.actual_checkout).toLocaleString("en-IN")
+      : b.check_out_date?.slice(0, 10);
+    const nights =
+      b.check_in_date && b.check_out_date
+        ? Math.ceil(
+            (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
+          )
+        : 1;
+    const basePrice = Number(b.total_price);
+    const roomGstPdf = Math.round(basePrice * GST_RATE * 100) / 100;
+    const alreadyPaidPdf = Math.round((basePrice + roomGstPdf) * 100) / 100;
+    const addonTotalPdf = Number(b.addon_charges || 0);
+    const addonGstPdf = Math.round(addonTotalPdf * GST_RATE * 100) / 100;
+    const remainingPdf = Math.round((addonTotalPdf + addonGstPdf) * 100) / 100;
+    const grandTotalPdf =
+      Math.round((alreadyPaidPdf + remainingPdf) * 100) / 100;
+    const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
+    const today = new Date().toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const W = 210;
+    const L = 18;
+    const R = W - 18;
+
+    doc.setFillColor(15, 25, 35);
+    doc.rect(0, 0, W, 32, "F");
+    doc.setFont("times", "bold");
+    doc.setFontSize(17);
+    doc.setTextColor(201, 168, 76);
+    doc.text("VV GRAND PARK", L, 13);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(180, 160, 100);
+    doc.text("RESIDENCY", L, 19);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(17);
+    doc.setTextColor(255, 255, 255);
+    doc.text("INVOICE", R, 13, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(150, 140, 120);
+    doc.text(invNo, R, 20, { align: "right" });
+    doc.text(`Date: ${today}`, R, 27, { align: "right" });
+
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.4);
+    doc.line(L, 37, R, 37);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(134, 142, 150);
+    doc.text("BILL TO", L, 44);
+    doc.text("FROM", W / 2 + 8, 44);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(15, 25, 35);
+    doc.text(b.guest_name || "Guest", L, 51);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(73, 80, 87);
+    doc.text(b.email || "", L, 57);
+    if (b.phone) doc.text(b.phone, L, 63);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(15, 25, 35);
+    doc.text("VV Grand Park Residency", W / 2 + 8, 51);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(73, 80, 87);
+    doc.text("vvgrandpark.com", W / 2 + 8, 57);
+    doc.text("vvgrandpark.hotel@gmail.com", W / 2 + 8, 63);
+
+    const tableTop = 76;
+    doc.setFillColor(15, 25, 35);
+    doc.rect(L, tableTop, W - 36, 8, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(201, 168, 76);
+    doc.text("DESCRIPTION", L + 4, tableTop + 5.5);
+    doc.text("DETAILS", 108, tableTop + 5.5);
+    doc.text("AMOUNT", R, tableTop + 5.5, { align: "right" });
+
+    const rows = [
+      {
+        desc: `${b.room_type} — Room ${b.room_number || b.room_id}`,
+        detail: `${nights} night${nights > 1 ? "s" : ""}`,
+        amount: `Rs.${basePrice.toLocaleString()}`,
+      },
+      { desc: "Check-in", detail: ci, amount: "—" },
+      { desc: "Check-out", detail: co, amount: "—" },
+      ...(b.hours_spent
+        ? [
+            {
+              desc: "Hours Stayed",
+              detail: `${b.hours_spent} hrs`,
+              amount: "—",
+            },
+          ]
+        : []),
+      { desc: "Guests", detail: `${b.guest_count || 1}`, amount: "—" },
+    ];
+
+    let y = tableTop + 13;
+    rows.forEach((row, i) => {
+      if (i % 2 === 0) {
+        doc.setFillColor(248, 249, 250);
+        doc.rect(L, y - 5, W - 36, 8, "F");
+      }
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(15, 25, 35);
+      doc.text(row.desc, L + 4, y);
+      doc.setTextColor(80, 80, 80);
+      doc.text(String(row.detail), 108, y);
+      doc.text(row.amount, R, y, { align: "right" });
+      y += 8;
+    });
+
+    if (b.addons && b.addons.length > 0) {
+      y += 2;
+      doc.setFillColor(235, 235, 235);
+      doc.rect(L, y - 4, W - 36, 8, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(80, 80, 80);
+      doc.text("ADD-ON CHARGES", L + 4, y + 1);
+      y += 8;
+      b.addons.forEach((addon, i) => {
+        if (i % 2 === 0) {
+          doc.setFillColor(248, 249, 250);
+          doc.rect(L, y - 5, W - 36, 8, "F");
+        }
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(15, 25, 35);
+        doc.text(addon.label, L + 4, y);
+        doc.setTextColor(80, 80, 80);
+        doc.text(
+          new Date(addon.created_at).toLocaleDateString("en-IN"),
+          108,
+          y,
+        );
+        doc.text(`Rs.${Number(addon.amount).toLocaleString()}`, R, y, {
+          align: "right",
+        });
+        y += 8;
+      });
+    }
+
+    y += 5;
+    doc.setDrawColor(220, 220, 220);
+    doc.setLineWidth(0.3);
+    doc.line(L, y, R, y);
+    y += 5;
+    const SX = W - 90;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.5);
+    doc.setTextColor(160, 160, 160);
+    doc.text("BOOKING PAYMENT — ALREADY PAID", L, y + 1);
+    y += 6;
+    [
+      { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
+      {
+        label: "GST (18%)",
+        val: `Rs.${Math.round(roomGstPdf).toLocaleString()}`,
+      },
+    ].forEach(({ label, val }) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(110, 110, 110);
+      doc.text(label, SX, y);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 30, 30);
+      doc.text(val, R, y, { align: "right" });
+      y += 6;
+    });
+    doc.setFillColor(232, 248, 240);
+    doc.rect(SX - 1, y - 4, R - SX + 3, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(45, 154, 110);
+    doc.text("Amount Already Paid", SX, y + 1);
+    doc.text(`Rs.${Math.round(alreadyPaidPdf).toLocaleString()}`, R, y + 1, {
+      align: "right",
+    });
+    y += 9;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.5);
+    doc.setTextColor(160, 160, 160);
+    doc.text("ADD-ON CHARGES", L, y + 1);
+    y += 6;
+    [
+      { label: "Add-on Charges", val: `Rs.${addonTotalPdf.toLocaleString()}` },
+      {
+        label: "GST on Add-ons (18%)",
+        val: `Rs.${Math.round(addonGstPdf).toLocaleString()}`,
+      },
+    ].forEach(({ label, val }) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(110, 110, 110);
+      doc.text(label, SX, y);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 30, 30);
+      doc.text(val, R, y, { align: "right" });
+      y += 6;
+    });
+    const remBg = isAddonPaid ? [232, 248, 240] : [255, 248, 220];
+    const remTxt = isAddonPaid ? [45, 154, 110] : [180, 120, 20];
+    doc.setFillColor(...remBg);
+    doc.rect(SX - 1, y - 4, R - SX + 3, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...remTxt);
+    doc.text(isAddonPaid ? "Add-ons Paid" : "Remaining to Pay", SX, y + 1);
+    doc.text(`Rs.${Math.round(remainingPdf).toLocaleString()}`, R, y + 1, {
+      align: "right",
+    });
+    y += 8;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(140, 140, 140);
+    doc.text(
+      `Payment Mode: ${selectedPaymentMode}   Status: ${isAddonPaid ? "PAID" : "PENDING"}`,
+      SX,
+      y,
+    );
+    y += 8;
+
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.5);
+    doc.line(SX - 1, y - 1, R, y - 1);
+    doc.setFillColor(15, 25, 35);
+    doc.roundedRect(SX - 1, y + 1, R - SX + 3, 14, 2, 2, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(201, 168, 76);
+    doc.text("GRAND TOTAL", (SX - 1 + R) / 2, y + 6.5, { align: "center" });
+    doc.setFontSize(11);
+    doc.setTextColor(255, 255, 255);
+    doc.text(
+      `Rs.${Math.round(grandTotalPdf).toLocaleString()}`,
+      (SX - 1 + R) / 2,
+      y + 13,
+      { align: "center" },
+    );
+
+    // Terms & Conditions
+    y += 24;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(80, 80, 80);
+    doc.text("TERMS & CONDITIONS", L, y);
+    y += 5;
+    const terms = [
+      "1. Valid photo ID must be presented at check-in.",
+      "2. Check-in time: 12:00 PM | Check-out time: 11:00 AM.",
+      "3. Early check-in/late check-out subject to availability.",
+      "4. Pets, outside food, and smoking are not permitted on premises.",
+      "5. The hotel is not liable for loss of valuables.",
+      "6. Cancellations must be made 24 hours prior to check-in for a refund.",
+    ];
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.5);
+    doc.setTextColor(120, 120, 120);
+    terms.forEach((term) => {
+      doc.text(term, L, y);
+      y += 5;
+    });
+
+    const footerY = 282;
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.3);
+    doc.line(L, footerY, R, footerY);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.setTextColor(134, 142, 150);
+    doc.text(
+      "Thank you for choosing VV Grand Park Residency. We look forward to welcoming you again.",
+      W / 2,
+      footerY + 5,
+      { align: "center" },
+    );
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.text(
+      "vvgrandpark.com  |  vvgrandpark.hotel@gmail.com",
+      W / 2,
+      footerY + 11,
+      { align: "center" },
+    );
+
+    doc.save(`${invNo}-${(b.guest_name || "guest").replace(/\s+/g, "_")}.pdf`);
   }
 
   // ── Loading state ──────────────────────────────────────────────────────────
@@ -634,7 +937,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   return (
     <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-navy/70 backdrop-blur-sm">
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
-
         {/* ── Header ── */}
         <div className="bg-navy px-7 py-5 flex items-center justify-between shrink-0">
           <div>
@@ -642,7 +944,8 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               Booking #{booking.booking_id} — {booking.guest_name}
             </div>
             <div className="text-xs text-white/45 mt-0.5">
-              {booking.room_type} · {booking.check_in_date?.slice(0, 10)} → {booking.check_out_date?.slice(0, 10)}
+              {booking.room_type} · {booking.check_in_date?.slice(0, 10)} →{" "}
+              {booking.check_out_date?.slice(0, 10)}
             </div>
           </div>
           <button
@@ -655,7 +958,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
 
         {/* ── Scrollable body ── */}
         <div className="overflow-y-auto flex-1 px-7 py-6 space-y-5">
-
           {/* ── Check-in / Check-out cards ── */}
           <div className="grid grid-cols-2 gap-3">
             {/* Check-in */}
@@ -686,7 +988,8 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               {booking.actual_checkout ? (
                 <div>
                   <div className="text-[0.82rem] text-blue-600 font-semibold">
-                    ✅ {new Date(booking.actual_checkout).toLocaleString("en-IN")}
+                    ✅{" "}
+                    {new Date(booking.actual_checkout).toLocaleString("en-IN")}
                   </div>
                   <div className="text-xs text-gray-400 mt-1">
                     Duration: {booking.hours_spent}h
@@ -695,11 +998,14 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               ) : (
                 <button
                   onClick={handleCheckout}
-                  disabled={!booking.actual_checkin || booking.status === "cancelled"}
+                  disabled={
+                    !booking.actual_checkin || booking.status === "cancelled"
+                  }
                   className={`text-white text-[0.8rem] font-semibold px-4 py-2 rounded-md transition-colors
-                    ${booking.actual_checkin
-                      ? "bg-blue-600 hover:bg-blue-700 cursor-pointer"
-                      : "bg-gray-300 cursor-not-allowed"
+                    ${
+                      booking.actual_checkin
+                        ? "bg-blue-600 hover:bg-blue-700 cursor-pointer"
+                        : "bg-gray-300 cursor-not-allowed"
                     }`}
                 >
                   ⏹ Record Check-out
@@ -721,9 +1027,10 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                   key={preset}
                   onClick={() => setAddonLabel(preset)}
                   className={`px-3 py-1 rounded-full text-[0.72rem] font-semibold border-[1.5px] transition-colors
-                    ${addonLabel === preset
-                      ? "bg-navy text-gold border-navy"
-                      : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                    ${
+                      addonLabel === preset
+                        ? "bg-navy text-gold border-navy"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
                     }`}
                 >
                   {preset}
@@ -763,7 +1070,9 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                     key={addon.addon_id}
                     className="flex items-center justify-between bg-white rounded-md px-3 py-2 border border-gray-200"
                   >
-                    <span className="text-[0.82rem] text-navy">{addon.label}</span>
+                    <span className="text-[0.82rem] text-navy">
+                      {addon.label}
+                    </span>
                     <div className="flex items-center gap-3">
                       <span className="text-[0.85rem] font-bold text-navy">
                         Rs.{Number(addon.amount).toLocaleString()}
@@ -796,9 +1105,10 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                   key={mode}
                   onClick={() => setPaymentMode(mode)}
                   className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[0.78rem] font-semibold border-2 transition-all
-                    ${paymentMode === mode
-                      ? "bg-navy text-gold border-navy"
-                      : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                    ${
+                      paymentMode === mode
+                        ? "bg-navy text-gold border-navy"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
                     }`}
                 >
                   {paymentIcons[mode]}
@@ -820,8 +1130,14 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                 Booking Payment (Already Paid)
               </div>
               {[
-                { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
-                { label: "GST (18%)", val: `Rs.${Math.round(roomGst).toLocaleString()}` },
+                {
+                  label: "Room Charges",
+                  val: `Rs.${basePrice.toLocaleString()}`,
+                },
+                {
+                  label: "GST (18%)",
+                  val: `Rs.${Math.round(roomGst).toLocaleString()}`,
+                },
               ].map(({ label, val }) => (
                 <div
                   key={label}
@@ -832,7 +1148,9 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                 </div>
               ))}
               <div className="flex justify-between items-center mt-2 bg-emerald-600/15 rounded-md px-2.5 py-1.5 border border-emerald-600/30">
-                <span className="text-[0.82rem] text-emerald-500 font-bold">Amount Already Paid</span>
+                <span className="text-[0.82rem] text-emerald-500 font-bold">
+                  Amount Already Paid
+                </span>
                 <span className="text-[0.95rem] text-emerald-500 font-bold">
                   Rs.{Math.round(alreadyPaid).toLocaleString()}
                 </span>
@@ -847,8 +1165,14 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                 Add-on Charges
               </div>
               {[
-                { label: "Add-on Charges", val: `Rs.${addonTotal.toLocaleString()}` },
-                { label: "GST on Add-ons (18%)", val: `Rs.${Math.round(addonGst).toLocaleString()}` },
+                {
+                  label: "Add-on Charges",
+                  val: `Rs.${addonTotal.toLocaleString()}`,
+                },
+                {
+                  label: "GST on Add-ons (18%)",
+                  val: `Rs.${Math.round(addonGst).toLocaleString()}`,
+                },
               ].map(({ label, val }) => (
                 <div
                   key={label}
@@ -860,26 +1184,38 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               ))}
               <div
                 className={`flex justify-between items-center mt-2 rounded-md px-2.5 py-1.5 border transition-all
-                  ${addonPaid
-                    ? "bg-emerald-600/15 border-emerald-600/30"
-                    : "bg-gold/10 border-gold/25"
+                  ${
+                    addonPaid
+                      ? "bg-emerald-600/15 border-emerald-600/30"
+                      : "bg-gold/10 border-gold/25"
                   }`}
               >
                 <div>
-                  <div className={`text-[0.82rem] font-bold ${addonPaid ? "text-emerald-500" : "text-gold"}`}>
+                  <div
+                    className={`text-[0.82rem] font-bold ${addonPaid ? "text-emerald-500" : "text-gold"}`}
+                  >
                     {addonPaid ? "Add-ons Paid" : "Remaining Amount to Pay"}
                   </div>
                   <div className="text-[0.68rem] text-white/35 mt-0.5">
-                    {addonPaid ? `Received via ${paymentMode}` : `via ${paymentMode}`}
+                    {addonPaid
+                      ? `Received via ${paymentMode}`
+                      : `via ${paymentMode}`}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
                   {addonPaid && (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#10b981">
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="#10b981"
+                    >
                       <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
                     </svg>
                   )}
-                  <span className={`text-[1.1rem] font-bold font-display ${addonPaid ? "text-emerald-500" : "text-gold"}`}>
+                  <span
+                    className={`text-[1.1rem] font-bold font-display ${addonPaid ? "text-emerald-500" : "text-gold"}`}
+                  >
                     Rs.{Math.round(remainingAmount).toLocaleString()}
                   </span>
                 </div>
@@ -890,7 +1226,9 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
 
             {/* Grand total */}
             <div className="flex justify-between items-center">
-              <span className="font-body font-bold text-gold text-[1rem]">Grand Total</span>
+              <span className="font-body font-bold text-gold text-[1rem]">
+                Grand Total
+              </span>
               <span className="font-body font-bold text-white text-[1.4rem]">
                 Rs.{Math.round(finalTotal).toLocaleString()}
               </span>
@@ -910,25 +1248,38 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
             <button
               onClick={() => setAddonPaid(!addonPaid)}
               disabled={addonTotal === 0}
-              title={addonTotal === 0 ? "No add-on charges to mark as paid" : ""}
+              title={
+                addonTotal === 0 ? "No add-on charges to mark as paid" : ""
+              }
               className={`flex-1 flex items-center justify-center gap-1 py-3 rounded-lg text-[0.88rem] font-bold transition-all
-                ${addonPaid
-                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                  : addonTotal > 0
-                    ? "bg-gold text-navy hover:bg-gold/90"
-                    : "bg-gray-200 text-gray-400 cursor-not-allowed opacity-60"
+                ${
+                  addonPaid
+                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                    : addonTotal > 0
+                      ? "bg-gold text-navy hover:bg-gold/90"
+                      : "bg-gray-200 text-gray-400 cursor-not-allowed opacity-60"
                 }`}
             >
               {addonPaid ? (
                 <>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
                     <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
                   </svg>
                   Add-ons Paid
                 </>
               ) : (
                 <>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
                     <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />
                   </svg>
                   Mark as Paid
@@ -936,7 +1287,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               )}
             </button>
           </div>
-
         </div>
       </div>
     </div>
@@ -1006,7 +1356,6 @@ function ImageSlot({ index, value, onChange, isMain }) {
 
   return (
     <div className="flex flex-col gap-1.5">
-
       {/* Label */}
       <div className="flex items-center gap-1.5">
         {isMain && (
@@ -1027,7 +1376,10 @@ function ImageSlot({ index, value, onChange, isMain }) {
         className={`relative w-full rounded-[10px] overflow-hidden bg-gray-50 transition-colors duration-200
           ${isMain ? "aspect-video" : "aspect-[4/3]"}
           ${dragging ? "border-2 border-dashed border-gold" : "border-[1.5px] border-gray-200"}`}
-        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
         onDragLeave={() => setDragging(false)}
         onDrop={async (e) => {
           e.preventDefault();
@@ -1035,7 +1387,6 @@ function ImageSlot({ index, value, onChange, isMain }) {
           await handleFile(e.dataTransfer.files[0]);
         }}
       >
-
         {/* PREVIEW */}
         {value && (
           <>
@@ -1043,7 +1394,9 @@ function ImageSlot({ index, value, onChange, isMain }) {
               src={value}
               alt={slotLabel}
               className="w-full h-full object-cover"
-              onError={(e) => { e.target.style.display = "none"; }}
+              onError={(e) => {
+                e.target.style.display = "none";
+              }}
             />
             {isMain && (
               <div className="absolute top-2 left-2 bg-gold/90 text-white text-[0.58rem] font-bold tracking-[0.8px] px-2 py-0.5 rounded uppercase">
@@ -1057,8 +1410,19 @@ function ImageSlot({ index, value, onChange, isMain }) {
                 title="Replace"
                 className="w-7 h-7 flex items-center justify-center rounded-md bg-navy/75 text-white border-none cursor-pointer hover:bg-navy transition-colors"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="16 16 12 12 8 16" />
+                  <line x1="12" y1="12" x2="12" y2="21" />
+                  <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
                 </svg>
               </button>
               <button
@@ -1066,8 +1430,20 @@ function ImageSlot({ index, value, onChange, isMain }) {
                 title="Remove"
                 className="w-7 h-7 flex items-center justify-center rounded-md bg-red-600/80 text-white border-none cursor-pointer hover:bg-red-600 transition-colors"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" />
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
                 </svg>
               </button>
             </div>
@@ -1077,8 +1453,19 @@ function ImageSlot({ index, value, onChange, isMain }) {
         {/* EMPTY STATE */}
         {!value && mode === "idle" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-2.5">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#CED4DA" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#CED4DA"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="16 16 12 12 8 16" />
+              <line x1="12" y1="12" x2="12" y2="21" />
+              <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
             </svg>
             <div className="text-[0.65rem] text-gray-400 text-center">
               {isMain ? "Main photo" : "Add photo"}
@@ -1138,7 +1525,10 @@ function ImageSlot({ index, value, onChange, isMain }) {
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={async (e) => { await handleFile(e.target.files[0]); e.target.value = ""; }}
+        onChange={async (e) => {
+          await handleFile(e.target.files[0]);
+          e.target.value = "";
+        }}
       />
     </div>
   );
@@ -1147,12 +1537,12 @@ function ImageSlot({ index, value, onChange, isMain }) {
 /* ── EDIT ROOM MODAL — 5-slot image upload ── */
 function EditRoomModal({ room, onClose, showToast, onRefresh }) {
   const [form, setForm] = useState({
-    room_number:     room.room_number     || "",
-    room_type:       room.room_type       || "",
+    room_number: room.room_number || "",
+    room_type: room.room_type || "",
     price_per_night: room.price_per_night || "",
-    capacity:        room.capacity        || 2,
-    description:     room.description    || "",
-    is_available:    room.is_available,
+    capacity: room.capacity || 2,
+    description: room.description || "",
+    is_available: room.is_available,
   });
   const [images, setImages] = useState([
     room.image_url || "",
@@ -1193,13 +1583,14 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
     onClose();
   }
 
-  const inputCls = "w-full px-3 py-2 rounded-md border-[1.5px] border-gray-200 text-[0.85rem] text-gray-900 box-border focus:outline-none focus:ring-2 focus:ring-navy/10 focus:border-navy/40 transition";
-  const labelCls = "block text-[0.62rem] font-bold text-gray-400 mb-1 tracking-[0.8px] uppercase";
+  const inputCls =
+    "w-full px-3 py-2 rounded-md border-[1.5px] border-gray-200 text-[0.85rem] text-gray-900 box-border focus:outline-none focus:ring-2 focus:ring-navy/10 focus:border-navy/40 transition";
+  const labelCls =
+    "block text-[0.62rem] font-bold text-gray-400 mb-1 tracking-[0.8px] uppercase";
 
   return (
     <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 bg-navy/75 backdrop-blur-sm">
       <div className="bg-white rounded-2xl w-full max-w-[600px] max-h-[92vh] overflow-hidden flex flex-col shadow-[0_24px_64px_rgba(0,0,0,0.28)]">
-
         {/* Header */}
         <div className="bg-navy px-6 py-5 flex items-center justify-between shrink-0">
           <div>
@@ -1220,7 +1611,6 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
 
         {/* Scrollable body */}
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-
           {/* Images */}
           <div className="bg-gray-50 rounded-xl p-3.5 border border-gray-200">
             <div className="text-[0.65rem] font-bold text-gray-600 tracking-[1px] uppercase mb-3">
@@ -1229,7 +1619,12 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
 
             {/* Main slot */}
             <div className="mb-2.5">
-              <ImageSlot index={0} value={images[0]} onChange={(v) => setImage(0, v)} isMain={true} />
+              <ImageSlot
+                index={0}
+                value={images[0]}
+                onChange={(v) => setImage(0, v)}
+                isMain={true}
+              />
             </div>
 
             {/* 4 thumbnails */}
@@ -1246,7 +1641,8 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
             </div>
 
             <div className="mt-2 text-[0.62rem] text-gray-400 leading-relaxed">
-              JPG, PNG, WebP supported. Files are converted to base64 and stored securely.
+              JPG, PNG, WebP supported. Files are converted to base64 and stored
+              securely.
             </div>
           </div>
 
@@ -1257,7 +1653,9 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
               <input
                 className={inputCls}
                 value={form.room_number}
-                onChange={(e) => setForm({ ...form, room_number: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, room_number: e.target.value })
+                }
               />
             </div>
             <div>
@@ -1265,11 +1663,15 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
               <select
                 className={inputCls}
                 value={form.room_type}
-                onChange={(e) => setForm({ ...form, room_type: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, room_type: e.target.value })
+                }
               >
-                {["Standard", "Deluxe", "Suite", "Luxury", "Presidential"].map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
+                {["Standard", "Deluxe", "Suite", "Luxury", "Presidential"].map(
+                  (t) => (
+                    <option key={t}>{t}</option>
+                  ),
+                )}
               </select>
             </div>
           </div>
@@ -1282,7 +1684,9 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
                 className={inputCls}
                 type="number"
                 value={form.price_per_night}
-                onChange={(e) => setForm({ ...form, price_per_night: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, price_per_night: e.target.value })
+                }
               />
             </div>
             <div>
@@ -1304,7 +1708,9 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
             <textarea
               className={`${inputCls} resize-y min-h-[64px]`}
               value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, description: e.target.value })
+              }
             />
           </div>
 
@@ -1312,11 +1718,14 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
           <div className="flex items-center gap-2.5">
             <span className={`${labelCls} mb-0`}>Status:</span>
             <button
-              onClick={() => setForm({ ...form, is_available: form.is_available ? 0 : 1 })}
+              onClick={() =>
+                setForm({ ...form, is_available: form.is_available ? 0 : 1 })
+              }
               className={`px-3.5 py-1 rounded-md text-[0.78rem] font-bold border-[1.5px] cursor-pointer transition-colors
-                ${form.is_available
-                  ? "bg-emerald-50 text-emerald-600 border-emerald-600 hover:bg-emerald-100"
-                  : "bg-red-50 text-red-600 border-red-600 hover:bg-red-100"
+                ${
+                  form.is_available
+                    ? "bg-emerald-50 text-emerald-600 border-emerald-600 hover:bg-emerald-100"
+                    : "bg-red-50 text-red-600 border-red-600 hover:bg-red-100"
                 }`}
             >
               {form.is_available ? "Available" : "Blocked"}
@@ -1336,15 +1745,15 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
             onClick={save}
             disabled={loading}
             className={`flex-[2] py-2.5 rounded-lg text-[0.88rem] font-bold border-none transition-colors
-              ${loading
-                ? "bg-gray-400 text-white cursor-not-allowed"
-                : "bg-navy text-gold cursor-pointer hover:bg-navy/90"
+              ${
+                loading
+                  ? "bg-gray-400 text-white cursor-not-allowed"
+                  : "bg-navy text-gold cursor-pointer hover:bg-navy/90"
               }`}
           >
             {loading ? "Saving..." : "Save Changes"}
           </button>
         </div>
-
       </div>
     </div>
   );
@@ -1353,12 +1762,12 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
 /* ── ADD ROOM MODAL ── */
 function AddRoomModal({ onClose, showToast, onRefresh }) {
   const [form, setForm] = useState({
-    room_number:     "",
-    room_type:       "Standard",
+    room_number: "",
+    room_type: "Standard",
     price_per_night: "",
-    capacity:        2,
-    description:     "",
-    image_url:       "",
+    capacity: 2,
+    description: "",
+    image_url: "",
   });
   const [loading, setLoading] = useState(false);
 
@@ -1378,22 +1787,39 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
     onClose();
   }
 
-  const inputCls = "w-full px-3 py-2.5 rounded-lg border-[1.5px] border-gray-200 text-[0.85rem] text-gray-900 box-border outline-none transition-colors duration-200 focus:border-gold focus:ring-2 focus:ring-gold/15";
-  const labelCls = "block text-[0.62rem] font-bold text-gray-400 mb-1.5 tracking-[0.8px] uppercase";
+  const inputCls =
+    "w-full px-3 py-2.5 rounded-lg border-[1.5px] border-gray-200 text-[0.85rem] text-gray-900 box-border outline-none transition-colors duration-200 focus:border-gold focus:ring-2 focus:ring-gold/15";
+  const labelCls =
+    "block text-[0.62rem] font-bold text-gray-400 mb-1.5 tracking-[0.8px] uppercase";
 
   const roomTypes = ["Standard", "Deluxe", "Suite", "Luxury", "Presidential"];
   const typeColors = {
-    Standard:     { border: "border-gray-500",   bg: "bg-gray-500",   text: "text-gray-500"   },
-    Deluxe:       { border: "border-blue-600",   bg: "bg-blue-600",   text: "text-blue-600"   },
-    Suite:        { border: "border-violet-600", bg: "bg-violet-600", text: "text-violet-600" },
-    Luxury:       { border: "border-gold",       bg: "bg-gold",       text: "text-gold"       },
-    Presidential: { border: "border-red-600",    bg: "bg-red-600",    text: "text-red-600"    },
+    Standard: {
+      border: "border-gray-500",
+      bg: "bg-gray-500",
+      text: "text-gray-500",
+    },
+    Deluxe: {
+      border: "border-blue-600",
+      bg: "bg-blue-600",
+      text: "text-blue-600",
+    },
+    Suite: {
+      border: "border-violet-600",
+      bg: "bg-violet-600",
+      text: "text-violet-600",
+    },
+    Luxury: { border: "border-gold", bg: "bg-gold", text: "text-gold" },
+    Presidential: {
+      border: "border-red-600",
+      bg: "bg-red-600",
+      text: "text-red-600",
+    },
   };
 
   return (
     <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 bg-navy/80 backdrop-blur-sm">
       <div className="bg-white rounded-2xl w-full max-w-[560px] max-h-[92vh] overflow-hidden flex flex-col shadow-[0_24px_64px_rgba(0,0,0,0.3)]">
-
         {/* Header */}
         <div className="bg-navy px-6 py-5 flex items-center justify-between shrink-0">
           <div>
@@ -1414,7 +1840,6 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
 
         {/* Scrollable body */}
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-
           {/* Image preview */}
           {form.image_url && (
             <div className="rounded-xl overflow-hidden h-40 relative">
@@ -1445,9 +1870,10 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                     type="button"
                     onClick={() => setForm({ ...form, room_type: t })}
                     className={`px-3.5 py-1.5 rounded-full text-[0.75rem] font-semibold border-2 transition-all duration-150
-                      ${active
-                        ? `${c.bg} ${c.border} text-white`
-                        : `bg-white border-gray-200 text-gray-600 hover:${c.border} hover:${c.text}`
+                      ${
+                        active
+                          ? `${c.bg} ${c.border} text-white`
+                          : `bg-white border-gray-200 text-gray-600 hover:${c.border} hover:${c.text}`
                       }`}
                   >
                     {t}
@@ -1465,7 +1891,9 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                 className={inputCls}
                 placeholder="e.g. 102"
                 value={form.room_number}
-                onChange={(e) => setForm({ ...form, room_number: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, room_number: e.target.value })
+                }
               />
             </div>
             <div>
@@ -1475,7 +1903,9 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                 type="number"
                 placeholder="e.g. 2500"
                 value={form.price_per_night}
-                onChange={(e) => setForm({ ...form, price_per_night: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, price_per_night: e.target.value })
+                }
               />
             </div>
           </div>
@@ -1490,9 +1920,10 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                   type="button"
                   onClick={() => setForm({ ...form, capacity: n })}
                   className={`w-10 h-10 rounded-lg text-[0.85rem] font-bold border-2 transition-all duration-150
-                    ${form.capacity === n
-                      ? "bg-navy border-navy text-gold"
-                      : "bg-white border-gray-200 text-gray-600 hover:border-navy/40"
+                    ${
+                      form.capacity === n
+                        ? "bg-navy border-navy text-gold"
+                        : "bg-white border-gray-200 text-gray-600 hover:border-navy/40"
                     }`}
                 >
                   {n}
@@ -1508,7 +1939,9 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
               className={`${inputCls} resize-y min-h-[72px]`}
               placeholder="Describe the room amenities, view, features..."
               value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, description: e.target.value })
+              }
             />
           </div>
 
@@ -1542,20 +1975,27 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                   val: `Rs.${Math.round(Number(form.price_per_night) * 0.18).toLocaleString()}`,
                 },
               ].map(({ label, val }) => (
-                <div key={label} className="flex justify-between text-[0.82rem] mb-1">
+                <div
+                  key={label}
+                  className="flex justify-between text-[0.82rem] mb-1"
+                >
                   <span className="text-gray-400">{label}</span>
                   <span className="font-semibold">{val}</span>
                 </div>
               ))}
               <div className="flex justify-between text-[0.9rem] border-t border-gray-200 pt-2 mt-1">
-                <span className="font-display font-semibold text-navy">Guest pays / night</span>
+                <span className="font-display font-semibold text-navy">
+                  Guest pays / night
+                </span>
                 <strong className="font-display text-navy">
-                  Rs.{Math.round(Number(form.price_per_night) * 1.18).toLocaleString()}
+                  Rs.
+                  {Math.round(
+                    Number(form.price_per_night) * 1.18,
+                  ).toLocaleString()}
                 </strong>
               </div>
             </div>
           )}
-
         </div>
 
         {/* Footer */}
@@ -1570,15 +2010,15 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
             onClick={save}
             disabled={loading}
             className={`flex-[2] py-2.5 rounded-lg text-[0.88rem] font-bold border-none flex items-center justify-center gap-2 transition-all duration-200
-              ${loading
-                ? "bg-gray-400 text-white cursor-not-allowed"
-                : "bg-navy text-gold cursor-pointer hover:bg-navy/90"
+              ${
+                loading
+                  ? "bg-gray-400 text-white cursor-not-allowed"
+                  : "bg-navy text-gold cursor-pointer hover:bg-navy/90"
               }`}
           >
             {loading ? "Adding Room..." : "✚ Add Room"}
           </button>
         </div>
-
       </div>
     </div>
   );
@@ -1593,13 +2033,17 @@ function ResetPasswordModal({ user, onClose, showToast }) {
 
   async function handleReset() {
     if (password.length < 6) return showToast("Min 6 characters", "error");
-    if (password !== confirm) return showToast("Passwords don't match", "error");
+    if (password !== confirm)
+      return showToast("Passwords don't match", "error");
     setLoading(true);
     try {
-      const res = await apiFetch(`/api/admin/users/${user.user_id}/reset-password`, {
-        method: "PATCH",
-        body: JSON.stringify({ new_password: password }),
-      });
+      const res = await apiFetch(
+        `/api/admin/users/${user.user_id}/reset-password`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ new_password: password }),
+        },
+      );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       showToast(`Password reset for ${user.name}!`, "success");
@@ -1611,8 +2055,10 @@ function ResetPasswordModal({ user, onClose, showToast }) {
     }
   }
 
-  const inputCls = "w-full px-3 py-2.5 rounded-md border-[1.5px] border-gray-200 text-[0.875rem] box-border focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/15 transition-colors";
-  const labelCls = "block text-[0.62rem] font-bold text-gray-400 mb-1.5 tracking-[0.8px] uppercase";
+  const inputCls =
+    "w-full px-3 py-2.5 rounded-md border-[1.5px] border-gray-200 text-[0.875rem] box-border focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/15 transition-colors";
+  const labelCls =
+    "block text-[0.62rem] font-bold text-gray-400 mb-1.5 tracking-[0.8px] uppercase";
 
   const bothFilled = password && confirm;
   const isMatch = password === confirm && password.length >= 6;
@@ -1621,7 +2067,6 @@ function ResetPasswordModal({ user, onClose, showToast }) {
   return (
     <div className="fixed inset-0 z-[900] flex items-center justify-center p-4 bg-navy/80 backdrop-blur-sm">
       <div className="bg-white rounded-2xl w-full max-w-[400px] overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
-
         {/* Header */}
         <div className="bg-navy px-6 py-5 flex items-center justify-between">
           <div>
@@ -1642,7 +2087,6 @@ function ResetPasswordModal({ user, onClose, showToast }) {
 
         {/* Body */}
         <div className="p-6 space-y-3.5">
-
           {/* New Password */}
           <div>
             <label className={labelCls}>New Password</label>
@@ -1705,7 +2149,6 @@ function ResetPasswordModal({ user, onClose, showToast }) {
               {loading ? "Resetting..." : "Reset Password"}
             </button>
           </div>
-
         </div>
       </div>
     </div>
@@ -1714,7 +2157,12 @@ function ResetPasswordModal({ user, onClose, showToast }) {
 /*═════════════════════════════════════════════════════════
    MAIN ADMIN DASHBOARD
 ══════════════════════════════════════════════════════════════════════════════ */
-export default function AdminDashboard({ adminUser, onClose, showToast, fullPage = false }) {
+export default function AdminDashboard({
+  adminUser,
+  onClose,
+  showToast,
+  fullPage = false,
+}) {
   const [tab, setTab] = useState("overview");
   const [stats, setStats] = useState(null);
   const [bookings, setBookings] = useState([]);
@@ -1738,49 +2186,71 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
       apiFetch("/api/admin/bookings").then((r) => r.json()),
       apiFetch("/api/admin/rooms").then((r) => r.json()),
       apiFetch("/api/rooms").then((r) => r.json()),
-      apiFetch("/api/admin/users").then((r) => r.json()).catch(() => []),
-    ]).then(([s, b, allR, r, u]) => {
-      setStats(s);
-      setBookings(Array.isArray(b) ? b : []);
-      setAllRooms(Array.isArray(allR) ? allR : []);
-      setRooms(Array.isArray(r) ? r : []);
-      setUsers(Array.isArray(u) ? u : []);
-    }).finally(() => setLoading(false));
+      apiFetch("/api/admin/users")
+        .then((r) => r.json())
+        .catch(() => []),
+    ])
+      .then(([s, b, allR, r, u]) => {
+        setStats(s);
+        setBookings(Array.isArray(b) ? b : []);
+        setAllRooms(Array.isArray(allR) ? allR : []);
+        setRooms(Array.isArray(r) ? r : []);
+        setUsers(Array.isArray(u) ? u : []);
+      })
+      .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => {
+    fetchAll();
+  }, []);
 
   async function confirmCancelBooking(id) {
     try {
-      const res = await apiFetch(`/api/bookings/${id}/cancel`, { method: "PATCH" });
+      const res = await apiFetch(`/api/bookings/${id}/cancel`, {
+        method: "PATCH",
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setBookings((b) => b.map((x) => x.booking_id === id ? { ...x, status: "cancelled" } : x));
+      setBookings((b) =>
+        b.map((x) => (x.booking_id === id ? { ...x, status: "cancelled" } : x)),
+      );
       showToast("Booking cancelled", "success");
       setCancelBookingData(null);
-    } catch (err) { showToast(err.message, "error"); }
+    } catch (err) {
+      showToast(err.message, "error");
+    }
   }
 
   async function deleteBooking(id) {
-    if (!window.confirm("Permanently delete this cancelled booking record?")) return;
+    if (!window.confirm("Permanently delete this cancelled booking record?"))
+      return;
     try {
-      const res = await apiFetch(`/api/admin/bookings/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/admin/bookings/${id}`, {
+        method: "DELETE",
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setBookings((b) => b.filter((x) => x.booking_id !== id));
       showToast("Booking deleted", "success");
-    } catch (err) { showToast(err.message, "error"); }
+    } catch (err) {
+      showToast(err.message, "error");
+    }
   }
 
   async function deleteRoom(roomId) {
-    if (!window.confirm("Permanently delete this room? This cannot be undone.")) return;
+    if (!window.confirm("Permanently delete this room? This cannot be undone."))
+      return;
     try {
-      const res = await apiFetch(`/api/admin/rooms/${roomId}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/admin/rooms/${roomId}`, {
+        method: "DELETE",
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setAllRooms((r) => r.filter((x) => x.room_id !== roomId));
       showToast("Room deleted successfully", "success");
-    } catch (err) { showToast(err.message, "error"); }
+    } catch (err) {
+      showToast(err.message, "error");
+    }
   }
 
   async function toggleRoom(roomId, current) {
@@ -1789,25 +2259,39 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
         method: "PATCH",
         body: JSON.stringify({ is_available: current ? 0 : 1 }),
       });
-      setAllRooms((r) => r.map((x) => x.room_id === roomId ? { ...x, is_available: current ? 0 : 1 } : x));
+      setAllRooms((r) =>
+        r.map((x) =>
+          x.room_id === roomId ? { ...x, is_available: current ? 0 : 1 } : x,
+        ),
+      );
       showToast(`Room ${current ? "blocked" : "unblocked"}`, "success");
-    } catch (err) { showToast(err.message, "error"); }
+    } catch (err) {
+      showToast(err.message, "error");
+    }
   }
 
-  const last7 = Array(7).fill(0).map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    return {
-      label: d.toLocaleDateString("en-IN", { weekday: "short" }),
-      value: bookings.filter((b) => b.check_in_date?.slice(0, 10) === d.toISOString().slice(0, 10)).length,
-    };
-  });
+  const last7 = Array(7)
+    .fill(0)
+    .map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return {
+        label: d.toLocaleDateString("en-IN", { weekday: "short" }),
+        value: bookings.filter(
+          (b) => b.check_in_date?.slice(0, 10) === d.toISOString().slice(0, 10),
+        ).length,
+      };
+    });
 
   const revenueByRoom = allRooms
     .map((r) => ({
       label: r.room_type,
       value: bookings
-        .filter((b) => b.room_type === r.room_type && (b.status === "confirmed" || b.status === "completed"))
+        .filter(
+          (b) =>
+            b.room_type === r.room_type &&
+            (b.status === "confirmed" || b.status === "completed"),
+        )
         .reduce((sum, b) => sum + Number(b.final_total || b.total_price), 0),
     }))
     .filter((r) => r.value > 0);
@@ -1817,7 +2301,8 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
   const completed = bookings.filter((b) => b.status === "completed").length;
 
   const filteredBookings = bookings.filter(
-    (b) => !searchTerm ||
+    (b) =>
+      !searchTerm ||
       b.guest_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       b.room_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       b.email?.toLowerCase().includes(searchTerm.toLowerCase()),
@@ -1828,27 +2313,30 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
   );
 
   const tabs = [
-    { id: "overview", label: "Overview",       icon: GridIcon     },
-    { id: "bookings", label: "Bookings",        icon: BookingIcon  },
-    { id: "checkins", label: "Check-in Details",icon: BedIcon      },
-    { id: "rooms",    label: "Rooms",           icon: BedIcon      },
-    { id: "users",    label: "Users",           icon: UsersIcon    },
-    { id: "book",     label: "New Booking",     icon: CalendarIcon },
+    { id: "overview", label: "Overview", icon: GridIcon },
+    { id: "bookings", label: "Bookings", icon: BookingIcon },
+    { id: "checkins", label: "Check-in Details", icon: BedIcon },
+    { id: "rooms", label: "Rooms", icon: BedIcon },
+    { id: "users", label: "Users", icon: UsersIcon },
+    { id: "book", label: "New Booking", icon: CalendarIcon },
   ];
 
   // ── Shared cell classes ──────────────────────────────────────────────────
-  const thCls = "px-3.5 py-2.5 text-left text-[0.62rem] font-bold text-gray-400 uppercase tracking-[1px] border-b-[1.5px] border-gray-200 bg-gray-50 whitespace-nowrap";
+  const thCls =
+    "px-3.5 py-2.5 text-left text-[0.62rem] font-bold text-gray-400 uppercase tracking-[1px] border-b-[1.5px] border-gray-200 bg-gray-50 whitespace-nowrap";
   const tdCls = "px-3.5 py-[11px]";
 
   // ── Status badge helper ──────────────────────────────────────────────────
   function StatusBadge({ status }) {
     const map = {
       confirmed: "bg-emerald-50 text-emerald-600",
-      cancelled:  "bg-red-50 text-red-600",
-      completed:  "bg-blue-50 text-blue-600",
+      cancelled: "bg-red-50 text-red-600",
+      completed: "bg-blue-50 text-blue-600",
     };
     return (
-      <span className={`inline-block px-2.5 py-0.5 rounded text-[0.62rem] font-bold uppercase ${map[status] ?? map.completed}`}>
+      <span
+        className={`inline-block px-2.5 py-0.5 rounded text-[0.62rem] font-bold uppercase ${map[status] ?? map.completed}`}
+      >
         {status}
       </span>
     );
@@ -1888,14 +2376,21 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
         {tabs.map(({ id, label, icon: TabIcon }) => (
           <div
             key={id}
-            onClick={() => { setTab(id); setSidebarOpen(false); }}
+            onClick={() => {
+              setTab(id);
+              setSidebarOpen(false);
+            }}
             className={`flex items-center gap-2.5 px-5 py-[11px] cursor-pointer text-[0.82rem] transition-all duration-[180ms] border-l-[2.5px]
-              ${tab === id
-                ? "bg-gold/[0.12] border-gold text-gold font-semibold"
-                : "border-transparent text-white/50 font-normal hover:text-white/70 hover:bg-white/[0.04]"
+              ${
+                tab === id
+                  ? "bg-gold/[0.12] border-gold text-gold font-semibold"
+                  : "border-transparent text-white/50 font-normal hover:text-white/70 hover:bg-white/[0.04]"
               }`}
           >
-            <TabIcon size={15} color={tab === id ? "#C9A84C" : "rgba(255,255,255,0.4)"} />
+            <TabIcon
+              size={15}
+              color={tab === id ? "#C9A84C" : "rgba(255,255,255,0.4)"}
+            />
             {label}
             {id === "checkins" && checkedInBookings.length > 0 && (
               <span className="ml-auto bg-emerald-600 text-white rounded-[10px] px-1.5 text-[0.6rem] font-bold">
@@ -1913,15 +2408,20 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
             <UserIcon size={14} color="#C9A84C" />
           </div>
           <div>
-            <div className="text-[0.78rem] font-semibold text-white">{adminUser?.name}</div>
-            <div className="text-[0.65rem] text-white/35 tracking-[0.5px] uppercase">Administrator</div>
+            <div className="text-[0.78rem] font-semibold text-white">
+              {adminUser?.name}
+            </div>
+            <div className="text-[0.65rem] text-white/35 tracking-[0.5px] uppercase">
+              Administrator
+            </div>
           </div>
         </div>
         <button
           onClick={onClose}
           className="w-full flex items-center gap-2 px-3 py-2 bg-white/[0.06] border border-white/10 rounded-lg text-white/60 text-[0.78rem] cursor-pointer hover:bg-white/10 transition-colors"
         >
-          <ArrowRightIcon size={13} color="rgba(255,255,255,0.5)" /> Back to Site
+          <ArrowRightIcon size={13} color="rgba(255,255,255,0.5)" /> Back to
+          Site
         </button>
       </div>
     </>
@@ -1929,7 +2429,6 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
 
   return (
     <div className="min-h-screen bg-gray-50">
-
       {/* Keyframe for pulse-green */}
       <style>{`
         @keyframes pulse-green {
@@ -1946,7 +2445,10 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
       {/* ── Mobile sidebar overlay ── */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-[200] md:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setSidebarOpen(false)}
+          />
           <div className="absolute top-0 left-0 bottom-0 w-[220px] bg-navy flex flex-col">
             <SidebarContent />
           </div>
@@ -1955,7 +2457,6 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
 
       {/* ── Main ── */}
       <div className="md:ml-[220px] min-h-screen">
-
         {/* Topbar */}
         <div className="bg-navy px-5 h-16 flex items-center justify-between border-b border-gold/[0.12] sticky top-0 z-[99]">
           {/* Hamburger — mobile only */}
@@ -1973,7 +2474,12 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
               {tabs.find((t) => t.id === tab)?.label}
             </div>
             <div className="text-[0.72rem] text-white/35 mt-px">
-              {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+              {new Date().toLocaleDateString("en-IN", {
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })}
             </div>
           </div>
 
@@ -1984,26 +2490,50 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
 
         {/* Content */}
         <div className="p-5">
-
           {/* ── OVERVIEW ── */}
           {tab === "overview" && stats && (
             <>
               {/* Stat cards */}
               <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 mb-6 max-sm:grid-cols-2 max-[480px]:grid-cols-1">
-                <StatCard label="Total Rooms"      value={allRooms.length}                                                    icon={BedIcon}        accent="#0F1923" />
-                <StatCard label="Total Bookings"   value={stats.total_bookings}                                               icon={BookingIcon}    accent="#2471A3" chartData={last7}        chartType="bar" />
-                <StatCard label="Registered Users" value={stats.total_users}                                                  icon={UsersIcon}      accent="#2D9A6E" />
-                <StatCard label="Total Revenue"    value={`Rs.${Number(stats.total_revenue).toLocaleString()}`}               icon={CreditCardIcon} accent="#C9A84C" chartData={revenueByRoom} chartType="bar" />
+                <StatCard
+                  label="Total Rooms"
+                  value={allRooms.length}
+                  icon={BedIcon}
+                  accent="#0F1923"
+                />
+                <StatCard
+                  label="Total Bookings"
+                  value={stats.total_bookings}
+                  icon={BookingIcon}
+                  accent="#2471A3"
+                  chartData={last7}
+                  chartType="bar"
+                />
+                <StatCard
+                  label="Registered Users"
+                  value={stats.total_users}
+                  icon={UsersIcon}
+                  accent="#2D9A6E"
+                />
+                <StatCard
+                  label="Total Revenue"
+                  value={`Rs.${Number(stats.total_revenue).toLocaleString()}`}
+                  icon={CreditCardIcon}
+                  accent="#C9A84C"
+                  chartData={revenueByRoom}
+                  chartType="bar"
+                />
               </div>
 
               {/* Charts row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-
                 {/* Bookings this week */}
                 <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <div className="text-[0.65rem] tracking-[1.5px] uppercase text-gray-400 mb-0.5">Bookings This Week</div>
+                      <div className="text-[0.65rem] tracking-[1.5px] uppercase text-gray-400 mb-0.5">
+                        Bookings This Week
+                      </div>
                       <div className="font-body text-[1.4rem] font-semibold text-navy">
                         {last7.reduce((s, d) => s + d.value, 0)}
                       </div>
@@ -2013,7 +2543,12 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                   <LineChart data={last7} color="#C9A84C" height={80} />
                   <div className="flex justify-between mt-1.5">
                     {last7.map((d, i) => (
-                      <div key={i} className="text-[0.6rem] text-gray-400 text-center">{d.label}</div>
+                      <div
+                        key={i}
+                        className="text-[0.6rem] text-gray-400 text-center"
+                      >
+                        {d.label}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -2022,7 +2557,9 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                 <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <div className="text-[0.65rem] tracking-[1.5px] uppercase text-gray-400 mb-0.5">Revenue by Room</div>
+                      <div className="text-[0.65rem] tracking-[1.5px] uppercase text-gray-400 mb-0.5">
+                        Revenue by Room
+                      </div>
                       <div className="font-body text-[1.4rem] font-semibold text-navy">
                         Rs.{Number(stats.total_revenue).toLocaleString()}
                       </div>
@@ -2031,31 +2568,55 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                   </div>
                   {revenueByRoom.length > 0 ? (
                     <>
-                      <BarChart data={revenueByRoom} color="#0F1923" height={72} />
+                      <BarChart
+                        data={revenueByRoom}
+                        color="#0F1923"
+                        height={72}
+                      />
                       <div className="flex justify-between mt-1.5">
                         {revenueByRoom.map((d, i) => (
-                          <div key={i} className="text-[0.58rem] text-gray-400 text-center">{d.label.slice(0, 3)}</div>
+                          <div
+                            key={i}
+                            className="text-[0.58rem] text-gray-400 text-center"
+                          >
+                            {d.label.slice(0, 3)}
+                          </div>
                         ))}
                       </div>
                     </>
                   ) : (
-                    <div className="text-center py-6 text-gray-400 text-[0.82rem]">No revenue data yet</div>
+                    <div className="text-center py-6 text-gray-400 text-[0.82rem]">
+                      No revenue data yet
+                    </div>
                   )}
                 </div>
 
                 {/* Donut */}
                 <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-[0_1px_4px_rgba(15,25,35,0.05)] flex flex-col items-center justify-center gap-4">
-                  <div className="text-[0.65rem] tracking-[1.5px] uppercase text-gray-400">Booking Status</div>
-                  <DonutChart confirmed={confirmed} cancelled={cancelled} completed={completed} size={100} />
+                  <div className="text-[0.65rem] tracking-[1.5px] uppercase text-gray-400">
+                    Booking Status
+                  </div>
+                  <DonutChart
+                    confirmed={confirmed}
+                    cancelled={cancelled}
+                    completed={completed}
+                    size={100}
+                  />
                   <div className="flex flex-col gap-2 w-full">
                     {[
                       { label: "Confirmed", val: confirmed, color: "#2D9A6E" },
                       { label: "Cancelled", val: cancelled, color: "#C0392B" },
                       { label: "Completed", val: completed, color: "#2471A3" },
                     ].map(({ label, val, color }) => (
-                      <div key={label} className="flex items-center justify-between text-[0.78rem]">
+                      <div
+                        key={label}
+                        className="flex items-center justify-between text-[0.78rem]"
+                      >
                         <div className="flex items-center gap-1.5">
-                          <div className="w-2 h-2 rounded-full" style={{ background: color }} />
+                          <div
+                            className="w-2 h-2 rounded-full"
+                            style={{ background: color }}
+                          />
                           <span className="text-gray-600">{label}</span>
                         </div>
                         <span className="font-bold text-navy">{val}</span>
@@ -2068,7 +2629,9 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
               {/* Recent bookings */}
               <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
                 <div className="flex items-center justify-between mb-4">
-                  <div className="font-display text-[1rem] font-semibold text-navy">Recent Bookings</div>
+                  <div className="font-display text-[1rem] font-semibold text-navy">
+                    Recent Bookings
+                  </div>
                   <button
                     onClick={() => setTab("bookings")}
                     className="flex items-center gap-1 bg-none border-none text-gold text-[0.78rem] font-semibold cursor-pointer"
@@ -2080,8 +2643,17 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                   <table className="w-full border-collapse min-w-[600px]">
                     <thead>
                       <tr>
-                        {["#", "Guest", "Room", "Check-in", "Total", "Status"].map((h) => (
-                          <th key={h} className={thCls}>{h}</th>
+                        {[
+                          "#",
+                          "Guest",
+                          "Room",
+                          "Check-in",
+                          "Total",
+                          "Status",
+                        ].map((h) => (
+                          <th key={h} className={thCls}>
+                            {h}
+                          </th>
                         ))}
                       </tr>
                     </thead>
@@ -2092,14 +2664,37 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                           className="border-t border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors"
                           onClick={() => setSelectedBookingId(b.booking_id)}
                         >
-                          <td className={`${tdCls} text-[0.78rem] text-gray-400`}>#{b.booking_id}</td>
-                          <td className={`${tdCls} text-[0.85rem] font-semibold text-navy`}>{b.guest_name}</td>
-                          <td className={`${tdCls} text-[0.82rem] text-gray-600`}>{b.room_type}</td>
-                          <td className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}>{b.check_in_date?.slice(0, 10)}</td>
-                          <td className={`${tdCls} text-[0.85rem] font-semibold text-navy`}>
-                            Rs.{Number(b.final_total || b.total_price).toLocaleString()}
+                          <td
+                            className={`${tdCls} text-[0.78rem] text-gray-400`}
+                          >
+                            #{b.booking_id}
                           </td>
-                          <td className={tdCls}><StatusBadge status={b.status} /></td>
+                          <td
+                            className={`${tdCls} text-[0.85rem] font-semibold text-navy`}
+                          >
+                            {b.guest_name}
+                          </td>
+                          <td
+                            className={`${tdCls} text-[0.82rem] text-gray-600`}
+                          >
+                            {b.room_type}
+                          </td>
+                          <td
+                            className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}
+                          >
+                            {b.check_in_date?.slice(0, 10)}
+                          </td>
+                          <td
+                            className={`${tdCls} text-[0.85rem] font-semibold text-navy`}
+                          >
+                            Rs.
+                            {Number(
+                              b.final_total || b.total_price,
+                            ).toLocaleString()}
+                          </td>
+                          <td className={tdCls}>
+                            <StatusBadge status={b.status} />
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -2115,7 +2710,9 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
               <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
                 <div className="font-display text-[1rem] font-semibold text-navy">
                   All Bookings{" "}
-                  <span className="text-[0.78rem] font-body font-normal text-gray-400 ml-2">({bookings.length} total)</span>
+                  <span className="text-[0.78rem] font-body font-normal text-gray-400 ml-2">
+                    ({bookings.length} total)
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 bg-gray-50 border-[1.5px] border-gray-200 rounded-lg px-3 py-2 min-w-[200px] flex-[0_1_240px]">
                   <SearchIcon size={14} color="#868E96" />
@@ -2131,25 +2728,62 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                 <table className="w-full border-collapse min-w-[700px]">
                   <thead>
                     <tr>
-                      {["#", "Guest", "Room", "Check-in", "Check-out", "Total", "Status", "Actions"].map((h) => (
-                        <th key={h} className={thCls}>{h}</th>
+                      {[
+                        "#",
+                        "Guest",
+                        "Room",
+                        "Check-in",
+                        "Check-out",
+                        "Total",
+                        "Status",
+                        "Actions",
+                      ].map((h) => (
+                        <th key={h} className={thCls}>
+                          {h}
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {filteredBookings.map((b) => (
-                      <tr key={b.booking_id} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
-                        <td className={`${tdCls} text-[0.75rem] text-gray-400`}>#{b.booking_id}</td>
-                        <td className={`${tdCls} text-[0.85rem] font-semibold text-navy whitespace-nowrap`}>{b.guest_name}</td>
+                      <tr
+                        key={b.booking_id}
+                        className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
+                      >
+                        <td className={`${tdCls} text-[0.75rem] text-gray-400`}>
+                          #{b.booking_id}
+                        </td>
+                        <td
+                          className={`${tdCls} text-[0.85rem] font-semibold text-navy whitespace-nowrap`}
+                        >
+                          {b.guest_name}
+                        </td>
                         <td className={tdCls}>
-                          <span className="bg-gray-100 px-2 py-0.5 rounded text-[0.72rem] font-semibold">{b.room_type}</span>
+                          <span className="bg-gray-100 px-2 py-0.5 rounded text-[0.72rem] font-semibold">
+                            {b.room_type}
+                          </span>
                         </td>
-                        <td className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}>{b.check_in_date?.slice(0, 10)}</td>
-                        <td className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}>{b.check_out_date?.slice(0, 10)}</td>
-                        <td className={`${tdCls} text-[0.85rem] font-bold text-navy whitespace-nowrap`}>
-                          Rs.{Number(b.final_total || b.total_price).toLocaleString()}
+                        <td
+                          className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}
+                        >
+                          {b.check_in_date?.slice(0, 10)}
                         </td>
-                        <td className={tdCls}><StatusBadge status={b.status} /></td>
+                        <td
+                          className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}
+                        >
+                          {b.check_out_date?.slice(0, 10)}
+                        </td>
+                        <td
+                          className={`${tdCls} text-[0.85rem] font-bold text-navy whitespace-nowrap`}
+                        >
+                          Rs.
+                          {Number(
+                            b.final_total || b.total_price,
+                          ).toLocaleString()}
+                        </td>
+                        <td className={tdCls}>
+                          <StatusBadge status={b.status} />
+                        </td>
                         <td className={tdCls}>
                           <div className="flex gap-1.5 flex-wrap">
                             <button
@@ -2189,14 +2823,21 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
             <div>
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <div className="font-display text-[1.1rem] font-semibold text-navy">Currently Checked-in Guests</div>
+                  <div className="font-display text-[1.1rem] font-semibold text-navy">
+                    Currently Checked-in Guests
+                  </div>
                   <div className="text-[0.78rem] text-gray-400 mt-0.5">
                     {checkedInBookings.length > 0 ? (
                       <span>
-                        <span className="text-emerald-600 font-semibold">{checkedInBookings.length}</span>
-                        {" "}guest{checkedInBookings.length !== 1 ? "s" : ""} currently on premises
+                        <span className="text-emerald-600 font-semibold">
+                          {checkedInBookings.length}
+                        </span>{" "}
+                        guest{checkedInBookings.length !== 1 ? "s" : ""}{" "}
+                        currently on premises
                       </span>
-                    ) : "No guests currently checked in"}
+                    ) : (
+                      "No guests currently checked in"
+                    )}
                   </div>
                 </div>
                 <button
@@ -2210,14 +2851,21 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
               {checkedInBookings.length === 0 ? (
                 <div className="bg-white rounded-2xl border border-gray-200 py-16 text-center">
                   <div className="text-5xl mb-3.5">🏨</div>
-                  <div className="font-display text-[1.1rem] text-navy mb-2">No guests currently checked in</div>
-                  <div className="text-[0.82rem] text-gray-400">When a booking is checked in, it will appear here with a live timer</div>
+                  <div className="font-display text-[1.1rem] text-navy mb-2">
+                    No guests currently checked in
+                  </div>
+                  <div className="text-[0.82rem] text-gray-400">
+                    When a booking is checked in, it will appear here with a
+                    live timer
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
                   {checkedInBookings.map((b) => (
-                    <div key={b.booking_id} className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-[0_2px_12px_rgba(15,25,35,0.08)]">
-
+                    <div
+                      key={b.booking_id}
+                      className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-[0_2px_12px_rgba(15,25,35,0.08)]"
+                    >
                       {/* Card header */}
                       <div className="bg-navy px-5 py-4 flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -2225,16 +2873,25 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                             {b.guest_name?.charAt(0)}
                           </div>
                           <div>
-                            <div className="text-[0.9rem] font-semibold text-white">{b.guest_name}</div>
-                            <div className="text-[0.68rem] text-white/40 mt-px">Booking #{b.booking_id}</div>
+                            <div className="text-[0.9rem] font-semibold text-white">
+                              {b.guest_name}
+                            </div>
+                            <div className="text-[0.68rem] text-white/40 mt-px">
+                              Booking #{b.booking_id}
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 bg-emerald-600/20 border border-emerald-600 rounded-full px-2.5 py-0.5">
                           <span
                             className="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block"
-                            style={{ animation: "pulse-green 1.5s ease-in-out infinite" }}
+                            style={{
+                              animation:
+                                "pulse-green 1.5s ease-in-out infinite",
+                            }}
                           />
-                          <span className="text-[0.62rem] font-bold text-emerald-500 tracking-[1px]">LIVE</span>
+                          <span className="text-[0.62rem] font-bold text-emerald-500 tracking-[1px]">
+                            LIVE
+                          </span>
                         </div>
                       </div>
 
@@ -2245,22 +2902,48 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                         </div>
                         <LiveTimer checkinTime={b.actual_checkin} />
                         <div className="text-[0.68rem] text-gray-500 mt-1.5">
-                          Checked in: {new Date(b.actual_checkin).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                          Checked in:{" "}
+                          {new Date(b.actual_checkin).toLocaleString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
                         </div>
                       </div>
 
                       {/* Details */}
                       <div className="px-4 pt-3.5 pb-4">
                         {[
-                          { label: "Room",               val: `${b.room_type}${b.room_number ? ` · #${b.room_number}` : ""}` },
-                          { label: "Scheduled Check-in",  val: b.check_in_date?.slice(0, 10) },
-                          { label: "Scheduled Check-out", val: b.check_out_date?.slice(0, 10) },
-                          { label: "Guests",             val: `${b.guest_count || 1} person${(b.guest_count || 1) > 1 ? "s" : ""}` },
-                          { label: "Room Charges",       val: `Rs.${Number(b.total_price).toLocaleString()}` },
+                          {
+                            label: "Room",
+                            val: `${b.room_type}${b.room_number ? ` · #${b.room_number}` : ""}`,
+                          },
+                          {
+                            label: "Scheduled Check-in",
+                            val: b.check_in_date?.slice(0, 10),
+                          },
+                          {
+                            label: "Scheduled Check-out",
+                            val: b.check_out_date?.slice(0, 10),
+                          },
+                          {
+                            label: "Guests",
+                            val: `${b.guest_count || 1} person${(b.guest_count || 1) > 1 ? "s" : ""}`,
+                          },
+                          {
+                            label: "Room Charges",
+                            val: `Rs.${Number(b.total_price).toLocaleString()}`,
+                          },
                         ].map(({ label, val }) => (
-                          <div key={label} className="flex justify-between items-center text-[0.78rem] py-1.5 border-b border-gray-100">
+                          <div
+                            key={label}
+                            className="flex justify-between items-center text-[0.78rem] py-1.5 border-b border-gray-100"
+                          >
                             <span className="text-gray-400">{label}</span>
-                            <span className="font-semibold text-navy">{val}</span>
+                            <span className="font-semibold text-navy">
+                              {val}
+                            </span>
                           </div>
                         ))}
                         <button
@@ -2284,7 +2967,8 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                 <div className="font-display text-[1rem] font-semibold text-navy">
                   Room Management{" "}
                   <span className="text-[0.78rem] font-normal text-gray-400 ml-2">
-                    ({allRooms.length} total · {allRooms.filter((r) => !r.is_available).length} blocked)
+                    ({allRooms.length} total ·{" "}
+                    {allRooms.filter((r) => !r.is_available).length} blocked)
                   </span>
                 </div>
                 <button
@@ -2298,9 +2982,13 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                 <table className="w-full border-collapse min-w-[560px]">
                   <thead>
                     <tr>
-                      {["Room", "Type", "Price/Night", "Status", "Actions"].map((h) => (
-                        <th key={h} className={thCls}>{h}</th>
-                      ))}
+                      {["Room", "Type", "Price/Night", "Status", "Actions"].map(
+                        (h) => (
+                          <th key={h} className={thCls}>
+                            {h}
+                          </th>
+                        ),
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -2309,18 +2997,26 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                         key={r.room_id}
                         className={`border-t border-gray-100 ${!r.is_available ? "bg-red-50/50" : ""}`}
                       >
-                        <td className={`${tdCls} text-[0.85rem] font-bold text-navy`}>#{r.room_number || r.room_id}</td>
+                        <td
+                          className={`${tdCls} text-[0.85rem] font-bold text-navy`}
+                        >
+                          #{r.room_number || r.room_id}
+                        </td>
                         <td className={tdCls}>
                           <span className="bg-navy text-[#E8D5A3] px-2.5 py-0.5 rounded text-[0.65rem] font-bold tracking-[1px] uppercase">
                             {r.room_type}
                           </span>
                         </td>
-                        <td className={`${tdCls} text-[0.85rem] font-bold text-navy`}>
+                        <td
+                          className={`${tdCls} text-[0.85rem] font-bold text-navy`}
+                        >
                           Rs.{Number(r.price_per_night).toLocaleString()}
                         </td>
                         <td className={tdCls}>
-                          <span className={`px-2.5 py-0.5 rounded text-[0.65rem] font-bold uppercase
-                            ${r.is_available ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}>
+                          <span
+                            className={`px-2.5 py-0.5 rounded text-[0.65rem] font-bold uppercase
+                            ${r.is_available ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}
+                          >
                             {r.is_available ? "Available" : "Blocked"}
                           </span>
                         </td>
@@ -2333,25 +3029,28 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                               ✏️ Edit
                             </button>
                             <button
-                              onClick={() => toggleRoom(r.room_id, r.is_available)}
+                              onClick={() =>
+                                toggleRoom(r.room_id, r.is_available)
+                              }
                               className={`px-2.5 py-1 rounded border-[1.5px] bg-none text-[0.72rem] font-semibold cursor-pointer transition-colors
-                                ${r.is_available
-                                  ? "border-red-600 text-red-600 hover:bg-red-50"
-                                  : "border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+                                ${
+                                  r.is_available
+                                    ? "border-red-600 text-red-600 hover:bg-red-50"
+                                    : "border-emerald-600 text-emerald-600 hover:bg-emerald-50"
                                 }`}
                             >
                               {r.is_available ? "🚫 Block" : "✅ Unblock"}
                             </button>
                             {r.is_available && (
                               <button
-  onClick={() => {
-    setBookingRoom(r);
-    setTab("book");
-  }}
-  className="px-2.5 py-1 rounded bg-[#0F1923] text-white border-none text-[0.72rem] font-semibold cursor-pointer transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
->
-  Book
-</button>
+                                onClick={() => {
+                                  setBookingRoom(r);
+                                  setTab("book");
+                                }}
+                                className="px-2.5 py-1 rounded bg-[#0F1923] text-white border-none text-[0.72rem] font-semibold cursor-pointer transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
+                              >
+                                Book
+                              </button>
                             )}
                             <button
                               onClick={() => deleteRoom(r.room_id)}
@@ -2374,50 +3073,86 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
             <div className="bg-white rounded-2xl p-5 border border-gray-200">
               <div className="font-display text-[1rem] font-semibold text-navy mb-5">
                 Registered Users{" "}
-                <span className="text-[0.78rem] font-normal text-gray-400 ml-2">({users.length} total)</span>
+                <span className="text-[0.78rem] font-normal text-gray-400 ml-2">
+                  ({users.length} total)
+                </span>
               </div>
               {users.length === 0 ? (
-                <div className="text-center py-10 text-gray-400">No users found</div>
+                <div className="text-center py-10 text-gray-400">
+                  No users found
+                </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse min-w-[500px]">
                     <thead>
                       <tr>
-                        {["#", "Name", "Email", "Role", "Joined", "Actions"].map((h) => (
-                          <th key={h} className={thCls}>{h}</th>
+                        {[
+                          "#",
+                          "Name",
+                          "Email",
+                          "Role",
+                          "Joined",
+                          "Actions",
+                        ].map((h) => (
+                          <th key={h} className={thCls}>
+                            {h}
+                          </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {users.map((u) => (
-                        <tr key={u.user_id} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
-                          <td className={`${tdCls} text-[0.75rem] text-gray-400`}>#{u.user_id}</td>
+                        <tr
+                          key={u.user_id}
+                          className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
+                        >
+                          <td
+                            className={`${tdCls} text-[0.75rem] text-gray-400`}
+                          >
+                            #{u.user_id}
+                          </td>
                           <td className={tdCls}>
                             <div className="flex items-center gap-2.5">
                               <div className="w-[30px] h-[30px] rounded-full bg-navy flex items-center justify-center text-[#E8D5A3] text-[0.72rem] font-bold shrink-0">
                                 {u.name?.charAt(0)}
                               </div>
-                              <span className="text-[0.85rem] font-semibold text-navy">{u.name}</span>
+                              <span className="text-[0.85rem] font-semibold text-navy">
+                                {u.name}
+                              </span>
                             </div>
                           </td>
-                          <td className={`${tdCls} text-[0.8rem] text-gray-400`}>{u.email}</td>
+                          <td
+                            className={`${tdCls} text-[0.8rem] text-gray-400`}
+                          >
+                            {u.email}
+                          </td>
                           <td className={tdCls}>
-                            <span className={`px-2.5 py-0.5 rounded text-[0.65rem] font-bold uppercase
-                              ${u.role === "admin"   ? "bg-navy text-[#E8D5A3]"
-                              : u.role === "manager" ? "bg-blue-600 text-white"
-                              :                        "bg-gray-100 text-gray-600"}`}>
+                            <span
+                              className={`px-2.5 py-0.5 rounded text-[0.65rem] font-bold uppercase
+                              ${
+                                u.role === "admin"
+                                  ? "bg-navy text-[#E8D5A3]"
+                                  : u.role === "manager"
+                                    ? "bg-blue-600 text-white"
+                                    : "bg-gray-100 text-gray-600"
+                              }`}
+                            >
                               {u.role}
                             </span>
                           </td>
-                          <td className={`${tdCls} text-[0.8rem] text-gray-400`}>{u.created_at?.slice(0, 10)}</td>
+                          <td
+                            className={`${tdCls} text-[0.8rem] text-gray-400`}
+                          >
+                            {u.created_at?.slice(0, 10)}
+                          </td>
                           <td className={tdCls}>
                             <div className="flex gap-1.5">
                               <button
-  onClick={() => setSelectedUserId(u.user_id)}
-  className="px-2.5 py-1 rounded bg-[#0F1923] text-white border-none text-[0.72rem] font-semibold cursor-pointer transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
->
-  View
-</button>
+                                onClick={() => setSelectedUserId(u.user_id)}
+                                className="px-2.5 py-1 rounded bg-[#0F1923] text-white border-none text-[0.72rem] font-semibold cursor-pointer transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
+                              >
+                                View
+                              </button>
                               <button
                                 onClick={() => setResetPasswordUser(u)}
                                 className="px-2.5 py-1 rounded bg-none border-[1.5px] border-gold text-[#9A7A2E] text-[0.72rem] font-semibold cursor-pointer hover:bg-gold/10 transition-colors"
@@ -2442,60 +3177,114 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
                 New Booking — Select a Room
               </div>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
-                {rooms.filter((r) => r.is_available).map((r) => (
-                  <div key={r.room_id} className="bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
-                    <div className="h-[140px] overflow-hidden">
-                      <img
-                        src={r.image_url || "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=500"}
-                        alt={r.room_type}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <div className="px-4 py-3.5">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="bg-navy text-[#E8D5A3] px-2 py-0.5 rounded text-[0.62rem] font-bold tracking-[1px] uppercase">
-                          {r.room_type}
-                        </span>
-                        <span className="text-[0.72rem] text-gray-400">👥 {r.capacity || 2}</span>
+                {rooms
+                  .filter((r) => r.is_available)
+                  .map((r) => (
+                    <div
+                      key={r.room_id}
+                      className="bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-[0_1px_4px_rgba(15,25,35,0.05)]"
+                    >
+                      <div className="h-[140px] overflow-hidden">
+                        <img
+                          src={
+                            r.image_url ||
+                            "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=500"
+                          }
+                          alt={r.room_type}
+                          className="w-full h-full object-cover"
+                        />
                       </div>
-                      <div className="font-body text-[0.95rem] font-semibold text-navy mb-0.5">
-                        Room {r.room_number || r.room_id}
-                      </div>
-                      <div className="text-[0.78rem] text-gray-400 mb-3">
-                        {r.description || "Premium hotel room"}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-body text-[1rem] font-semibold text-navy">
-                            Rs.{Number(r.price_per_night).toLocaleString()}{" "}
-                            <span className="text-[0.65rem] font-body font-normal text-gray-400">/night</span>
-                          </div>
-                          <div className="text-[0.62rem] font-body text-red-500">+18% GST</div>
+                      <div className="px-4 py-3.5">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="bg-navy text-[#E8D5A3] px-2 py-0.5 rounded text-[0.62rem] font-bold tracking-[1px] uppercase">
+                            {r.room_type}
+                          </span>
+                          <span className="text-[0.72rem] text-gray-400">
+                            👥 {r.capacity || 2}
+                          </span>
                         </div>
-                        <button
-  onClick={() => setBookingRoom(r)}
-  className="bg-[#0f1923] text-white border-none rounded-md px-3.5 py-1.5 text-[0.75rem] font-semibold cursor-pointer transition-all hover:bg-[#c9a84c] hover:text-black hover:-translate-y-[1px]"
->
-  Book
-</button>
+                        <div className="font-body text-[0.95rem] font-semibold text-navy mb-0.5">
+                          Room {r.room_number || r.room_id}
+                        </div>
+                        <div className="text-[0.78rem] text-gray-400 mb-3">
+                          {r.description || "Premium hotel room"}
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="font-body text-[1rem] font-semibold text-navy">
+                              Rs.{Number(r.price_per_night).toLocaleString()}{" "}
+                              <span className="text-[0.65rem] font-body font-normal text-gray-400">
+                                /night
+                              </span>
+                            </div>
+                            <div className="text-[0.62rem] font-body text-red-500">
+                              +18% GST
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setBookingRoom(r)}
+                            className="bg-[#0f1923] text-white border-none rounded-md px-3.5 py-1.5 text-[0.75rem] font-semibold cursor-pointer transition-all hover:bg-[#c9a84c] hover:text-black hover:-translate-y-[1px]"
+                          >
+                            Book
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             </div>
           )}
-
         </div>
       </div>
 
       {/* ── Modals ── */}
-      {selectedUserId    && <UserDetailModal    userId={selectedUserId}        onClose={() => setSelectedUserId(null)}    showToast={showToast} />}
-      {selectedBookingId && <BookingDetailModal bookingId={selectedBookingId} onClose={() => setSelectedBookingId(null)} showToast={showToast} onRefresh={fetchAll} />}
-      {editRoom          && <EditRoomModal      room={editRoom}               onClose={() => setEditRoom(null)}           showToast={showToast} onRefresh={() => { fetchAll(); setEditRoom(null); }} />}
-      {cancelBookingData && <CancelWarningModal booking={cancelBookingData}   onConfirm={() => confirmCancelBooking(cancelBookingData.booking_id)} onClose={() => setCancelBookingData(null)} />}
-      {resetPasswordUser && <ResetPasswordModal user={resetPasswordUser}      onClose={() => setResetPasswordUser(null)} showToast={showToast} />}
-      {showAddRoom       && <AddRoomModal       onClose={() => setShowAddRoom(false)} showToast={showToast} onRefresh={fetchAll} />}
+      {selectedUserId && (
+        <UserDetailModal
+          userId={selectedUserId}
+          onClose={() => setSelectedUserId(null)}
+          showToast={showToast}
+        />
+      )}
+      {selectedBookingId && (
+        <BookingDetailModal
+          bookingId={selectedBookingId}
+          onClose={() => setSelectedBookingId(null)}
+          showToast={showToast}
+          onRefresh={fetchAll}
+        />
+      )}
+      {editRoom && (
+        <EditRoomModal
+          room={editRoom}
+          onClose={() => setEditRoom(null)}
+          showToast={showToast}
+          onRefresh={() => {
+            fetchAll();
+            setEditRoom(null);
+          }}
+        />
+      )}
+      {cancelBookingData && (
+        <CancelWarningModal
+          booking={cancelBookingData}
+          onConfirm={() => confirmCancelBooking(cancelBookingData.booking_id)}
+          onClose={() => setCancelBookingData(null)}
+        />
+      )}
+      {resetPasswordUser && (
+        <ResetPasswordModal
+          user={resetPasswordUser}
+          onClose={() => setResetPasswordUser(null)}
+          showToast={showToast}
+        />
+      )}
+      {showAddRoom && (
+        <AddRoomModal
+          onClose={() => setShowAddRoom(false)}
+          showToast={showToast}
+          onRefresh={fetchAll}
+        />
+      )}
 
       {/* Admin Booking Modal */}
       {bookingRoom && (
@@ -2503,7 +3292,8 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
           <div className="bg-white rounded-2xl w-full max-w-[440px] shadow-[0_16px_48px_rgba(0,0,0,0.2)] overflow-hidden">
             <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
               <div className="font-display text-[1.1rem] font-semibold text-navy">
-                Book {bookingRoom.room_type} — Room {bookingRoom.room_number || bookingRoom.room_id}
+                Book {bookingRoom.room_type} — Room{" "}
+                {bookingRoom.room_number || bookingRoom.room_id}
               </div>
               <button
                 onClick={() => setBookingRoom(null)}
@@ -2517,23 +3307,19 @@ export default function AdminDashboard({ adminUser, onClose, showToast, fullPage
               adminUser={adminUser}
               onClose={() => setBookingRoom(null)}
               showToast={showToast}
-              onSuccess={() => { setBookingRoom(null); fetchAll(); }}
+              onSuccess={() => {
+                setBookingRoom(null);
+                fetchAll();
+              }}
             />
           </div>
         </div>
       )}
-
     </div>
   );
 }
 
-function AdminBookingForm({
-  room,
-  adminUser,
-  onClose,
-  showToast,
-  onSuccess,
-}) {
+function AdminBookingForm({ room, adminUser, onClose, showToast, onSuccess }) {
   const [form, setForm] = useState({
     check_in_date: "",
     check_out_date: "",
@@ -2547,10 +3333,9 @@ function AdminBookingForm({
       ? Math.max(
           0,
           Math.ceil(
-            (new Date(form.check_out_date) -
-              new Date(form.check_in_date)) /
-              86400000
-          )
+            (new Date(form.check_out_date) - new Date(form.check_in_date)) /
+              86400000,
+          ),
         )
       : 0;
 
@@ -2583,10 +3368,10 @@ function AdminBookingForm({
       if (!res.ok) throw new Error(data.error);
 
       showToast(
-        `Booking confirmed! ₹${Number(
-          data.total_price
-        ).toLocaleString("en-IN")}`,
-        "success"
+        `Booking confirmed! ₹${Number(data.total_price).toLocaleString(
+          "en-IN",
+        )}`,
+        "success",
       );
 
       onSuccess();
@@ -2629,10 +3414,7 @@ function AdminBookingForm({
           <input
             type="date"
             required
-            min={
-              form.check_in_date ||
-              new Date().toISOString().split("T")[0]
-            }
+            min={form.check_in_date || new Date().toISOString().split("T")[0]}
             value={form.check_out_date}
             onChange={(e) =>
               setForm({
@@ -2671,8 +3453,8 @@ function AdminBookingForm({
         <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="text-gray-500">
-              ₹{Number(room.price_per_night).toLocaleString("en-IN")} ×{" "}
-              {nights} night{nights > 1 ? "s" : ""}
+              ₹{Number(room.price_per_night).toLocaleString("en-IN")} × {nights}{" "}
+              night{nights > 1 ? "s" : ""}
             </span>
 
             <span className="font-semibold text-slate-900">
