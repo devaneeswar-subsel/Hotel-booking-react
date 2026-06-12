@@ -746,12 +746,13 @@ app.post("/api/payment/verify", async (req, res) => {
             });
 
           y += 50;
+          y += 10;
           doc
             .fillColor("#333")
             .font("Helvetica-Bold")
             .fontSize(8)
             .text("TERMS & CONDITIONS", 50, y);
-          y += 6;
+          y += 8;
           const terms = [
             "1. Valid photo ID must be presented at check-in.",
             "2. Check-in time: 12:00 PM | Check-out time: 11:00 AM.",
@@ -759,10 +760,10 @@ app.post("/api/payment/verify", async (req, res) => {
             "4. Pets, outside food, and smoking are not permitted.",
             "5. Cancellations must be made 24 hours prior to check-in for a refund.",
           ];
-          doc.fillColor("#666").font("Helvetica").fontSize(7);
+          doc.fillColor("#666").font("Helvetica").fontSize(7.5);
           terms.forEach((t) => {
-            doc.text(t, 50, y);
-            y += 5;
+            doc.text(t, 50, y, { width: 495 });
+            y += 12;
           });
 
           doc
@@ -801,9 +802,9 @@ app.post("/api/payment/verify", async (req, res) => {
             </div>
             <div style="padding:32px;background:#fff">
               <div style="text-align:center;margin-bottom:24px">
-                <div style="width:64px;height:64px;background:#E8F8F0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin:0 auto">
-                  <span style="color:#2D9A6E;font-size:2rem;font-weight:bold">&#10003;</span>
-                </div>
+                <div style="width:64px;height:64px;background:#E8F8F0;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;line-height:1">
+  <span style="color:#2D9A6E;font-size:2.2rem;font-weight:900;line-height:1;display:block;margin-top:2px">&#10003;</span>
+</div>
                 <h2 style="color:#0F1923;margin:12px 0 4px">Booking Confirmed!</h2>
                 <p style="color:#868E96;font-size:0.9rem">Thank you, ${booking.guest_name}. Your reservation is confirmed.</p>
               </div>
