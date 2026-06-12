@@ -410,118 +410,133 @@ const fadeUp = (delay = 0) => ({
 
       {/* HERO */}
       {/* HERO */}
-     <div
+{/* HERO */}
+<div
   className="
     relative flex
-    min-h-[520px]
-    h-[100vh]
-    sm:h-[80vh]
-    md:h-[50vh]
-    lg:h-[85vh]
-    xl:h-[90vh]
-    max-h-[850px]
+
+    min-h-[580px]
+    h-[85dvh]
+    max-h-[880px]
+
     items-end
     overflow-hidden
+
     bg-cover
     bg-center
-    pb-8
-    sm:pb-12
-    lg:pb-16
+
+    pb-[clamp(1.5rem,4vw,4rem)]
   "
   style={{
     backgroundImage: "url('/hotel-hero.webp')",
   }}
 >
-        {/* Overlay */}
-        <div
-          className="absolute inset-0"
-          style={{
-            background: `linear-gradient(
-        to bottom,
-        rgba(15,25,35,0.25) 0%,
-        rgba(15,25,35,0.15) 40%,
-        rgba(15,25,35,0.75) 100%
-      )`,
-          }}
-        />
+  {/* Overlay */}
+  <div
+    className="absolute inset-0"
+    style={{
+      background: `
+        linear-gradient(
+          to bottom,
+          rgba(15,25,35,0.25) 0%,
+          rgba(15,25,35,0.15) 40%,
+          rgba(15,25,35,0.75) 100%
+        )
+      `,
+    }}
+  />
 
-        {/* Content */}
-        <div className="relative z-[2] mx-auto w-[92%] max-w-[1200px]">
-          {/* Eyebrow */}
-{/* Badge */}
-<motion.div {...fadeUp(0)} className="mb-[18px] inline-flex items-center gap-3 rounded-full border border-white/10 bg-black/30 px-4 py-2">
-  <div className="h-px w-9 bg-[var(--gold)]" />
-  <span className="text-[0.68rem] font-medium uppercase tracking-[3px] text-[var(--gold-light)]">
-    VV Grand Park Residency — Premium Hospitality
-  </span>
-</motion.div>
+  {/* Content */}
+  <div className="relative z-[2] mx-auto w-[92%] max-w-[1200px]">
+    <motion.div
+      {...fadeUp(0)}
+      className="
+        mb-[clamp(12px,2vw,18px)]
+        inline-flex
+        items-center
+        gap-3
+        rounded-full
+        border
+        border-white/10
+        bg-black/30
+        px-4
+        py-2
+      "
+    >
+      <div className="h-px w-9 bg-[var(--gold)]" />
 
-{/* Heading */}
-<motion.div {...fadeUp(0.15)}>
-  <HeroHeading />
-</motion.div>
+      <span
+        className="
+          text-[clamp(0.6rem,0.8vw,0.75rem)]
+          font-medium
+          uppercase
+          tracking-[3px]
+          text-[var(--gold-light)]
+        "
+      >
+        VV Grand Park Residency — Premium Hospitality
+      </span>
+    </motion.div>
 
-{/* Subtitle */}
-<motion.p
-  {...fadeUp(0.3)}
-  className="
-    mb-[34px]
-    max-w-[460px]
-    text-[clamp(0.9rem,1.5vw,1.05rem)]
-    leading-[1.75]
-    text-white/65
-  "
->
-  Experience world-class hospitality at VV Grand Park Residency —
-  breathtaking views, curated amenities, and moments you'll carry
-  forever.
-</motion.p>
+    <motion.div {...fadeUp(0.15)}>
+      <HeroHeading />
+    </motion.div>
 
-          {/* Actions */}
-          <div className="mb-4 sm:mb-6 md:mb-8  lg:mb-12 flex flex-wrap gap-3">
-            <button
-              className="btn btn-gold"
-              onClick={() => scrollTo("rooms")}
-            >
-              Explore Rooms
-              <ArrowRightIcon size={16} />
-            </button>
+    <motion.p
+      {...fadeUp(0.3)}
+      className="
+        mb-[clamp(20px,3vw,34px)]
+        max-w-[32rem]
+        text-[clamp(0.9rem,1.2vw,1.1rem)]
+        leading-[1.7]
+        text-white/65
+      "
+    >
+      Experience world-class hospitality at VV Grand Park Residency —
+      breathtaking views, curated amenities, and moments you'll carry forever.
+    </motion.p>
 
-            <button
-              className="btn btn-ghost"
-              onClick={() => scrollTo("calendar")}
-            >
-              <CalendarIcon size={16} />
-              Check Availability
-            </button>
-          </div>
+    <div
+      className="
+        mb-[clamp(1rem,3vw,3rem)]
+        flex
+        flex-wrap
+        gap-3
+      "
+    >
+      <button
+        className="btn btn-gold"
+        onClick={() => scrollTo('rooms')}
+      >
+        Explore Rooms
+        <ArrowRightIcon size={16} />
+      </button>
 
-          {/* Stats */}
-          {/* <div className="flex flex-wrap gap-10 border-t border-white/10 pt-7">
-      {[
-        { num: "250+", label: "Luxury Rooms" },
-        { num: "4.9", label: "Guest Rating" },
-        { num: "25+", label: "Years of Excellence" },
-        { num: "18K+", label: "Happy Guests" },
-      ].map((s, i) => (
-        <div key={i}>
-          <div className="mb-1 font-[var(--font-display)] text-[1.8rem] font-semibold leading-none text-white">
-            {s.num}
-          </div>
+      <button
+        className="btn btn-ghost"
+        onClick={() => scrollTo('calendar')}
+      >
+        <CalendarIcon size={16} />
+        Check Availability
+      </button>
+    </div>
 
-          <div className="text-[0.68rem] uppercase tracking-[1.5px] text-white/45">
-            {s.label}
-          </div>
-        </div>
+    <div
+      className="
+        flex
+        flex-wrap
+        gap-[clamp(1rem,3vw,2.5rem)]
+        border-t
+        border-white/10
+        pt-[clamp(1rem,2vw,2rem)]
+      "
+    >
+      {stats.map((s, i) => (
+        <StatItem key={i} {...s} />
       ))}
-    </div> */}
-          <div className="flex flex-wrap gap-x-10 gap-y-6 sm:gap-10 border-t border-white/10 pt-7">
-            {stats.map((s, i) => (
-              <StatItem key={i} {...s} />
-            ))}
-          </div>
-        </div>
-      </div>
+    </div>
+  </div>
+</div>
     </>
   );
 }

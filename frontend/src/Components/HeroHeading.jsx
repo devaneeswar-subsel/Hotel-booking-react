@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 
-const phrases = ["Comfort", "Elegance", "Serenity", "Indulgence", "Perfection"];
+const phrases = [
+  "Comfort",
+  "Elegance",
+  "Serenity",
+  "Indulgence",
+  "Perfection",
+];
 
 export default function HeroHeading() {
   const [index, setIndex] = useState(0);
@@ -9,24 +15,30 @@ export default function HeroHeading() {
   useEffect(() => {
     const interval = setInterval(() => {
       setVisible(false);
+
       setTimeout(() => {
         setIndex((i) => (i + 1) % phrases.length);
         setVisible(true);
       }, 400);
     }, 2800);
+
     return () => clearInterval(interval);
   }, []);
 
   return (
     <h1
       className="
-        mb-[22px]
-        max-w-[700px]
+        mb-[clamp(12px,2vw,24px)]
+        max-w-[12ch]
+
         font-[var(--font-display)]
-        text-[clamp(2.8rem,7vw,5.5rem)]
         font-semibold
-        leading-[1.05]
-        tracking-[-1px]
+
+        text-[clamp(2.5rem,7vw,5.8rem)]
+
+        leading-[0.95]
+        tracking-[-0.03em]
+
         text-white
       "
     >
@@ -34,12 +46,20 @@ export default function HeroHeading() {
       <br />
       Meets
       <br />
+
       <em
-        className="italic text-[var(--gold-light)] inline-block transition-all duration-400 ease-in-out"
+        className="
+          inline-block
+          italic
+          text-[var(--gold-light)]
+        "
         style={{
           opacity: visible ? 1 : 0,
-          transform: visible ? "translateY(0)" : "translateY(12px)",
-          transition: "opacity 400ms ease, transform 400ms ease",
+          transform: visible
+            ? "translateY(0)"
+            : "translateY(12px)",
+          transition:
+            "opacity 400ms ease, transform 400ms ease",
         }}
       >
         {phrases[index]}
