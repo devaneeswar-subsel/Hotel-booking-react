@@ -810,8 +810,8 @@ app.post("/api/payment/verify", async (req, res) => {
           });
 
           // Send email with PDF attachment
-          await transporter.sendMail({
-            from: `"VV Grand Park Residency" <${process.env.GMAIL_USER}>`,
+          await resend.emails.send({
+            from: `"VV Grand Park Residency" <bookings@vvgrandpark.com>`,
             to: booking.email,
             subject: `Booking Confirmed! ${invNo} — VV Grand Park Residency`,
             html: `
@@ -853,8 +853,9 @@ app.post("/api/payment/verify", async (req, res) => {
             attachments: [
               {
                 filename: `${invNo}-${(booking.guest_name || "guest").replace(/\s+/g, "_")}.pdf`,
-                content: pdfBuffer,
-                contentType: "application/pdf",
+                content: pdfBuffer.toString("base64"),
+                type: "application/pdf",
+                disposition: "attachment",
               },
             ],
           });
