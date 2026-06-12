@@ -410,12 +410,28 @@ const fadeUp = (delay = 0) => ({
 
       {/* HERO */}
       {/* HERO */}
-      <div
-        className="relative flex h-screen min-h-[680px] items-end overflow-hidden bg-cover bg-center pb-20"
-        style={{
-          backgroundImage: "url('/hotel-hero.webp')",
-        }}
-      >
+     <div
+  className="
+    relative flex
+    min-h-[520px]
+    h-[100vh]
+    sm:h-[80vh]
+    md:h-[50vh]
+    lg:h-[85vh]
+    xl:h-[90vh]
+    max-h-[850px]
+    items-end
+    overflow-hidden
+    bg-cover
+    bg-center
+    pb-8
+    sm:pb-12
+    lg:pb-16
+  "
+  style={{
+    backgroundImage: "url('/hotel-hero.webp')",
+  }}
+>
         {/* Overlay */}
         <div
           className="absolute inset-0"
@@ -462,7 +478,7 @@ const fadeUp = (delay = 0) => ({
 </motion.p>
 
           {/* Actions */}
-          <div className="mb-12 flex flex-wrap gap-3">
+          <div className="mb-4 sm:mb-6 md:mb-8  lg:mb-12 flex flex-wrap gap-3">
             <button
               className="btn btn-gold"
               onClick={() => scrollTo("rooms")}

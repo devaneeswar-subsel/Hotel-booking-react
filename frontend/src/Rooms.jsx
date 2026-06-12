@@ -68,7 +68,7 @@ const fadeUp = (delay = 0) => ({
   transition: { duration: 0.6, delay, ease: "easeOut" },
 })
   return (
-    <section id="rooms" className="section">
+    <section id="rooms" className="mx-auto max-w-7xl px-6 md:px-8 lg:px-12 py-4 sm:py-8 md:py-12 lg:py-20 " >
       <motion.div {...fadeUp(0)} className="section-eyebrow">
   <span>Accommodations</span>
 </motion.div>
@@ -192,7 +192,7 @@ const fadeUp = (delay = 0) => ({
                 <div className="room-type-badge">{room.room_type}</div>
               </div>
               <div className="room-card-body">
-                <div className="font-body">Room {room.room_number || `#${room.room_id}`}</div>
+                <div className="font-body font-bold">Room {room.room_number || `#${room.room_id}`}</div>
                 <p>
                   {room.description ||
                     "A beautifully furnished room with modern amenities and premium comfort."}
