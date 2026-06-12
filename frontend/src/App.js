@@ -416,7 +416,210 @@ function BookingModal({ room, user, onClose, showToast }) {
   }
 
   // downloadInvoice stays unchanged — no CSS involved
-  async function downloadInvoice() { /* ... same as before ... */ }
+  async function downloadInvoice() {
+    if (!confirmedBooking) return;
+    const b = confirmedBooking;
+    const nights =
+      b.check_in_date && b.check_out_date
+        ? Math.ceil(
+            (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
+          )
+        : 1;
+    const basePrice = Number(b.total_price);
+    const gst = Math.round(basePrice * 0.18 * 100) / 100;
+    const total = Math.round((basePrice + gst) * 100) / 100;
+    const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
+    const today = new Date().toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const W = 210,
+      L = 18,
+      R = W - 18;
+
+    // Header
+    doc.setFillColor(15, 25, 35);
+    doc.rect(0, 0, W, 32, "F");
+    doc.setFont("times", "bold").setFontSize(17).setTextColor(201, 168, 76);
+    doc.text("VV GRAND PARK", L, 13);
+    doc
+      .setFont("helvetica", "normal")
+      .setFontSize(7)
+      .setTextColor(180, 160, 100);
+    doc.text("RESIDENCY", L, 19);
+    doc
+      .setFont("helvetica", "bold")
+      .setFontSize(17)
+      .setTextColor(255, 255, 255);
+    doc.text("INVOICE", R, 13, { align: "right" });
+    doc
+      .setFont("helvetica", "normal")
+      .setFontSize(8)
+      .setTextColor(150, 140, 120);
+    doc.text(invNo, R, 20, { align: "right" });
+    doc.text(`Date: ${today}`, R, 27, { align: "right" });
+
+    // Divider
+    doc.setDrawColor(201, 168, 76).setLineWidth(0.4).line(L, 37, R, 37);
+
+    // Bill To / From
+    doc.setFont("helvetica", "bold").setFontSize(7).setTextColor(134, 142, 150);
+    doc.text("BILL TO", L, 44);
+    doc.text("FROM", W / 2 + 8, 44);
+    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(15, 25, 35);
+    doc.text(b.guest_name || "Guest", L, 51);
+    doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(73, 80, 87);
+    doc.text(b.email || "", L, 57);
+    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(15, 25, 35);
+    doc.text("VV Grand Park Residency", W / 2 + 8, 51);
+    doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(73, 80, 87);
+    doc.text("vvgrandpark.com", W / 2 + 8, 57);
+    doc.text("vvgrandpark.hotel@gmail.com", W / 2 + 8, 63);
+
+    // Table header
+    const tableTop = 76;
+    doc.setFillColor(15, 25, 35).rect(L, tableTop, W - 36, 8, "F");
+    doc
+      .setFont("helvetica", "bold")
+      .setFontSize(7.5)
+      .setTextColor(201, 168, 76);
+    doc.text("DESCRIPTION", L + 4, tableTop + 5.5);
+    doc.text("DETAILS", 108, tableTop + 5.5);
+    doc.text("AMOUNT", R, tableTop + 5.5, { align: "right" });
+
+    // Rows
+    const rows = [
+      {
+        desc: `${b.room_type} — Room ${b.room_number || b.room_id}`,
+        detail: `${nights} night${nights > 1 ? "s" : ""}`,
+        amount: `Rs.${basePrice.toLocaleString()}`,
+      },
+      {
+        desc: "Check-in",
+        detail: new Date(b.check_in_date).toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        }),
+        amount: "—",
+      },
+      {
+        desc: "Check-out",
+        detail: new Date(b.check_out_date).toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        }),
+        amount: "—",
+      },
+      { desc: "Guests", detail: `${b.guest_count || 1}`, amount: "—" },
+      { desc: "Payment ID", detail: b.payment_id || "—", amount: "—" },
+    ];
+
+    let y = tableTop + 13;
+    rows.forEach((row, i) => {
+      if (i % 2 === 0) {
+        doc.setFillColor(248, 249, 250).rect(L, y - 5, W - 36, 8, "F");
+      }
+      doc
+        .setFont("helvetica", "normal")
+        .setFontSize(8)
+        .setTextColor(15, 25, 35);
+      doc.text(row.desc, L + 4, y);
+      doc.setTextColor(80, 80, 80);
+      doc.text(String(row.detail), 108, y);
+      doc.text(row.amount, R, y, { align: "right" });
+      y += 8;
+    });
+
+    // Summary
+    y += 10;
+    doc.setDrawColor(220, 220, 220).setLineWidth(0.3).line(L, y, R, y);
+    y += 8;
+    const SX = W - 90;
+    [
+      { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
+      { label: "GST (18%)", val: `Rs.${Math.round(gst).toLocaleString()}` },
+    ].forEach(({ label, val }) => {
+      doc
+        .setFont("helvetica", "normal")
+        .setFontSize(8)
+        .setTextColor(110, 110, 110);
+      doc.text(label, SX, y);
+      doc.setFont("helvetica", "bold").setTextColor(30, 30, 30);
+      doc.text(val, R, y, { align: "right" });
+      y += 7;
+    });
+
+    // Total box
+    y += 3;
+    doc
+      .setFillColor(15, 25, 35)
+      .roundedRect(SX - 1, y, R - SX + 3, 14, 2, 2, "F");
+    doc
+      .setFont("helvetica", "bold")
+      .setFontSize(7.5)
+      .setTextColor(201, 168, 76);
+    doc.text("TOTAL PAID", (SX - 1 + R) / 2, y + 5.5, { align: "center" });
+    doc.setFontSize(11).setTextColor(255, 255, 255);
+    doc.text(
+      `Rs.${Math.round(total).toLocaleString()}`,
+      (SX - 1 + R) / 2,
+      y + 12,
+      { align: "center" },
+    );
+
+    // Terms
+    y += 22;
+    doc.setFont("helvetica", "bold").setFontSize(7).setTextColor(80, 80, 80);
+    doc.text("TERMS & CONDITIONS", L, y);
+    y += 5;
+    const terms = [
+      "1. Valid photo ID must be presented at check-in.",
+      "2. Check-in: 12:00 PM | Check-out: 11:00 AM.",
+      "3. Early check-in/late check-out subject to availability.",
+      "4. Pets, outside food, and smoking are not permitted.",
+      "5. Cancellations must be made 24 hours prior to check-in for a refund.",
+    ];
+    doc
+      .setFont("helvetica", "normal")
+      .setFontSize(6.5)
+      .setTextColor(120, 120, 120);
+    terms.forEach((t) => {
+      doc.text(t, L, y);
+      y += 5;
+    });
+
+    // Footer
+    const footerY = 282;
+    doc
+      .setDrawColor(201, 168, 76)
+      .setLineWidth(0.3)
+      .line(L, footerY, R, footerY);
+    doc
+      .setFont("helvetica", "italic")
+      .setFontSize(8)
+      .setTextColor(134, 142, 150);
+    doc.text(
+      "Thank you for choosing VV Grand Park Residency!",
+      W / 2,
+      footerY + 5,
+      { align: "center" },
+    );
+    doc.setFont("helvetica", "normal").setFontSize(7.5);
+    doc.text(
+      "vvgrandpark.com  |  vvgrandpark.hotel@gmail.com",
+      W / 2,
+      footerY + 11,
+      { align: "center" },
+    );
+
+    doc.save(`${invNo}-${(b.guest_name || "guest").replace(/\s+/g, "_")}.pdf`);
+  }
 
   if (confirmedBooking)
     return (
