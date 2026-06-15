@@ -1463,7 +1463,7 @@ if (showAdmin && user?.role === "admin") {
 }
 
 return (
-  <div>
+  <div style={{ overflowX: "hidden", width: "100%" }}>
     <Hero
       user={user}
       onAuthClick={() => setShowAuth(true)}
@@ -1478,33 +1478,30 @@ return (
     />
 
     <Rooms
-  user={user}
-  availableRoomIds={availableRoomIds}          // ← add this
-  onBookClick={(room) => setBookingRoom(room)}
-  onCardClick={(room) => setSelectedRoom(room)}
-  onAuthPrompt={() => setShowAuth(true)}
-/>
+      user={user}
+      availableRoomIds={availableRoomIds} // ← add this
+      onBookClick={(room) => setBookingRoom(room)}
+      onCardClick={(room) => setSelectedRoom(room)}
+      onAuthPrompt={() => setShowAuth(true)}
+    />
 
     <CalendarSection
-  onViewRooms={(ids) => {
-    setAvailableRoomIds(ids);
-    setTimeout(() => {
-      document
-        .getElementById("rooms-section")
-        ?.scrollIntoView({ behavior: "smooth" });
-    }, 300);
-  }}
-/>
+      onViewRooms={(ids) => {
+        setAvailableRoomIds(ids);
+        setTimeout(() => {
+          document
+            .getElementById("rooms-section")
+            ?.scrollIntoView({ behavior: "smooth" });
+        }, 300);
+      }}
+    />
     <Facilities />
     <Gallery />
     <Testimonials />
     <Footer />
 
     {showAuth && (
-      <AuthModal
-        onClose={() => setShowAuth(false)}
-        onLogin={handleLogin}
-      />
+      <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
     )}
 
     {bookingRoom && user && (
@@ -1517,45 +1514,39 @@ return (
     )}
 
     {showBookings &&
-  user &&
-  user.role !== "admin" &&
-  user.role !== "manager" && (
-    <MyBookingsModal
-      user={user}
-      onClose={() => setShowBookings(false)}
-      showToast={showToast}
-     onNavigateToRooms={(roomId) => {
-  setShowBookings(false);
-  if (roomId) {
-    apiFetch(`/api/rooms/${roomId}`)
-      .then((r) => r.json())
-      .then((room) => {
-        if (room?.room_id) setSelectedRoom(room);
-      })
-      .catch(() => {});
-  } else {
-    document
-      .getElementById("rooms-section")
-      ?.scrollIntoView({ behavior: "smooth" });
-  }
-}}
-    />
-  )}
-
-    {toast && (
-      <Toast
-        msg={toast.msg}
-        type={toast.type}
-        onHide={() => setToast(null)}
-      />
-    )}
-
-    {user &&
+      user &&
       user.role !== "admin" &&
       user.role !== "manager" && (
-        <button
-          onClick={() => setShowBookings(true)}
-          className="
+        <MyBookingsModal
+          user={user}
+          onClose={() => setShowBookings(false)}
+          showToast={showToast}
+          onNavigateToRooms={(roomId) => {
+            setShowBookings(false);
+            if (roomId) {
+              apiFetch(`/api/rooms/${roomId}`)
+                .then((r) => r.json())
+                .then((room) => {
+                  if (room?.room_id) setSelectedRoom(room);
+                })
+                .catch(() => {});
+            } else {
+              document
+                .getElementById("rooms-section")
+                ?.scrollIntoView({ behavior: "smooth" });
+            }
+          }}
+        />
+      )}
+
+    {toast && (
+      <Toast msg={toast.msg} type={toast.type} onHide={() => setToast(null)} />
+    )}
+
+    {user && user.role !== "admin" && user.role !== "manager" && (
+      <button
+        onClick={() => setShowBookings(true)}
+        className="
             fixed
             bottom-7
             left-7
@@ -1575,14 +1566,11 @@ return (
             duration-200
             hover:bg-[var(--gold)]
           "
-        >
-          <BookingIcon
-            size={15}
-            color="var(--gold-light)"
-          />
-          My Bookings
-        </button>
-      )}
+      >
+        <BookingIcon size={15} color="var(--gold-light)" />
+        My Bookings
+      </button>
+    )}
   </div>
 );
 }

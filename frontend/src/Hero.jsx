@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
-import StatItem from "./Components/StatItem";
 import { motion } from "framer-motion";
-
 import {
   ArrowRightIcon,
   CalendarIcon,
@@ -13,16 +11,16 @@ import {
   SettingsIcon,
   BookingIcon,
 } from "./Icons";
-import HeroHeading from "./Components/HeroHeading";
+
+const phrases = ["Comfort", "Elegance", "Serenity", "Indulgence", "Perfection"];
+
 const stats = [
-  { target: 250, suffix: "+", label: "Luxury Rooms", decimals: 0 },
-  { target: 4.9, suffix: "", label: "Guest Rating", decimals: 1 },
-  { target: 25, suffix: "+", label: "Years of Excellence", decimals: 0 },
-  { target: 18, suffix: "K+", label: "Happy Guests", decimals: 0 },
+  { num: "250+", label: "Luxury Rooms" },
+  { num: "4.9", label: "Guest Rating" },
+  { num: "25+", label: "Years of Excellence" },
+  { num: "18K+", label: "Happy Guests" },
 ];
-export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
-  const [scrolled, setScrolled] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 24 },
   whileInView: { opacity: 1, y: 0 },
@@ -30,10 +28,27 @@ const fadeUp = (delay = 0) => ({
   transition: { duration: 0.6, delay, ease: "easeOut" },
 });
 
+export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
+  const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const [visible, setVisible] = useState(true);
+
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 40);
     window.addEventListener("scroll", handler);
     return () => window.removeEventListener("scroll", handler);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setPhraseIndex((i) => (i + 1) % phrases.length);
+        setVisible(true);
+      }, 400);
+    }, 2800);
+    return () => clearInterval(interval);
   }, []);
 
   const scrollTo = (id) => {
@@ -43,313 +58,288 @@ const fadeUp = (delay = 0) => ({
 
   return (
     <>
-      {/* NAVBAR */}
+      {/* ── NAVBAR ── */}
       <nav
-        className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-[4%] py-5 transition-all duration-300 ${scrolled
-            ? "bg-[rgba(15,25,35,0.95)] backdrop-blur-md shadow-lg"
-            : "bg-transparent"
-          }`}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 50,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 3%",
+          height: 68,
+          background: scrolled ? "rgba(15,25,35,0.95)" : "transparent",
+          backdropFilter: scrolled ? "blur(12px)" : "none",
+          boxShadow: scrolled ? "0 2px 20px rgba(0,0,0,0.3)" : "none",
+          transition: "all 0.3s ease",
+          boxSizing: "border-box",
+          minWidth: 0,
+        }}
       >
-        {/* Logo */}
+        {/* Logo — flex-shrink: 0 so it never squishes */}
         <div
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="flex cursor-pointer items-center gap-3"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
         >
           <img
             src="/logo.png"
-            alt="VV Grand Park Residency"
-            className="h-11 w-11 object-contain brightness-110 mix-blend-screen"
+            alt="VV Grand Park"
+            style={{ height: 38, width: 38, objectFit: "contain" }}
           />
-
-          <div className="flex flex-col leading-[1.1]">
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              lineHeight: 1.1,
+            }}
+          >
             <span
-              className="
-          font-[var(--font-display)]
-          text-[1rem]
-          font-bold
-          tracking-[2px]
-          text-white
-        "
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: "0.88rem",
+                fontWeight: 700,
+                letterSpacing: 2,
+                color: "#fff",
+                whiteSpace: "nowrap",
+              }}
             >
               VV GRAND PARK
             </span>
-
             <span
-              className="
-          font-[var(--font-display)]
-          text-[0.6rem]
-          font-normal
-          tracking-[3px]
-          text-[var(--gold-light)]
-        "
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: "0.52rem",
+                letterSpacing: 3,
+                color: "var(--gold-light)",
+                whiteSpace: "nowrap",
+              }}
             >
               RESIDENCY
             </span>
           </div>
         </div>
 
-        {/* Desktop Links with Premium Center-Out Underline Animations */}
-        <div className="hidden items-center gap-8 lg:flex">
-          <span
-            onClick={() =>
-              window.scrollTo({
-                top: 0,
-                behavior: "smooth",
-              })
-            }
-            className="group relative cursor-pointer py-1 text-[0.85rem] font-medium text-white/75 transition-colors duration-300 hover:text-[var(--gold-light)]"
-          >
-            Home
-            <span className="absolute bottom-0 left-0 h-[2px] w-full origin-center scale-x-0 bg-[var(--gold-light)] transition-transform duration-300 group-hover:scale-x-100" />
-          </span>
-
-          <span
-            onClick={() => scrollTo("rooms")}
-            className="group relative cursor-pointer py-1 text-[0.85rem] font-medium text-white/75 transition-colors duration-300 hover:text-[var(--gold-light)]"
-          >
-            Rooms
-            <span className="absolute bottom-0 left-0 h-[2px] w-full origin-center scale-x-0 bg-[var(--gold-light)] transition-transform duration-300 group-hover:scale-x-100" />
-          </span>
-
-          <span
-            onClick={() => scrollTo("facilities")}
-            className="group relative cursor-pointer py-1 text-[0.85rem] font-medium text-white/75 transition-colors duration-300 hover:text-[var(--gold-light)]"
-          >
-            Facilities
-            <span className="absolute bottom-0 left-0 h-[2px] w-full origin-center scale-x-0 bg-[var(--gold-light)] transition-transform duration-300 group-hover:scale-x-100" />
-          </span>
-
-          <span
-            onClick={() => scrollTo("gallery")}
-            className="group relative cursor-pointer py-1 text-[0.85rem] font-medium text-white/75 transition-colors duration-300 hover:text-[var(--gold-light)]"
-          >
-            Gallery
-            <span className="absolute bottom-0 left-0 h-[2px] w-full origin-center scale-x-0 bg-[var(--gold-light)] transition-transform duration-300 group-hover:scale-x-100" />
-          </span>
+        {/* Desktop Links — centered, flex-shrink allowed */}
+        <div
+          className="hero-nav-links"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 24,
+            flex: "1 1 auto",
+            justifyContent: "center",
+            minWidth: 0,
+          }}
+        >
+          {["Home", "Rooms", "Facilities", "Gallery"].map((link) => (
+            <span
+              key={link}
+              onClick={() =>
+                link === "Home"
+                  ? window.scrollTo({ top: 0, behavior: "smooth" })
+                  : scrollTo(link.toLowerCase())
+              }
+              style={{
+                cursor: "pointer",
+                fontSize: "0.82rem",
+                fontWeight: 500,
+                color: "rgba(255,255,255,0.75)",
+                padding: "4px 0",
+                transition: "color 0.3s",
+                whiteSpace: "nowrap",
+              }}
+              onMouseEnter={(e) => (e.target.style.color = "var(--gold-light)")}
+              onMouseLeave={(e) =>
+                (e.target.style.color = "rgba(255,255,255,0.75)")
+              }
+            >
+              {link}
+            </span>
+          ))}
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-3">
+        {/* Actions — flex-shrink: 0 */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexShrink: 0,
+          }}
+        >
           {user ? (
             <>
-              {/* User Pill */}
               <div
-                className="
-            hidden
-            md:flex
-            items-center
-            gap-2
-            rounded-full
-            border
-            border-white/10
-            bg-white/5
-            px-3
-            py-2
-            text-[0.8rem]
-            font-medium
-            text-white
-          "
+                className="hero-nav-actions"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(255,255,255,0.05)",
+                  padding: "5px 10px",
+                  fontSize: "0.78rem",
+                  color: "#fff",
+                  whiteSpace: "nowrap",
+                }}
               >
-                <UserIcon size={14} color="rgba(255,255,255,0.7)" />
+                <UserIcon size={13} color="rgba(255,255,255,0.7)" />
                 {user.name.split(" ")[0]}
               </div>
-
-              {/* Admin/User Button */}
-              {user.role === "admin" ? (
-                <button
-                  onClick={onMyBookings}
-                  className="
-              hidden
-              md:flex
-              items-center
-              gap-2
-              rounded-md
-              bg-[var(--gold)]
-              px-[18px]
-              py-2
-              text-[0.78rem]
-              font-semibold
-              text-[var(--navy)]
-              transition
-              hover:brightness-105
-            "
-                >
-                  <SettingsIcon size={14} />
-                  Admin Panel
-                </button>
-              ) : (
-                <button
-                  onClick={onMyBookings}
-                  className="
-              hidden
-              md:flex
-              items-center
-              gap-2
-              rounded-md
-              border
-              border-white/15
-              bg-white/5
-              px-[18px]
-              py-2
-              text-[0.78rem]
-              font-medium
-              text-white
-              transition
-              hover:bg-white/10
-            "
-                >
-                  <BookingIcon size={14} />
-                  My Bookings
-                </button>
-              )}
-
-              {/* Logout */}
               <button
-                onClick={onLogout}
-                className="
-            hidden
-            md:flex
-            items-center
-            justify-center
-            rounded-md
-            border
-            border-white/15
-            bg-white/5
-            px-[14px]
-            py-2
-            text-white
-            transition
-            hover:bg-white/10
-          "
+                className="hero-nav-actions"
+                onClick={onMyBookings}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  borderRadius: 6,
+                  padding: "6px 13px",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  background:
+                    user.role === "admin"
+                      ? "var(--gold)"
+                      : "rgba(255,255,255,0.05)",
+                  color: user.role === "admin" ? "var(--navy)" : "#fff",
+                  border:
+                    user.role === "admin"
+                      ? "none"
+                      : "1px solid rgba(255,255,255,0.15)",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
               >
-                <LogOutIcon size={14} />
+                {user.role === "admin" ? (
+                  <SettingsIcon size={13} />
+                ) : (
+                  <BookingIcon size={13} />
+                )}
+                {user.role === "admin" ? "Admin Panel" : "My Bookings"}
+              </button>
+              <button
+                className="hero-nav-actions"
+                onClick={onLogout}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                <LogOutIcon size={13} />
               </button>
             </>
           ) : (
             <button
+              className="hero-nav-actions"
               onClick={onAuthClick}
-              className="
-          hidden
-          md:flex
-          items-center
-          gap-2
-          rounded-md
-          border
-          border-white/15
-          bg-white/5
-          px-5
-          py-[9px]
-          text-[0.8rem]
-          font-medium
-          text-white
-          transition
-          hover:bg-white/10
-        "
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                borderRadius: 6,
+                padding: "7px 18px",
+                fontSize: "0.78rem",
+                fontWeight: 500,
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.15)",
+                color: "#fff",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
             >
-              Sign In
-              <ArrowRightIcon size={14} />
+              Sign In <ArrowRightIcon size={13} />
             </button>
           )}
 
-          {/* Mobile Hamburger */}
+          {/* Hamburger */}
           <button
+            className="hero-hamburger"
             onClick={() => setMenuOpen(!menuOpen)}
-            className="
-        flex
-        h-10
-        w-10
-        items-center
-        justify-center
-        rounded-md
-        border
-        border-white/15
-        bg-white/5
-        text-white
-        lg:hidden
-      "
+            style={{
+              display: "none",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 38,
+              height: 38,
+              borderRadius: 6,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.15)",
+              color: "#fff",
+              cursor: "pointer",
+            }}
           >
-            {menuOpen ? <XIcon size={22} /> : <MenuIcon size={22} />}
+            {menuOpen ? <XIcon size={20} /> : <MenuIcon size={20} />}
           </button>
         </div>
       </nav>
-      {/* MOBILE MENU */}
+
+      {/* ── MOBILE MENU ── */}
       <div
-        className={`fixed left-0 right-0 top-[72px] z-40 flex flex-col gap-1 overflow-hidden bg-[var(--navy)] px-6 transition-all duration-300 lg:hidden ${menuOpen
-            ? "max-h-[500px] border-t border-white/10 py-6 opacity-100"
-            : "max-h-0 py-0 opacity-0"
-          }`}
+        style={{
+          position: "fixed",
+          top: 68,
+          left: 0,
+          right: 0,
+          zIndex: 40,
+          background: "var(--navy)",
+          maxHeight: menuOpen ? 500 : 0,
+          overflow: "hidden",
+          opacity: menuOpen ? 1 : 0,
+          transition: "all 0.3s ease",
+          borderTop: menuOpen ? "1px solid rgba(255,255,255,0.1)" : "none",
+          padding: menuOpen ? "20px 6%" : "0 6%",
+        }}
       >
         <span
-          className="
-      mb-1
-      font-[var(--font-display)]
-      text-[0.85rem]
-      tracking-[1px]
-      text-[var(--gold-light)]
-    "
+          style={{
+            display: "block",
+            fontFamily: "var(--font-display)",
+            fontSize: "0.75rem",
+            letterSpacing: 1,
+            color: "var(--gold-light)",
+            marginBottom: 12,
+          }}
         >
           VV GRAND PARK RESIDENCY
         </span>
-
-        <span
-          onClick={() => {
-            window.scrollTo({ top: 0, behavior: "smooth" });
-            setMenuOpen(false);
-          }}
-          className="
-      cursor-pointer
-      py-3
-      text-[0.9rem]
-      text-white/80
-      transition
-      hover:text-[var(--gold-light)]
-    "
-        >
-          Home
-        </span>
-
-        <span
-          onClick={() => scrollTo("rooms")}
-          className="
-      cursor-pointer
-      py-3
-      text-[0.9rem]
-      text-white/80
-      transition
-      hover:text-[var(--gold-light)]
-    "
-        >
-          Rooms
-        </span>
-
-        <span
-          onClick={() => scrollTo("facilities")}
-          className="
-      cursor-pointer
-      py-3
-      text-[0.9rem]
-      text-white/80
-      transition
-      hover:text-[var(--gold-light)]
-    "
-        >
-          Facilities
-        </span>
-
-        <span
-          onClick={() => scrollTo("gallery")}
-          className="
-      cursor-pointer
-      py-3
-      text-[0.9rem]
-      text-white/80
-      transition
-      hover:text-[var(--gold-light)]
-    "
-        >
-          Gallery
-        </span>
-
+        {["Home", "Rooms", "Facilities", "Gallery"].map((link) => (
+          <span
+            key={link}
+            onClick={() =>
+              link === "Home"
+                ? (window.scrollTo({ top: 0, behavior: "smooth" }),
+                  setMenuOpen(false))
+                : scrollTo(link.toLowerCase())
+            }
+            style={{
+              display: "block",
+              padding: "12px 0",
+              fontSize: "0.9rem",
+              color: "rgba(255,255,255,0.8)",
+              cursor: "pointer",
+              borderBottom: "1px solid rgba(255,255,255,0.05)",
+            }}
+          >
+            {link}
+          </span>
+        ))}
         {user ? (
           <>
             <span
@@ -357,33 +347,29 @@ const fadeUp = (delay = 0) => ({
                 onMyBookings();
                 setMenuOpen(false);
               }}
-              className="
-          cursor-pointer
-          py-3
-          text-[0.9rem]
-          text-white/80
-          transition
-          hover:text-[var(--gold-light)]
-        "
+              style={{
+                display: "block",
+                padding: "12px 0",
+                fontSize: "0.9rem",
+                color: "rgba(255,255,255,0.8)",
+                cursor: "pointer",
+                borderBottom: "1px solid rgba(255,255,255,0.05)",
+              }}
             >
-              {user.role === "admin"
-                ? "Admin Panel"
-                : "My Bookings"}
+              {user.role === "admin" ? "Admin Panel" : "My Bookings"}
             </span>
-
             <span
               onClick={() => {
                 onLogout();
                 setMenuOpen(false);
               }}
-              className="
-          cursor-pointer
-          py-3
-          text-[0.9rem]
-          text-red-300
-          transition
-          hover:text-red-200
-        "
+              style={{
+                display: "block",
+                padding: "12px 0",
+                fontSize: "0.9rem",
+                color: "#fca5a5",
+                cursor: "pointer",
+              }}
             >
               Sign Out
             </span>
@@ -394,149 +380,219 @@ const fadeUp = (delay = 0) => ({
               onAuthClick();
               setMenuOpen(false);
             }}
-            className="
-        cursor-pointer
-        py-3
-        text-[0.9rem]
-        text-[var(--gold-light)]
-        transition
-        hover:text-[var(--gold)]
-      "
+            style={{
+              display: "block",
+              padding: "12px 0",
+              fontSize: "0.9rem",
+              color: "var(--gold-light)",
+              cursor: "pointer",
+            }}
           >
             Sign In
           </span>
         )}
       </div>
 
-      {/* HERO */}
-      {/* HERO */}
-{/* HERO */}
-<div
-  className="
-    relative flex
-
-    min-h-[580px]
-    h-[85dvh]
-    max-h-[880px]
-
-    items-end
-    overflow-hidden
-
-    bg-cover
-    bg-center
-
-    pb-[clamp(1.5rem,4vw,4rem)]
-  "
-  style={{
-    backgroundImage: "url('/hotel-hero.webp')",
-  }}
->
-  {/* Overlay */}
-  <div
-    className="absolute inset-0"
-    style={{
-      background: `
-        linear-gradient(
-          to bottom,
-          rgba(15,25,35,0.25) 0%,
-          rgba(15,25,35,0.15) 40%,
-          rgba(15,25,35,0.75) 100%
-        )
-      `,
-    }}
-  />
-
-  {/* Content */}
-  <div className="relative z-[2] mx-auto w-[92%] max-w-[1200px]">
-    <motion.div
-      {...fadeUp(0)}
-      className="
-        mb-[clamp(12px,2vw,18px)]
-        inline-flex
-        items-center
-        gap-3
-        rounded-full
-        border
-        border-white/10
-        bg-black/30
-        px-4
-        py-2
-      "
-    >
-      <div className="h-px w-9 bg-[var(--gold)]" />
-
-      <span
-        className="
-          text-[clamp(0.6rem,0.8vw,0.75rem)]
-          font-medium
-          uppercase
-          tracking-[3px]
-          text-[var(--gold-light)]
-        "
+      {/* ── HERO ── */}
+      <div
+        style={{
+          position: "relative",
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          overflow: "hidden",
+          overflowX: "hidden",
+          backgroundImage: "url('/hotel-hero.webp')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          /* Top padding clears navbar, bottom padding balances */
+          paddingTop: "clamp(100px, 14vw, 160px)",
+          paddingBottom: "clamp(48px, 7vw, 96px)",
+          boxSizing: "border-box",
+        }}
       >
-        VV Grand Park Residency — Premium Hospitality
-      </span>
-    </motion.div>
+        {/* Overlay */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background:
+              "linear-gradient(to bottom, rgba(15,25,35,0.45) 0%, rgba(15,25,35,0.1) 40%, rgba(15,25,35,0.85) 100%)",
+          }}
+        />
 
-    <motion.div {...fadeUp(0.15)}>
-      <HeroHeading />
-    </motion.div>
+        {/* Content */}
+        <div
+          style={{
+            position: "relative",
+            zIndex: 2,
+            width: "92%",
+            maxWidth: 1100,
+            margin: "0 auto",
+          }}
+        >
+          {/* Badge */}
+          <motion.div
+            {...fadeUp(0)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 10,
+              borderRadius: 999,
+              border: "1px solid rgba(255,255,255,0.1)",
+              background: "rgba(0,0,0,0.3)",
+              padding: "7px 14px",
+              marginBottom: 18,
+              maxWidth: "100%",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                height: 1,
+                width: 30,
+                background: "var(--gold)",
+                flexShrink: 0,
+              }}
+            />
+            <span
+              style={{
+                fontSize: "0.65rem",
+                fontWeight: 500,
+                textTransform: "uppercase",
+                letterSpacing: 2,
+                color: "var(--gold-light)",
+                whiteSpace: "normal",
+                wordBreak: "break-word",
+              }}
+            >
+              VV Grand Park Residency — Premium Hospitality
+            </span>
+          </motion.div>
 
-    <motion.p
-      {...fadeUp(0.3)}
-      className="
-        mb-[clamp(20px,3vw,34px)]
-        max-w-[32rem]
-        text-[clamp(0.9rem,1.2vw,1.1rem)]
-        leading-[1.7]
-        text-white/65
-      "
-    >
-      Experience world-class hospitality at VV Grand Park Residency —
-      breathtaking views, curated amenities, and moments you'll carry forever.
-    </motion.p>
+          {/* Heading — tighter clamp so it doesn't overflow at 100% */}
+          <motion.h1
+            {...fadeUp(0.15)}
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "clamp(2rem, 4.5vw, 4.5rem)",
+              fontWeight: 600,
+              lineHeight: 1.08,
+              letterSpacing: "-0.5px",
+              color: "#fff",
+              marginBottom: 18,
+              maxWidth: 600,
+            }}
+          >
+            Where Luxury
+            <br />
+            Meets
+            <br />
+            <em
+              style={{
+                fontStyle: "italic",
+                color: "var(--gold-light)",
+                display: "inline-block",
+                opacity: visible ? 1 : 0,
+                transform: visible ? "translateY(0)" : "translateY(10px)",
+                transition: "opacity 400ms ease, transform 400ms ease",
+              }}
+            >
+              {phrases[phraseIndex]}
+            </em>
+          </motion.h1>
 
-    <div
-      className="
-        mb-[clamp(1rem,3vw,3rem)]
-        flex
-        flex-wrap
-        gap-3
-      "
-    >
-      <button
-        className="btn btn-gold"
-        onClick={() => scrollTo('rooms')}
-      >
-        Explore Rooms
-        <ArrowRightIcon size={16} />
-      </button>
+          {/* Subtitle */}
+          <motion.p
+            {...fadeUp(0.3)}
+            style={{
+              fontSize: "clamp(0.82rem, 1.2vw, 1rem)",
+              lineHeight: 1.75,
+              color: "rgba(255,255,255,0.65)",
+              maxWidth: 440,
+              marginBottom: 28,
+            }}
+          >
+            Experience world-class hospitality at VV Grand Park Residency —
+            breathtaking views, curated amenities, and moments you'll carry
+            forever.
+          </motion.p>
 
-      <button
-        className="btn btn-ghost"
-        onClick={() => scrollTo('calendar')}
-      >
-        <CalendarIcon size={16} />
-        Check Availability
-      </button>
-    </div>
+          {/* Buttons */}
+          <motion.div
+            {...fadeUp(0.4)}
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 12,
+              marginBottom: 36,
+            }}
+          >
+            <button className="btn btn-gold" onClick={() => scrollTo("rooms")}>
+              Explore Rooms <ArrowRightIcon size={15} />
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => scrollTo("calendar")}
+            >
+              <CalendarIcon size={15} /> Check Availability
+            </button>
+          </motion.div>
 
-    <div
-      className="
-        flex
-        flex-wrap
-        gap-[clamp(1rem,3vw,2.5rem)]
-        border-t
-        border-white/10
-        pt-[clamp(1rem,2vw,2rem)]
-      "
-    >
-      {stats.map((s, i) => (
-        <StatItem key={i} {...s} />
-      ))}
-    </div>
-  </div>
-</div>
+          {/* Stats */}
+          <motion.div
+            {...fadeUp(0.5)}
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "14px 36px",
+              borderTop: "1px solid rgba(255,255,255,0.1)",
+              paddingTop: 20,
+            }}
+          >
+            {stats.map((s, i) => (
+              <div key={i}>
+                <div
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    fontSize: "clamp(1.2rem, 2.5vw, 1.7rem)",
+                    fontWeight: 600,
+                    color: "#fff",
+                    lineHeight: 1,
+                    marginBottom: 4,
+                  }}
+                >
+                  {s.num}
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.6rem",
+                    textTransform: "uppercase",
+                    letterSpacing: 1.5,
+                    color: "rgba(255,255,255,0.45)",
+                  }}
+                >
+                  {s.label}
+                </div>
+              </div>
+            ))}
+          </motion.div>
+        </div>
+      </div>
+
+      {/* ── RESPONSIVE STYLES ── */}
+      <style>{`
+        .hero-nav-links { display: flex !important; }
+        .hero-nav-actions { display: flex !important; }
+        .hero-hamburger { display: none !important; }
+
+        /* Switch to hamburger at 820px — handles 100%–150% zoom gracefully */
+        @media (max-width: 820px) {
+          .hero-nav-links { display: none !important; }
+          .hero-nav-actions { display: none !important; }
+          .hero-hamburger { display: flex !important; }
+        }
+      `}</style>
     </>
   );
 }
