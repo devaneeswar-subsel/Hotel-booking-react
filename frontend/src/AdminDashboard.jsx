@@ -1795,25 +1795,25 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
   const roomTypes = ["Standard", "Deluxe", "Suite", "Luxury", "Presidential"];
   const typeColors = {
     Standard: {
-      border: "border-gray-500",
-      bg: "bg-gray-500",
-      text: "text-gray-500",
+     border: "border-gold",
+      bg: "bg-gold",
+      text: "text-gold",
     },
     Deluxe: {
-      border: "border-blue-600",
-      bg: "bg-blue-600",
-      text: "text-blue-600",
+      border: "border-gold",
+      bg: "bg-gold",
+      text: "text-gold",
     },
     Suite: {
-      border: "border-violet-600",
-      bg: "bg-violet-600",
-      text: "text-violet-600",
+    border: "border-gold",
+      bg: "bg-gold",
+      text: "text-gold",
     },
     Luxury: { border: "border-gold", bg: "bg-gold", text: "text-gold" },
     Presidential: {
-      border: "border-red-600",
-      bg: "bg-red-600",
-      text: "text-red-600",
+      border: "border-gold",
+      bg: "bg-gold",
+      text: "text-gold",
     },
   };
 

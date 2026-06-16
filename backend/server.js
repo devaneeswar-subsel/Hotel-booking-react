@@ -392,6 +392,31 @@ app.get("/api/rooms", async (req, res) => {
   }
 });
 
+app.get("/api/rooms/:roomId/booked-dates", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        booking_id,
+        check_in_date,
+        check_out_date
+      FROM bookings
+      WHERE room_id = ?
+      AND status NOT IN ('cancelled','pending')
+      `,
+      [roomId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+});
 app.get("/api/rooms/:id", async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
@@ -403,6 +428,7 @@ app.get("/api/rooms/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  REVIEWS

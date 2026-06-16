@@ -1084,7 +1084,7 @@ function ReportsTab({ showToast }) {
     <div>
       {/* Configuration Section */}
       <div className="bg-white rounded-[14px] px-[22px] py-5 border border-[#E9ECEF] mb-5">
-        <div className="font-serif text-[1rem] font-semibold text-[#0F1923] mb-4">
+        <div className="font-body text-[1rem] font-semibold text-[#0F1923] mb-4">
           Generate Report
         </div>
         <div className="flex flex-wrap items-end gap-2.5">
@@ -1297,13 +1297,13 @@ function ReportsTab({ showToast }) {
                     <tr className="border-t-2 border-[#0F1923]">
                       <td
                         colSpan={8}
-                        className="px-3 py-2.5 font-serif font-bold text-[#0F1923] text-[0.85rem]"
+                        className="px-3 py-2.5 font-body font-bold text-[#0F1923] text-[0.85rem]"
                       >
                         TOTAL REVENUE
                       </td>
                       <td
                         colSpan={2}
-                        className="px-3 py-2.5 font-serif font-bold text-[#C9A84C] text-[1rem]"
+                        className="px-3 py-2.5 font-body  font-bold text-[#C9A84C] text-[1rem]"
                       >
                         Rs.
                         {Number(
@@ -1535,7 +1535,7 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
             <div className="bg-white rounded-[14px] px-[22px] py-5 border border-[#E9ECEF]">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
                 <div>
-                  <div className="font-serif text-[1rem] font-semibold text-[#0F1923]">
+                  <div className="font-body text-[1rem] font-semibold text-[#0F1923]">
                     All Bookings ({bookings.length})
                   </div>
                   <div className="text-[0.78rem] font-normal text-[#868E96]">
