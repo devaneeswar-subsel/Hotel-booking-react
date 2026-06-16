@@ -399,14 +399,14 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
           position: "relative",
           minHeight: "100vh",
           display: "flex",
-          alignItems: "flex-end",
+          alignItems: "center",
           overflow: "hidden",
           backgroundImage: "url('/hotel-hero.webp')",
           backgroundSize: "cover",
           backgroundPosition: "center",
-          paddingBottom: "clamp(32px, 5vw, 72px)",
-          /* Push content below navbar at all zoom levels */
-          paddingTop: 68,
+          /* Top padding clears navbar, bottom padding balances */
+          paddingTop: "clamp(100px, 14vw, 160px)",
+          paddingBottom: "clamp(48px, 7vw, 96px)",
           boxSizing: "border-box",
         }}
       >
@@ -416,7 +416,7 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
             position: "absolute",
             inset: 0,
             background:
-              "linear-gradient(to bottom, rgba(15,25,35,0.25) 0%, rgba(15,25,35,0.05) 35%, rgba(15,25,35,0.82) 100%)",
+              "linear-gradient(to bottom, rgba(15,25,35,0.45) 0%, rgba(15,25,35,0.1) 40%, rgba(15,25,35,0.85) 100%)",
           }}
         />
 
