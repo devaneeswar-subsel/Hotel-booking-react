@@ -401,6 +401,7 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
           display: "flex",
           alignItems: "center",
           overflow: "hidden",
+          overflowX: "hidden",
           backgroundImage: "url('/hotel-hero.webp')",
           backgroundSize: "cover",
           backgroundPosition: "center",
@@ -442,6 +443,8 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
               background: "rgba(0,0,0,0.3)",
               padding: "7px 14px",
               marginBottom: 18,
+              maxWidth: "100%",
+              overflow: "hidden",
             }}
           >
             <div
@@ -457,9 +460,10 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
                 fontSize: "0.65rem",
                 fontWeight: 500,
                 textTransform: "uppercase",
-                letterSpacing: 3,
+                letterSpacing: 2,
                 color: "var(--gold-light)",
-                whiteSpace: "nowrap",
+                whiteSpace: "normal",
+                wordBreak: "break-word",
               }}
             >
               VV Grand Park Residency — Premium Hospitality
