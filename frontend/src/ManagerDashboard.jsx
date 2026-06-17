@@ -1335,7 +1335,8 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
   const [bookingRoom, setBookingRoom] = useState(null);
   const [toast, setToast] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
+  const [bookingPage, setBookingPage] = useState(1);
+  const itemsPerPage = 10;
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
@@ -1369,7 +1370,14 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
       b.room_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       b.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+const totalPages = Math.ceil(
+  filteredBookings.length / itemsPerPage
+);
 
+const paginatedBookings = filteredBookings.slice(
+  (bookingPage - 1) * itemsPerPage,
+  bookingPage * itemsPerPage
+);
   const checkedInBookings = bookings.filter(
     (b) => b.actual_checkin && !b.actual_checkout && b.status === "confirmed"
   );
@@ -1380,7 +1388,41 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
     { id: "book", label: "New Booking", icon: CalendarIcon },
     { id: "reports", label: "Reports", icon: DownloadIcon },
   ];
+const getPageNumbers = (currentPage, totalPages) => {
+  const pages = [];
 
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) {
+      pages.push(i);
+    }
+  } else {
+    if (currentPage <= 4) {
+      pages.push(1, 2, 3, 4, 5, "...", totalPages);
+    } else if (currentPage >= totalPages - 3) {
+      pages.push(
+        1,
+        "...",
+        totalPages - 4,
+        totalPages - 3,
+        totalPages - 2,
+        totalPages - 1,
+        totalPages
+      );
+    } else {
+      pages.push(
+        1,
+        "...",
+        currentPage - 1,
+        currentPage,
+        currentPage + 1,
+        "...",
+        totalPages
+      );
+    }
+  }
+
+  return pages;
+};
   const SIDEBAR_W = 210;
 
   const SidebarContent = () => (
@@ -1546,7 +1588,10 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
                 <div className="flex w-full sm:w-auto flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <input
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e) => {
+  setSearchTerm(e.target.value);
+  setBookingPage(1);
+}}
                     placeholder="Search guest, room..."
                     className="px-3 py-2 rounded-md border border-[#E9ECEF] text-[0.9rem] w-full sm:w-[320px]"
                   />
@@ -1578,14 +1623,14 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredBookings.length === 0 ? (
+                    {paginatedBookings.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="p-6 text-center text-[#868E96]">
                           No bookings found
                         </td>
                       </tr>
                     ) : (
-                      filteredBookings.map((b) => (
+                      paginatedBookings.map((b) => (
                         <tr key={b.booking_id} className="border-t border-[#F1F3F5]">
                           <td className="px-3 py-3 text-[0.82rem] text-[#868E96]">#{b.booking_id}</td>
                           <td className="px-3 py-3 font-semibold text-[#0F1923]">{b.guest_name}</td>
@@ -1610,6 +1655,75 @@ export default function ManagerDashboard({ managerUser, onLogout }) {
                   </tbody>
                 </table>
               </div>
+{totalPages > 1 && (
+  <div className="mt-5 pt-4 border-t border-[#E9ECEF]">
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      
+      {/* Showing Count */}
+      <p className="text-xs sm:text-sm text-[#868E96] text-center sm:text-left">
+        Showing {(bookingPage - 1) * itemsPerPage + 1} -
+        {Math.min(
+          bookingPage * itemsPerPage,
+          filteredBookings.length
+        )}{" "}
+        of {filteredBookings.length}
+      </p>
+
+      {/* Pagination */}
+      <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
+        
+        <button
+          onClick={() =>
+            setBookingPage((p) => Math.max(p - 1, 1))
+          }
+          disabled={bookingPage === 1}
+          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50"
+        >
+          Previous
+        </button>
+
+        {getPageNumbers(
+          bookingPage,
+          totalPages
+        ).map((page, index) =>
+          page === "..." ? (
+            <span
+              key={index}
+              className="px-2 text-gray-400 text-sm"
+            >
+              ...
+            </span>
+          ) : (
+            <button
+              key={page}
+              onClick={() => setBookingPage(page)}
+              className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
+                bookingPage === page
+                  ? "bg-[#0F1923] text-white"
+                  : "border border-[#E9ECEF] bg-white"
+              }`}
+            >
+              {page}
+            </button>
+          )
+        )}
+
+        <button
+          onClick={() =>
+            setBookingPage((p) =>
+              Math.min(p + 1, totalPages)
+            )
+          }
+          disabled={bookingPage === totalPages}
+          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50"
+        >
+          Next
+        </button>
+
+      </div>
+    </div>
+  </div>
+)}
             </div>
           )}
 

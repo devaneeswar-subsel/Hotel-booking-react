@@ -2179,7 +2179,9 @@ export default function AdminDashboard({
   const [resetPasswordUser, setResetPasswordUser] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showAddRoom, setShowAddRoom] = useState(false);
-
+const [bookingPage, setBookingPage] = useState(1);
+const [userPage, setUserPage] = useState(1);
+const itemsPerPage = 10;
   const fetchAll = () => {
     Promise.all([
       apiFetch("/api/admin/stats").then((r) => r.json()),
@@ -2204,6 +2206,18 @@ export default function AdminDashboard({
     fetchAll();
   }, []);
 
+    const getPaginatedData = (data, page) =>
+  data.slice(
+    (page - 1) * itemsPerPage,
+    page * itemsPerPage
+  );
+
+
+const userTotalPages = Math.ceil(
+  users.length / itemsPerPage
+);
+
+const paginatedUsers = getPaginatedData(users, userPage);
   async function confirmCancelBooking(id) {
     try {
       const res = await apiFetch(`/api/bookings/${id}/cancel`, {
@@ -2295,22 +2309,30 @@ export default function AdminDashboard({
         .reduce((sum, b) => sum + Number(b.final_total || b.total_price), 0),
     }))
     .filter((r) => r.value > 0);
-
-  const confirmed = bookings.filter((b) => b.status === "confirmed").length;
-  const cancelled = bookings.filter((b) => b.status === "cancelled").length;
-  const completed = bookings.filter((b) => b.status === "completed").length;
-
-  const filteredBookings = bookings.filter(
-    (b) =>
-      !searchTerm ||
+    
+    const confirmed = bookings.filter((b) => b.status === "confirmed").length;
+    const cancelled = bookings.filter((b) => b.status === "cancelled").length;
+    const completed = bookings.filter((b) => b.status === "completed").length;
+    const filteredBookings = bookings.filter(
+      (b) =>
+        !searchTerm ||
       b.guest_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       b.room_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       b.email?.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
+    );
 
+ const totalPages = Math.ceil(
+  filteredBookings.length / itemsPerPage
+);
+
+const paginatedBookings = getPaginatedData(
+  filteredBookings,
+  bookingPage
+);
   const checkedInBookings = bookings.filter(
     (b) => b.actual_checkin && !b.actual_checkout && b.status === "confirmed",
   );
+  
 
   const tabs = [
     { id: "overview", label: "Overview", icon: GridIcon },
@@ -2320,7 +2342,54 @@ export default function AdminDashboard({
     { id: "users", label: "Users", icon: UsersIcon },
     { id: "book", label: "New Booking", icon: CalendarIcon },
   ];
+useEffect(() => {
+  setBookingPage(1);
+  setUserPage(1);
+}, [tab]);
 
+const getPageNumbers = (currentPage, totalPages) => {
+  const pages = [];
+
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) {
+      pages.push(i);
+    }
+  } else {
+    if (currentPage <= 4) {
+      pages.push(
+        1,
+        2,
+        3,
+        4,
+        5,
+        "...",
+        totalPages
+      );
+    } else if (currentPage >= totalPages - 3) {
+      pages.push(
+        1,
+        "...",
+        totalPages - 4,
+        totalPages - 3,
+        totalPages - 2,
+        totalPages - 1,
+        totalPages
+      );
+    } else {
+      pages.push(
+        1,
+        "...",
+        currentPage - 1,
+        currentPage,
+        currentPage + 1,
+        "...",
+        totalPages
+      );
+    }
+  }
+
+  return pages;
+};
   // ── Shared cell classes ──────────────────────────────────────────────────
   const thCls =
     "px-3.5 py-2.5 text-left text-[0.62rem] font-bold text-gray-400 uppercase tracking-[1px] border-b-[1.5px] border-gray-200 bg-gray-50 whitespace-nowrap";
@@ -2719,7 +2788,9 @@ export default function AdminDashboard({
                   <input
                     placeholder="Search guest, room..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e) => {
+  setSearchTerm(e.target.value);
+}}
                     className="border-none bg-transparent text-[0.82rem] text-gray-900 outline-none w-full"
                   />
                 </div>
@@ -2745,7 +2816,7 @@ export default function AdminDashboard({
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredBookings.map((b) => (
+                   {paginatedBookings.map((b) => (
                       <tr
                         key={b.booking_id}
                         className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
@@ -2815,6 +2886,73 @@ export default function AdminDashboard({
                   </tbody>
                 </table>
               </div>
+{totalPages > 1 && (
+  <div className="mt-5 pt-4 border-t border-gray-100">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+      {/* Showing Count */}
+      <p className="text-xs sm:text-sm text-gray-500 text-center sm:text-left">
+        Showing {(bookingPage - 1) * itemsPerPage + 1} -
+        {Math.min(
+          bookingPage * itemsPerPage,
+          filteredBookings.length
+        )}{" "}
+        of {filteredBookings.length}
+      </p>
+
+      {/* Pagination */}
+      <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
+        
+        <button
+          onClick={() =>
+            setBookingPage((p) => Math.max(p - 1, 1))
+          }
+          disabled={bookingPage === 1}
+          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+        >
+          Previous
+        </button>
+
+        {getPageNumbers(bookingPage, totalPages).map(
+          (page, index) =>
+            page === "..." ? (
+              <span
+                key={index}
+                className="px-2 text-gray-400 text-sm"
+              >
+                ...
+              </span>
+            ) : (
+              <button
+                key={page}
+                onClick={() => setBookingPage(page)}
+                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
+                  bookingPage === page
+                    ? "bg-navy text-white"
+                    : "border border-gray-200 text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {page}
+              </button>
+            )
+        )}
+
+        <button
+          onClick={() =>
+            setBookingPage((p) =>
+              Math.min(p + 1, totalPages)
+            )
+          }
+          disabled={bookingPage === totalPages}
+          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+        >
+          Next
+        </button>
+
+      </div>
+    </div>
+  </div>
+)}
             </div>
           )}
 
@@ -3073,7 +3211,7 @@ export default function AdminDashboard({
             <div className="bg-white rounded-2xl p-5 border border-gray-200">
               <div className="font-display text-[1rem] font-semibold text-navy mb-5">
                 Registered Users{" "}
-                <span className="text-[0.78rem] font-normal text-gray-400 ml-2">
+                <span className="text-[0.78rem] font-body text-gray-400 ml-2">
                   ({users.length} total)
                 </span>
               </div>
@@ -3082,6 +3220,7 @@ export default function AdminDashboard({
                   No users found
                 </div>
               ) : (
+                <>
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse min-w-[500px]">
                     <thead>
@@ -3101,7 +3240,7 @@ export default function AdminDashboard({
                       </tr>
                     </thead>
                     <tbody>
-                      {users.map((u) => (
+                      {paginatedUsers.map((u) => (
                         <tr
                           key={u.user_id}
                           className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
@@ -3166,6 +3305,74 @@ export default function AdminDashboard({
                     </tbody>
                   </table>
                 </div>
+{userTotalPages > 1 && (
+  <div className="mt-5 pt-4 border-t border-gray-100">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+      {/* Showing Count */}
+      <p className="text-xs sm:text-sm text-gray-500 text-center sm:text-left">
+        Showing {(userPage - 1) * itemsPerPage + 1} -
+        {Math.min(
+          userPage * itemsPerPage,
+          users.length
+        )}{" "}
+        of {users.length}
+      </p>
+
+      {/* Pagination */}
+      <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
+
+        <button
+          onClick={() =>
+            setUserPage((p) => Math.max(p - 1, 1))
+          }
+          disabled={userPage === 1}
+          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+        >
+          Previous
+        </button>
+
+        {getPageNumbers(userPage, userTotalPages).map(
+          (page, index) =>
+            page === "..." ? (
+              <span
+                key={index}
+                className="px-2 text-gray-400 text-sm"
+              >
+                ...
+              </span>
+            ) : (
+              <button
+                key={page}
+                onClick={() => setUserPage(page)}
+                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
+                  userPage === page
+                    ? "bg-navy text-white"
+                    : "border border-gray-200 text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {page}
+              </button>
+            )
+        )}
+
+        <button
+          onClick={() =>
+            setUserPage((p) =>
+              Math.min(p + 1, userTotalPages)
+            )
+          }
+          disabled={userPage === userTotalPages}
+          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+        >
+          Next
+        </button>
+
+      </div>
+    </div>
+  </div>
+)}
+              </>
               )}
             </div>
           )}
