@@ -671,7 +671,17 @@ setBookedDates(disabled);
         onDownloadInvoice={downloadInvoice}
       />
     );
+const parseLocalDate = (dateStr) => {
+  if (!dateStr) return null;
 
+  const [year, month, day] = dateStr.split("-");
+
+  return new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day)
+  );
+};
   return (
     /* Backdrop */
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
@@ -705,18 +715,18 @@ setBookedDates(disabled);
     </label>
 
   <DatePicker
-  selected={
-    form.check_in_date
-      ? new Date(form.check_in_date)
-      : null
-  }
+    selected={parseLocalDate(form.check_in_date)}
   onChange={(date) =>
-    setForm({
-      ...form,
-      check_in_date: date.toISOString().split("T")[0],
-      check_out_date: "",
-    })
-  }
+  setForm({
+    ...form,
+    check_in_date: `${date.getFullYear()}-${String(
+      date.getMonth() + 1
+    ).padStart(2, "0")}-${String(
+      date.getDate()
+    ).padStart(2, "0")}`,
+    check_out_date: "",
+  })
+}
   minDate={new Date()}
   excludeDates={bookedDates}
   dateFormat="dd/MM/yyyy"
@@ -735,15 +745,15 @@ setBookedDates(disabled);
     </label>
 
     <DatePicker
-  selected={
-    form.check_out_date
-      ? new Date(form.check_out_date)
-      : null
-  }
+selected={parseLocalDate(form.check_out_date)}
   onChange={(date) =>
     setForm({
       ...form,
-      check_out_date: date.toISOString().split("T")[0],
+      check_out_date: `${date.getFullYear()}-${String(
+  date.getMonth() + 1
+).padStart(2, "0")}-${String(
+  date.getDate()
+).padStart(2, "0")}`
     })
   }
   minDate={
@@ -802,8 +812,8 @@ setBookedDates(disabled);
                   </div>
                 ))}
                 <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
-                  <span className="font-display font-semibold text-navy">Total</span>
-                  <strong className="font-display text-navy">
+                  <span className="font-body font-semibold text-navy">Total</span>
+                  <strong className="font-body   text-navy">
                     Rs.{Math.round(total).toLocaleString()}
                   </strong>
                 </div>
