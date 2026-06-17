@@ -12,6 +12,8 @@ import RoomDetail from "./Roomdetail";
 import AdminDashboard from "./AdminDashboard";
 import ManagerDashboard from "./ManagerDashboard";
 import { XIcon, CheckIcon, BookingIcon, DownloadIcon } from "./Icons";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
@@ -169,9 +171,9 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
   const nights =
     booking.check_in_date && booking.check_out_date
       ? Math.ceil(
-          (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
-            86400000,
-        )
+        (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
+        86400000,
+      )
       : 1;
 
   const basePrice = Number(booking.total_price || 0);
@@ -321,16 +323,16 @@ function BookingModal({ room, user, onClose, showToast }) {
   });
   const [loading, setLoading] = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState(null);
-
+  const [bookedDates, setBookedDates] = useState([]);
   const nights =
     form.check_in_date && form.check_out_date
       ? Math.max(
-          0,
-          Math.ceil(
-            (new Date(form.check_out_date) - new Date(form.check_in_date)) /
-              86400000
-          )
+        0,
+        Math.ceil(
+          (new Date(form.check_out_date) - new Date(form.check_in_date)) /
+          86400000
         )
+      )
       : 0;
 
   const basePrice = room.price_per_night * nights;
@@ -414,6 +416,46 @@ function BookingModal({ room, user, onClose, showToast }) {
       setLoading(false);
     }
   }
+  //Greyout the dates that are already booked for the selected room. This is done by fetching the booked dates from the backend and storing them in the `bookedDates` state. The `useEffect` hook is used to load the booked dates whenever the `room.room_id` changes.
+  useEffect(() => {
+    async function loadBookedDates() {
+      try {
+        const res = await apiFetch(
+          `/api/rooms/${room.room_id}/booked-dates`
+        );
+        const data = await res.json();
+   const disabled = [];
+
+data.forEach((booking) => {
+  const start = new Date(booking.check_in_date);
+  const end = new Date(booking.check_out_date);
+
+  let current = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate()
+  );
+
+  const last = new Date(
+    end.getFullYear(),
+    end.getMonth(),
+    end.getDate()
+  );
+
+  while (current <= last) {
+    disabled.push(new Date(current));
+    current.setDate(current.getDate() + 1);
+  }
+});
+
+setBookedDates(disabled);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    loadBookedDates();
+  }, [room.room_id]);
 
   // downloadInvoice stays unchanged — no CSS involved
   async function downloadInvoice() {
@@ -422,8 +464,8 @@ function BookingModal({ room, user, onClose, showToast }) {
     const nights =
       b.check_in_date && b.check_out_date
         ? Math.ceil(
-            (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
-          )
+          (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
+        )
         : 1;
     const basePrice = Number(b.total_price);
     const gst = Math.round(basePrice * 0.18 * 100) / 100;
@@ -635,8 +677,7 @@ function BookingModal({ room, user, onClose, showToast }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
 
       {/* Modal card */}
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
-
+      <div className="relative w-[92vw] max-w-md bg-white rounded-2xl shadow-2xl overflow-visible">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="font-display text-base font-semibold text-navy">
@@ -656,30 +697,78 @@ function BookingModal({ room, user, onClose, showToast }) {
           <form onSubmit={handleSubmit} className="space-y-4">
 
             {/* Date row */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-500">Check-in Date</label>
-                <input
-                  type="date"
-                  required
-                  min={new Date().toISOString().split("T")[0]}
-                  value={form.check_in_date}
-                  onChange={(e) => setForm({ ...form, check_in_date: e.target.value })}
-                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-navy/20 focus:border-navy transition"
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-500">Check-out Date</label>
-                <input
-                  type="date"
-                  required
-                  min={form.check_in_date || new Date().toISOString().split("T")[0]}
-                  value={form.check_out_date}
-                  onChange={(e) => setForm({ ...form, check_out_date: e.target.value })}
-                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-navy/20 focus:border-navy transition"
-                />
-              </div>
-            </div>
+   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  {/* Check In */}
+  <div className="flex flex-col gap-1">
+    <label className="text-xs font-medium text-gray-500">
+      Check-in Date
+    </label>
+
+  <DatePicker
+  selected={
+    form.check_in_date
+      ? new Date(form.check_in_date)
+      : null
+  }
+  onChange={(date) =>
+    setForm({
+      ...form,
+      check_in_date: date.toISOString().split("T")[0],
+      check_out_date: "",
+    })
+  }
+  minDate={new Date()}
+  excludeDates={bookedDates}
+  dateFormat="dd/MM/yyyy"
+  placeholderText="DD/MM/YYYY"
+  popperPlacement="bottom"
+  popperClassName="vv-calendar-popper"
+  calendarClassName="vv-calendar"
+  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
+/>
+  </div>
+
+  {/* Check Out */}
+  <div className="flex flex-col gap-1">
+    <label className="text-xs font-medium text-gray-500">
+      Check-out Date
+    </label>
+
+    <DatePicker
+  selected={
+    form.check_out_date
+      ? new Date(form.check_out_date)
+      : null
+  }
+  onChange={(date) =>
+    setForm({
+      ...form,
+      check_out_date: date.toISOString().split("T")[0],
+    })
+  }
+  minDate={
+    form.check_in_date
+      ? new Date(form.check_in_date)
+      : new Date()
+  }
+  excludeDates={bookedDates}
+  filterDate={(date) => {
+    return !bookedDates.some(
+      (booked) =>
+        booked.getFullYear() === date.getFullYear() &&
+        booked.getMonth() === date.getMonth() &&
+        booked.getDate() === date.getDate()
+    );
+  }}
+  dateFormat="dd/MM/yyyy"
+  placeholderText="DD/MM/YYYY"
+  popperPlacement="bottom"
+  popperClassName="vv-calendar-popper"
+  calendarClassName="vv-calendar"
+  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
+/>
+  </div>
+</div>
 
             {/* Guests */}
             <div className="flex flex-col gap-1">
@@ -1318,8 +1407,8 @@ export default function App() {
   const [showManager, setShowManager] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [toast, setToast] = useState(null);
-const [availableRoomIds, setAvailableRoomIds] = useState(null);
-// null = no filter active, [] = none available, [1,2,3] = filter active
+  const [availableRoomIds, setAvailableRoomIds] = useState(null);
+  // null = no filter active, [] = none available, [1,2,3] = filter active
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
   }, []);
@@ -1338,7 +1427,7 @@ const [availableRoomIds, setAvailableRoomIds] = useState(null);
           }
         }
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setAuthLoading(false));
   }, []);
 
@@ -1355,7 +1444,7 @@ const [availableRoomIds, setAvailableRoomIds] = useState(null);
   }
 
   async function handleLogout() {
-    await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => { });
     setUser(null);
     setShowBookings(false);
     setShowAdmin(false);
@@ -1364,36 +1453,145 @@ const [availableRoomIds, setAvailableRoomIds] = useState(null);
   }
 
   if (authLoading) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0F1923]">
-      <div className="text-center">
-        <div className="font-['Playfair_Display'] text-[1.2rem] text-[#C9A84C] tracking-[2px] mb-3">
-          VV GRAND PARK
-        </div>
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0F1923]">
+        <div className="text-center">
+          <div className="font-['Playfair_Display'] text-[1.2rem] text-[#C9A84C] tracking-[2px] mb-3">
+            VV GRAND PARK
+          </div>
 
-        <div className="text-[0.8rem] text-white/40">
-          Loading...
+          <div className="text-[0.8rem] text-white/40">
+            Loading...
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-if (selectedRoom) {
+  if (selectedRoom) {
+    return (
+      <>
+        <RoomDetail
+          room={selectedRoom}
+          user={user}
+          onBack={() => setSelectedRoom(null)}
+          onBook={(room) => {
+            setSelectedRoom(null);
+            setBookingRoom(room);
+          }}
+          onAuthPrompt={() => {
+            setSelectedRoom(null);
+            setShowAuth(true);
+          }} />
+
+        {bookingRoom && user && (
+          <BookingModal
+            room={bookingRoom}
+            user={user}
+            onClose={() => setBookingRoom(null)}
+            showToast={showToast}
+          />
+        )}
+
+        {showAuth && (
+          <AuthModal
+            onClose={() => setShowAuth(false)}
+            onLogin={handleLogin}
+          />
+        )}
+
+        {toast && (
+          <Toast
+            msg={toast.msg}
+            type={toast.type}
+            onHide={() => setToast(null)}
+          />
+        )}
+      </>
+    );
+  }
+
+  if (showManager && user?.role === "manager") {
+    return (
+      <>
+        <ManagerDashboard
+          managerUser={user}
+          onLogout={handleLogout}
+        />
+
+        {toast && (
+          <Toast
+            msg={toast.msg}
+            type={toast.type}
+            onHide={() => setToast(null)}
+          />
+        )}
+      </>
+    );
+  }
+
+  if (showAdmin && user?.role === "admin") {
+    return (
+      <>
+        <AdminDashboard
+          adminUser={user}
+          onClose={() => setShowAdmin(false)}
+          showToast={showToast}
+          fullPage={true}
+        />
+
+        {toast && (
+          <Toast
+            msg={toast.msg}
+            type={toast.type}
+            onHide={() => setToast(null)}
+          />
+        )}
+      </>
+    );
+  }
+
   return (
-    <>
-       <RoomDetail
-      room={selectedRoom}
-      user={user}
-      onBack={() => setSelectedRoom(null)}
-      onBook={(room) => {
-  setSelectedRoom(null);
-  setBookingRoom(room);
-}}
-      onAuthPrompt={() => {
-        setSelectedRoom(null);
-        setShowAuth(true);
-      }}/>
+    <div style={{ overflowX: "hidden", width: "100%" }}>
+      <Hero
+        user={user}
+        onAuthClick={() => setShowAuth(true)}
+        onLogout={handleLogout}
+        onMyBookings={() =>
+          user?.role === "admin"
+            ? setShowAdmin(true)
+            : user?.role === "manager"
+              ? setShowManager(true)
+              : setShowBookings(true)
+        }
+      />
+
+      <Rooms
+        user={user}
+        availableRoomIds={availableRoomIds} // ← add this
+        onBookClick={(room) => setBookingRoom(room)}
+        onCardClick={(room) => setSelectedRoom(room)}
+        onAuthPrompt={() => setShowAuth(true)}
+      />
+
+      <CalendarSection
+        onViewRooms={(ids) => {
+          setAvailableRoomIds(ids);
+          setTimeout(() => {
+            document
+              .getElementById("rooms-section")
+              ?.scrollIntoView({ behavior: "smooth" });
+          }, 300);
+        }}
+      />
+      <Facilities />
+      <Gallery />
+      <Testimonials />
+      <Footer />
+
+      {showAuth && (
+        <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
+      )}
 
       {bookingRoom && user && (
         <BookingModal
@@ -1404,149 +1602,40 @@ if (selectedRoom) {
         />
       )}
 
-      {showAuth && (
-        <AuthModal
-          onClose={() => setShowAuth(false)}
-          onLogin={handleLogin}
-        />
-      )}
+      {showBookings &&
+        user &&
+        user.role !== "admin" &&
+        user.role !== "manager" && (
+          <MyBookingsModal
+            user={user}
+            onClose={() => setShowBookings(false)}
+            showToast={showToast}
+            onNavigateToRooms={(roomId) => {
+              setShowBookings(false);
+              if (roomId) {
+                apiFetch(`/api/rooms/${roomId}`)
+                  .then((r) => r.json())
+                  .then((room) => {
+                    if (room?.room_id) setSelectedRoom(room);
+                  })
+                  .catch(() => { });
+              } else {
+                document
+                  .getElementById("rooms-section")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }
+            }}
+          />
+        )}
 
       {toast && (
-        <Toast
-          msg={toast.msg}
-          type={toast.type}
-          onHide={() => setToast(null)}
-        />
-      )}
-    </>
-  );
-}
-
-if (showManager && user?.role === "manager") {
-  return (
-    <>
-      <ManagerDashboard
-        managerUser={user}
-        onLogout={handleLogout}
-      />
-
-      {toast && (
-        <Toast
-          msg={toast.msg}
-          type={toast.type}
-          onHide={() => setToast(null)}
-        />
-      )}
-    </>
-  );
-}
-
-if (showAdmin && user?.role === "admin") {
-  return (
-    <>
-      <AdminDashboard
-        adminUser={user}
-        onClose={() => setShowAdmin(false)}
-        showToast={showToast}
-        fullPage={true}
-      />
-
-      {toast && (
-        <Toast
-          msg={toast.msg}
-          type={toast.type}
-          onHide={() => setToast(null)}
-        />
-      )}
-    </>
-  );
-}
-
-return (
-  <div style={{ overflowX: "hidden", width: "100%" }}>
-    <Hero
-      user={user}
-      onAuthClick={() => setShowAuth(true)}
-      onLogout={handleLogout}
-      onMyBookings={() =>
-        user?.role === "admin"
-          ? setShowAdmin(true)
-          : user?.role === "manager"
-            ? setShowManager(true)
-            : setShowBookings(true)
-      }
-    />
-
-    <Rooms
-      user={user}
-      availableRoomIds={availableRoomIds} // ← add this
-      onBookClick={(room) => setBookingRoom(room)}
-      onCardClick={(room) => setSelectedRoom(room)}
-      onAuthPrompt={() => setShowAuth(true)}
-    />
-
-    <CalendarSection
-      onViewRooms={(ids) => {
-        setAvailableRoomIds(ids);
-        setTimeout(() => {
-          document
-            .getElementById("rooms-section")
-            ?.scrollIntoView({ behavior: "smooth" });
-        }, 300);
-      }}
-    />
-    <Facilities />
-    <Gallery />
-    <Testimonials />
-    <Footer />
-
-    {showAuth && (
-      <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
-    )}
-
-    {bookingRoom && user && (
-      <BookingModal
-        room={bookingRoom}
-        user={user}
-        onClose={() => setBookingRoom(null)}
-        showToast={showToast}
-      />
-    )}
-
-    {showBookings &&
-      user &&
-      user.role !== "admin" &&
-      user.role !== "manager" && (
-        <MyBookingsModal
-          user={user}
-          onClose={() => setShowBookings(false)}
-          showToast={showToast}
-          onNavigateToRooms={(roomId) => {
-            setShowBookings(false);
-            if (roomId) {
-              apiFetch(`/api/rooms/${roomId}`)
-                .then((r) => r.json())
-                .then((room) => {
-                  if (room?.room_id) setSelectedRoom(room);
-                })
-                .catch(() => {});
-            } else {
-              document
-                .getElementById("rooms-section")
-                ?.scrollIntoView({ behavior: "smooth" });
-            }
-          }}
-        />
+        <Toast msg={toast.msg} type={toast.type} onHide={() => setToast(null)} />
       )}
 
-    {toast && (
-      <Toast msg={toast.msg} type={toast.type} onHide={() => setToast(null)} />
-    )}
-
-    {user && user.role !== "admin" && user.role !== "manager" && (
-      <button
-        onClick={() => setShowBookings(true)}
-        className="
+      {user && user.role !== "admin" && user.role !== "manager" && (
+        <button
+          onClick={() => setShowBookings(true)}
+          className="
             fixed
             bottom-7
             left-7
@@ -1566,11 +1655,11 @@ return (
             duration-200
             hover:bg-[var(--gold)]
           "
-      >
-        <BookingIcon size={15} color="var(--gold-light)" />
-        My Bookings
-      </button>
-    )}
-  </div>
-);
+        >
+          <BookingIcon size={15} color="var(--gold-light)" />
+          My Bookings
+        </button>
+      )}
+    </div>
+  );
 }

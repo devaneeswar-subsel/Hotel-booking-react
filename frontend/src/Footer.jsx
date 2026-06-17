@@ -35,16 +35,16 @@ export default function Footer() {
             Experience true luxury, curated for the discerning traveller.
           </p>
 
-          <div className="flex gap-3">
-            {["FB", "IG", "TW"].map((s) => (
-              <div
-                key={s}
-                className="flex h-[34px] w-[34px] cursor-pointer items-center justify-center rounded-full border border-white/15 text-[0.65rem] font-bold tracking-[0.5px] text-white/40 transition-all duration-200 hover:border-[#C9A84C] hover:text-[#C9A84C]"
-              >
-                {s}
-              </div>
-            ))}
-          </div>
+            {/* <div className="flex gap-3">
+              {["FB", "IG", "TW"].map((s) => (
+                <div
+                  key={s}
+                  className="flex h-[34px] w-[34px] cursor-pointer items-center justify-center rounded-full border border-white/15 text-[0.65rem] font-bold tracking-[0.5px] text-white/40 transition-all duration-200 hover:border-[#C9A84C] hover:text-[#C9A84C]"
+                >
+                  {s}
+                </div>
+              ))}
+            </div> */}
         </div>
 
         {/* Navigate */}

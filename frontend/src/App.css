@@ -1588,3 +1588,124 @@ tbody tr:hover td {
     padding: 0 1rem;
   }
 }
+
+
+/*booking calender */
+/* Wrapper */
+.react-datepicker-wrapper,
+.react-datepicker__input-container {
+  width: 100%;
+}
+
+.react-datepicker__input-container input {
+  width: 100%;
+}
+
+/* Calendar Popup */
+.vv-calendar-popper {
+  z-index: 9999 !important;
+}
+
+/* Main Calendar */
+.vv-calendar {
+  border: none !important;
+  border-radius: 18px !important;
+  overflow: hidden;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+  font-family: inherit;
+}
+
+/* Header */
+.react-datepicker__header {
+  background: linear-gradient(
+    135deg,
+    #0f1923 0%,
+    #1d3557 100%
+  ) !important;
+  border-bottom: none !important;
+  padding: 14px !important;
+}
+
+/* Month Title */
+.react-datepicker__current-month {
+  color: white !important;
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px;
+}
+
+/* Week Days */
+.react-datepicker__day-name {
+  color: #d4af37 !important;
+  font-weight: 600;
+}
+
+/* Day Cell */
+.react-datepicker__day {
+  width: 2.3rem !important;
+  line-height: 2.3rem !important;
+  margin: 0.15rem !important;
+  border-radius: 50% !important;
+  transition: all 0.2s ease;
+}
+
+/* Hover */
+.react-datepicker__day:hover {
+  background: #d4af37 !important;
+  color: white !important;
+}
+
+/* Selected */
+.react-datepicker__day--selected {
+  background: #0f1923 !important;
+  color: white !important;
+}
+
+/* Today */
+.react-datepicker__day--today {
+  border: 2px solid #d4af37 !important;
+  background: transparent !important;
+  font-weight: 600;
+}
+
+/* Disabled Booked Dates */
+.react-datepicker__day--excluded {
+  background: #ececec !important;
+  color: #9ca3af !important;
+  text-decoration: line-through;
+  cursor: not-allowed !important;
+}
+
+/* Navigation Arrows */
+.react-datepicker__navigation-icon::before {
+  margin-top: 8px !important;
+  border-color: white !important;
+}
+
+/* Mobile Responsive */
+@media (max-width: 640px) {
+  .react-datepicker-popper {
+    width: 100% !important;
+    max-width: 320px !important;
+  }
+
+  .react-datepicker {
+    width: 100% !important;
+    max-width: 320px !important;
+    border-radius: 18px !important;
+  }
+
+  .react-datepicker__month-container {
+    width: 100%;
+  }
+
+  .react-datepicker__day {
+    width: 2rem !important;
+    line-height: 2rem !important;
+    margin: 0.1rem !important;
+  }
+
+  .react-datepicker__current-month {
+    font-size: 0.95rem !important;
+  }
+}
