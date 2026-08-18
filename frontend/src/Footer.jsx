@@ -55,16 +55,16 @@ export default function Footer() {
 
           <ul>
             {[
-              "Rooms & Suites",
-              "Dining",
-              "Spa & Wellness",
-              "Events",
-              "Gallery",
+              { label: "Rooms & Suites", link: "/rooms" },
+              { label: "Facilities", link: "/facilities" },
+              { label: "Gallery", link: "/gallery" },
+              { label: "About", link: "/about" },
+              { label: "Book Now", link: "/booking" },
             ].map((item) => (
-              <li key={item} className="mb-[11px]">
-                <span className="flex cursor-pointer items-center gap-2 text-[0.82rem] text-white/45 transition-colors duration-200 hover:text-[#E8D5A3]">
-                  {item}
-                </span>
+              <li key={item.label} className="mb-[11px]">
+                <a href={item.link} className="flex cursor-pointer items-center gap-2 text-[0.82rem] text-white/45 transition-colors duration-200 hover:text-[#E8D5A3]">
+                  {item.label}
+                </a>
               </li>
             ))}
           </ul>
@@ -78,15 +78,14 @@ export default function Footer() {
 
           <ul>
             {[
-              "Privacy Policy",
-              "Terms of Service",
-              "Cancellation Policy",
-              "FAQ",
+              { label: "Privacy Policy", link: "/privacy-policy" },
+              { label: "Terms & Conditions", link: "/terms-and-conditions" },
+              { label: "Cancellation Policy", link: "/cancellation-policy" },
             ].map((item) => (
-              <li key={item} className="mb-[11px]">
-                <span className="flex cursor-pointer items-center gap-2 text-[0.82rem] text-white/45 transition-colors duration-200 hover:text-[#E8D5A3]">
-                  {item}
-                </span>
+              <li key={item.label} className="mb-[11px]">
+                <a href={item.link} className="flex cursor-pointer items-center gap-2 text-[0.82rem] text-white/45 transition-colors duration-200 hover:text-[#E8D5A3]">
+                  {item.label}
+                </a>
               </li>
             ))}
           </ul>
@@ -102,27 +101,27 @@ export default function Footer() {
             <li className="mb-[11px]">
               <span className="flex items-center gap-2 text-[0.82rem] text-white/45">
                 <MapPinIcon size={13} color="rgba(255,255,255,0.4)" />
-                123 Palace Road, Chennai
+                <span>3/4/D, Thanjai Saalai<br/>near Navajeevan Hospital<br/>Thiruvarur - 610004</span>
               </span>
             </li>
 
             <li className="mb-[11px]">
               <a
-                href="tel:+911234567890"
+                href="tel:+919384982510"
                 className="flex items-center gap-2 text-[0.82rem] text-white/45 transition-colors duration-200 hover:text-[#E8D5A3]"
               >
                 <PhoneIcon size={13} color="rgba(255,255,255,0.4)" />
-                +91 12345 67890
+                +91 93849 82510
               </a>
             </li>
 
             <li className="mb-[11px]">
               <a
-                href="mailto:hello@vvgrandpark.com"
+                href="mailto:vvgrandpark@gmail.com"
                 className="flex items-center gap-2 text-[0.82rem] text-white/45 transition-colors duration-200 hover:text-[#E8D5A3]"
               >
                 <MailIcon size={13} color="rgba(255,255,255,0.4)" />
-                hello@vvgrandpark.com
+                vvgrandpark@gmail.com
               </a>
             </li>
           </ul>

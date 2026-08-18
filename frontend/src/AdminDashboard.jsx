@@ -500,7 +500,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const [addonAmount, setAddonAmount] = useState("");
   const [addonLoading, setAddonLoading] = useState(false);
   const [paymentMode, setPaymentMode] = useState("Online");
-  const [addonPaid, setAddonPaid] = useState(false);
 
   const PRESET_ADDONS = [
     "Food & Beverages",

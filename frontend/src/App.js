@@ -317,7 +317,6 @@ function BookingModal({ room, user, onClose, showToast }) {
   });
   const [loading, setLoading] = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState(null);
-  const [bookedDates, setBookedDates] = useState([]);
   const nights =
     form.check_in_date && form.check_out_date
       ? Math.max(

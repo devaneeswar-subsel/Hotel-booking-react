@@ -833,7 +833,22 @@ app.post("/api/payment/verify", async (req, res) => {
             <div style="padding:32px;background:#fff">
               <div style="text-align:center;margin-bottom:24px">
                 <div style="width:64px;height:64px;background:#E8F8F0;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;line-height:1">
-                  <span style="color:#2D9A6E;font-size:1.6rem;font-weight:900;line-height:1;">&#10003;</span>
+                 <div style="width:64px;height:64px;background:#E8F8F0;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;">
+  <svg
+    width="32"
+    height="32"
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M5 12.5L9.5 17L19 7.5"
+      stroke="#2D9A6E"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </svg>
 </div>
                 <h2 style="color:#0F1923;margin:12px 0 4px">Booking Confirmed!</h2>
                 <p style="color:#868E96;font-size:0.9rem">Thank you, ${booking.guest_name}. Your reservation is confirmed.</p>
