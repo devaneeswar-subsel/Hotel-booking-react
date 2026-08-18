@@ -21,6 +21,13 @@ const stats = [
   { num: "18K+", label: "Happy Guests" },
 ];
 
+const navLinks = [
+  { label: "Home", id: "home", href: "/#home" },
+  { label: "Rooms", id: "rooms", href: "/#rooms" },
+  { label: "Facilities", id: "facilities", href: "/#facilities" },
+  { label: "Gallery", id: "gallery", href: "/#gallery" },
+];
+
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 24 },
   whileInView: { opacity: 1, y: 0 },
@@ -54,6 +61,14 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
   const scrollTo = (id) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
     setMenuOpen(false);
+  };
+
+  const handleSectionLink = (event, id) => {
+    if (window.location.pathname !== "/") return;
+
+    event.preventDefault();
+    scrollTo(id);
+    window.history.pushState(null, "", `/#${id}`);
   };
 
   return (
@@ -140,20 +155,18 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
             minWidth: 0,
           }}
         >
-          {["Home", "Rooms", "Facilities", "Gallery"].map((link) => (
-            <span
-              key={link}
-              onClick={() =>
-                link === "Home"
-                  ? window.scrollTo({ top: 0, behavior: "smooth" })
-                  : scrollTo(link.toLowerCase())
-              }
+          {navLinks.map((link) => (
+            <a
+              key={link.label}
+              href={link.href}
+              onClick={(event) => handleSectionLink(event, link.id)}
               style={{
                 cursor: "pointer",
                 fontSize: "0.82rem",
                 fontWeight: 500,
                 color: "rgba(255,255,255,0.75)",
                 padding: "4px 0",
+                textDecoration: "none",
                 transition: "color 0.3s",
                 whiteSpace: "nowrap",
               }}
@@ -162,8 +175,8 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
                 (e.target.style.color = "rgba(255,255,255,0.75)")
               }
             >
-              {link}
-            </span>
+              {link.label}
+            </a>
           ))}
         </div>
 
@@ -319,26 +332,23 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
         >
           VV GRAND PARK RESIDENCY
         </span>
-        {["Home", "Rooms", "Facilities", "Gallery"].map((link) => (
-          <span
-            key={link}
-            onClick={() =>
-              link === "Home"
-                ? (window.scrollTo({ top: 0, behavior: "smooth" }),
-                  setMenuOpen(false))
-                : scrollTo(link.toLowerCase())
-            }
+        {navLinks.map((link) => (
+          <a
+            key={link.label}
+            href={link.href}
+            onClick={(event) => handleSectionLink(event, link.id)}
             style={{
               display: "block",
               padding: "12px 0",
               fontSize: "0.9rem",
               color: "rgba(255,255,255,0.8)",
               cursor: "pointer",
+              textDecoration: "none",
               borderBottom: "1px solid rgba(255,255,255,0.05)",
             }}
           >
-            {link}
-          </span>
+            {link.label}
+          </a>
         ))}
         {user ? (
           <>
@@ -395,6 +405,7 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
 
       {/* ── HERO ── */}
       <div
+        id="home"
         style={{
           position: "relative",
           minHeight: "100vh",

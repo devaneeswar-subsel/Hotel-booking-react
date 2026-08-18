@@ -55,11 +55,11 @@ export default function Footer() {
 
           <ul>
             {[
-              { label: "Rooms & Suites", link: "/rooms" },
-              { label: "Facilities", link: "/facilities" },
-              { label: "Gallery", link: "/gallery" },
-              { label: "About", link: "/about" },
-              { label: "Book Now", link: "/booking" },
+              { label: "Home", link: "/#home" },
+              { label: "Rooms & Suites", link: "/#rooms" },
+              { label: "Facilities", link: "/#facilities" },
+              { label: "Gallery", link: "/#gallery" },
+              { label: "Book Now", link: "/#calendar" },
             ].map((item) => (
               <li key={item.label} className="mb-[11px]">
                 <a href={item.link} className="flex cursor-pointer items-center gap-2 text-[0.82rem] text-white/45 transition-colors duration-200 hover:text-[#E8D5A3]">
