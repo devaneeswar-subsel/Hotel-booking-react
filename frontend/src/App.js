@@ -153,11 +153,7 @@ function WriteReviewModal({
               />
             </div>
 
-            <button
-              className="submit-btn"
-              type="submit"
-              disabled={loading}
-            >
+            <button className="submit-btn" type="submit" disabled={loading}>
               {loading ? "Submitting..." : "Submit Review"}
             </button>
           </form>
@@ -171,9 +167,9 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
   const nights =
     booking.check_in_date && booking.check_out_date
       ? Math.ceil(
-        (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
-        86400000,
-      )
+          (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
+            86400000,
+        )
       : 1;
 
   const basePrice = Number(booking.total_price || 0);
@@ -245,9 +241,7 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
               >
                 <span className="text-[var(--gray-400)]">{label}</span>
 
-                <span className="font-semibold text-[var(--navy)]">
-                  {val}
-                </span>
+                <span className="font-semibold text-[var(--navy)]">{val}</span>
               </div>
             ))}
 
@@ -327,12 +321,12 @@ function BookingModal({ room, user, onClose, showToast }) {
   const nights =
     form.check_in_date && form.check_out_date
       ? Math.max(
-        0,
-        Math.ceil(
-          (new Date(form.check_out_date) - new Date(form.check_in_date)) /
-          86400000
+          0,
+          Math.ceil(
+            (new Date(form.check_out_date) - new Date(form.check_in_date)) /
+              86400000,
+          ),
         )
-      )
       : 0;
 
   const basePrice = room.price_per_night * nights;
@@ -358,7 +352,13 @@ function BookingModal({ room, user, onClose, showToast }) {
       const orderData = await orderRes.json();
       if (!orderRes.ok) throw new Error(orderData.error);
 
-      const { booking_id, total_price, razorpay_order_id, razorpay_key, room_name } = orderData;
+      const {
+        booking_id,
+        total_price,
+        razorpay_order_id,
+        razorpay_key,
+        room_name,
+      } = orderData;
 
       const options = {
         key: razorpay_key,
@@ -367,7 +367,11 @@ function BookingModal({ room, user, onClose, showToast }) {
         name: "VV Grand Park Residency",
         description: room_name,
         order_id: razorpay_order_id,
-        prefill: { name: user.name, email: user.email, contact: user.phone || "" },
+        prefill: {
+          name: user.name,
+          email: user.email,
+          contact: user.phone || "",
+        },
         theme: { color: "#0F1923" },
         modal: {
           ondismiss: async () => {
@@ -417,45 +421,42 @@ function BookingModal({ room, user, onClose, showToast }) {
     }
   }
   //Greyout the dates that are already booked for the selected room. This is done by fetching the booked dates from the backend and storing them in the `bookedDates` state. The `useEffect` hook is used to load the booked dates whenever the `room.room_id` changes.
-  useEffect(() => {
-    async function loadBookedDates() {
-      try {
-        const res = await apiFetch(
-          `/api/rooms/${room.room_id}/booked-dates`
-        );
-        const data = await res.json();
-   const disabled = [];
+    const [occupiedNights, setOccupiedNights] = useState(new Set());
 
-data.forEach((booking) => {
-  const start = new Date(booking.check_in_date);
-  const end = new Date(booking.check_out_date);
+    useEffect(() => {
+      async function loadBookedDates() {
+        try {
+          const res = await apiFetch(`/api/rooms/${room.room_id}/booked-dates`);
+          const data = await res.json();
 
-  let current = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate()
-  );
+          const nights = new Set();
+          data.forEach((booking) => {
+            const start = new Date(booking.check_in_date);
+            const end = new Date(booking.check_out_date);
+            let current = new Date(
+              start.getFullYear(),
+              start.getMonth(),
+              start.getDate(),
+            );
+            const last = new Date(
+              end.getFullYear(),
+              end.getMonth(),
+              end.getDate(),
+            );
+            // occupy nights from check-in up to (not including) check-out
+            while (current < last) {
+              nights.add(current.toDateString());
+              current.setDate(current.getDate() + 1);
+            }
+          });
 
-  const last = new Date(
-    end.getFullYear(),
-    end.getMonth(),
-    end.getDate()
-  );
-
-  while (current <= last) {
-    disabled.push(new Date(current));
-    current.setDate(current.getDate() + 1);
-  }
-});
-
-setBookedDates(disabled);
-      } catch (err) {
-        console.error(err);
+          setOccupiedNights(nights);
+        } catch (err) {
+          console.error(err);
+        }
       }
-    }
-
-    loadBookedDates();
-  }, [room.room_id]);
+      loadBookedDates();
+    }, [room.room_id]);
 
   // downloadInvoice stays unchanged — no CSS involved
   async function downloadInvoice() {
@@ -464,8 +465,8 @@ setBookedDates(disabled);
     const nights =
       b.check_in_date && b.check_out_date
         ? Math.ceil(
-          (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
-        )
+            (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
+          )
         : 1;
     const basePrice = Number(b.total_price);
     const gst = Math.round(basePrice * 0.18 * 100) / 100;
@@ -671,21 +672,16 @@ setBookedDates(disabled);
         onDownloadInvoice={downloadInvoice}
       />
     );
-const parseLocalDate = (dateStr) => {
-  if (!dateStr) return null;
+  const parseLocalDate = (dateStr) => {
+    if (!dateStr) return null;
 
-  const [year, month, day] = dateStr.split("-");
+    const [year, month, day] = dateStr.split("-");
 
-  return new Date(
-    Number(year),
-    Number(month) - 1,
-    Number(day)
-  );
-};
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  };
   return (
     /* Backdrop */
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
-
       {/* Modal card */}
       <div className="relative w-[92vw] max-w-md bg-white rounded-2xl shadow-2xl overflow-visible">
         {/* Header */}
@@ -705,90 +701,113 @@ const parseLocalDate = (dateStr) => {
         {/* Body */}
         <div className="px-6 py-5">
           <form onSubmit={handleSubmit} className="space-y-4">
-
             {/* Date row */}
-   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-  {/* Check In */}
-  <div className="flex flex-col gap-1">
-    <label className="text-xs font-medium text-gray-500">
-      Check-in Date
-    </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Check In */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">
+                  Check-in Date
+                </label>
 
-  <DatePicker
-    selected={parseLocalDate(form.check_in_date)}
-  onChange={(date) =>
-  setForm({
-    ...form,
-    check_in_date: `${date.getFullYear()}-${String(
-      date.getMonth() + 1
-    ).padStart(2, "0")}-${String(
-      date.getDate()
-    ).padStart(2, "0")}`,
-    check_out_date: "",
-  })
-}
-  minDate={new Date()}
-  excludeDates={bookedDates}
-  dateFormat="dd/MM/yyyy"
-  placeholderText="DD/MM/YYYY"
-  popperPlacement="bottom"
-  popperClassName="vv-calendar-popper"
-  calendarClassName="vv-calendar"
-  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
-/>
-  </div>
+                <DatePicker
+                  selected={parseLocalDate(form.check_in_date)}
+                  onChange={(date) =>
+                    setForm({
+                      ...form,
+                      check_in_date: `${date.getFullYear()}-${String(
+                        date.getMonth() + 1,
+                      ).padStart(2, "0")}-${String(date.getDate()).padStart(
+                        2,
+                        "0",
+                      )}`,
+                      check_out_date: "",
+                    })
+                  }
+                  minDate={new Date()}
+                  filterDate={(date) =>
+                    !occupiedNights.has(date.toDateString())
+                  }
+                  dateFormat="dd/MM/yyyy"
+                  placeholderText="DD/MM/YYYY"
+                  popperPlacement="bottom"
+                  popperClassName="vv-calendar-popper"
+                  calendarClassName="vv-calendar"
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                />
+              </div>
 
-  {/* Check Out */}
-  <div className="flex flex-col gap-1">
-    <label className="text-xs font-medium text-gray-500">
-      Check-out Date
-    </label>
+              {/* Check Out */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">
+                  Check-out Date
+                </label>
 
-    <DatePicker
-selected={parseLocalDate(form.check_out_date)}
-  onChange={(date) =>
-    setForm({
-      ...form,
-      check_out_date: `${date.getFullYear()}-${String(
-  date.getMonth() + 1
-).padStart(2, "0")}-${String(
-  date.getDate()
-).padStart(2, "0")}`
-    })
-  }
-  minDate={
-    form.check_in_date
-      ? new Date(form.check_in_date)
-      : new Date()
-  }
-  excludeDates={bookedDates}
-  filterDate={(date) => {
-    return !bookedDates.some(
-      (booked) =>
-        booked.getFullYear() === date.getFullYear() &&
-        booked.getMonth() === date.getMonth() &&
-        booked.getDate() === date.getDate()
-    );
-  }}
-  dateFormat="dd/MM/yyyy"
-  placeholderText="DD/MM/YYYY"
-  popperPlacement="bottom"
-  popperClassName="vv-calendar-popper"
-  calendarClassName="vv-calendar"
-  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
-/>
-  </div>
-</div>
+                <DatePicker
+                  selected={parseLocalDate(form.check_out_date)}
+                  onChange={(date) =>
+                    setForm({
+                      ...form,
+                      check_out_date: `${date.getFullYear()}-${String(
+                        date.getMonth() + 1,
+                      ).padStart(2, "0")}-${String(date.getDate()).padStart(
+                        2,
+                        "0",
+                      )}`,
+                    })
+                  }
+                  minDate={
+                    form.check_in_date
+                      ? new Date(form.check_in_date)
+                      : new Date()
+                  }
+                  filterDate={(date) => {
+                    if (!form.check_in_date) return true;
+                    const checkIn = parseLocalDate(form.check_in_date);
+                    if (date <= checkIn) return false; // checkout must be after check-in
+                    // every night from check-in to checkout-1 must be free
+                    let night = new Date(checkIn);
+                    while (night < date) {
+                      if (occupiedNights.has(night.toDateString()))
+                        return false;
+                      night.setDate(night.getDate() + 1);
+                    }
+                    return true;
+                  }}
+                  dateFormat="dd/MM/yyyy"
+                  placeholderText="DD/MM/YYYY"
+                  popperPlacement="bottom"
+                  popperClassName="vv-calendar-popper"
+                  calendarClassName="vv-calendar"
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                />
+              </div>
+            </div>
+            {/* Check-in / Check-out times notice */}
+            <div className="flex items-center justify-between rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-xs">
+              <div className="flex items-center gap-1.5 text-gray-600">
+                <span className="font-semibold text-navy">Check-in</span>
+                <span className="text-gray-500">from 12:00 PM</span>
+              </div>
+              <div className="h-4 w-px bg-gray-200" />
+              <div className="flex items-center gap-1.5 text-gray-600">
+                <span className="font-semibold text-navy">Check-out</span>
+                <span className="text-gray-500">by 11:00 AM</span>
+              </div>
+            </div>
 
             {/* Guests */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Number of Guests</label>
+              <label className="text-xs font-medium text-gray-500">
+                Number of Guests
+              </label>
               <input
                 type="number"
                 min="1"
                 max={room.capacity || 4}
                 value={form.guest_count}
-                onChange={(e) => setForm({ ...form, guest_count: +e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, guest_count: +e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-navy/20 focus:border-navy transition"
               />
             </div>
@@ -812,7 +831,9 @@ selected={parseLocalDate(form.check_out_date)}
                   </div>
                 ))}
                 <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
-                  <span className="font-body font-semibold text-navy">Total</span>
+                  <span className="font-body font-semibold text-navy">
+                    Total
+                  </span>
                   <strong className="font-body   text-navy">
                     Rs.{Math.round(total).toLocaleString()}
                   </strong>
@@ -830,22 +851,34 @@ selected={parseLocalDate(form.check_out_date)}
                 "Opening Payment..."
               ) : (
                 <>
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+                  <svg
+                    width="17"
+                    height="17"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
                     <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
                   </svg>
-                  Pay Now — Rs.{nights > 0 ? Math.round(total).toLocaleString() : "0"}
+                  Pay Now — Rs.
+                  {nights > 0 ? Math.round(total).toLocaleString() : "0"}
                 </>
               )}
             </button>
 
             {/* Security note */}
             <p className="flex items-center justify-center gap-1.5 text-[0.7rem] text-gray-400">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
               </svg>
               Secured by Razorpay · UPI, Cards, Net Banking accepted
             </p>
-
           </form>
         </div>
       </div>
@@ -867,6 +900,9 @@ function AuthModal({ onClose, onLogin }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
 
   const eyeBtn = (show, toggle) => (
     <button
@@ -888,7 +924,77 @@ function AuthModal({ onClose, onLogin }) {
       {show ? "🙈" : "👁️"}
     </button>
   );
+  async function sendOtp(e) {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+    setLoading(true);
+    try {
+      const res = await apiFetch("/api/auth/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ email: form.email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSuccess("OTP sent to your email.");
+      setMode("otp");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
+  async function verifyOtp(e) {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+    setLoading(true);
+    try {
+      const res = await apiFetch("/api/auth/verify-otp", {
+        method: "POST",
+        body: JSON.stringify({ email: form.email, otp }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSuccess("OTP verified. Set your new password.");
+      setMode("reset");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function resetPassword(e) {
+    e.preventDefault();
+    setError("");
+    if (newPass.length < 6)
+      return setError("Password must be at least 6 characters");
+    if (newPass !== confirmPass) return setError("Passwords don't match");
+    setLoading(true);
+    try {
+      const res = await apiFetch("/api/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({
+          email: form.email,
+          otp,
+          new_password: newPass,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSuccess("Password reset! Please sign in.");
+      setMode("login");
+      setOtp("");
+      setNewPass("");
+      setConfirmPass("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
   async function handleSubmit(e) {
     e.preventDefault();
 
@@ -939,23 +1045,22 @@ function AuthModal({ onClose, onLogin }) {
           <h2>
             {mode === "login"
               ? "Welcome Back"
-              : "Create Account"}
+              : mode === "register"
+                ? "Create Account"
+                : mode === "forgot"
+                  ? "Forgot Password"
+                  : mode === "otp"
+                    ? "Enter OTP"
+                    : "Reset Password"}
           </h2>
 
-          <button
-            className="modal-close"
-            onClick={onClose}
-          >
+          <button className="modal-close" onClick={onClose}>
             <XIcon size={14} color="#495057" />
           </button>
         </div>
 
         <div className="modal-body">
-          {error && (
-            <p className="error-msg">
-              {error}
-            </p>
-          )}
+          {error && <p className="error-msg">{error}</p>}
 
           {success && (
             <p className="bg-[#E8F8F0] text-[#2D9A6E] px-[14px] py-[10px] rounded-lg text-[0.85rem] mb-[14px] font-medium">
@@ -963,110 +1068,187 @@ function AuthModal({ onClose, onLogin }) {
             </p>
           )}
 
-          <form onSubmit={handleSubmit}>
-            {mode === "register" && (
+          {(mode === "login" || mode === "register") && (
+            <form onSubmit={handleSubmit}>
+              {mode === "register" && (
+                <div className="form-group">
+                  <label>Full Name</label>
+
+                  <input
+                    required
+                    placeholder="John Doe"
+                    value={form.name}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        name: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              )}
+
               <div className="form-group">
-                <label>Full Name</label>
+                <label>Email</label>
 
                 <input
+                  type="email"
                   required
-                  placeholder="John Doe"
-                  value={form.name}
+                  placeholder="you@email.com"
+                  value={form.email}
                   onChange={(e) =>
                     setForm({
                       ...form,
-                      name: e.target.value,
+                      email: e.target.value,
                     })
                   }
                 />
               </div>
-            )}
 
-            <div className="form-group">
-              <label>Email</label>
-
-              <input
-                type="email"
-                required
-                placeholder="you@email.com"
-                value={form.email}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    email: e.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Password</label>
-
-              <div className="relative">
-                <input
-                  type={showPass ? "text" : "password"}
-                  required
-                  placeholder="••••••••"
-                  value={form.password}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      password: e.target.value,
-                    })
-                  }
-                  className="pr-10"
-                />
-
-                {eyeBtn(showPass, () =>
-                  setShowPass(!showPass)
-                )}
-              </div>
-            </div>
-
-            {mode === "register" && (
               <div className="form-group">
-                <label>
-                  Phone Number
-                  <span className="text-[#C0392B] ml-[3px]">
-                    *
-                  </span>
-                </label>
+                <label>Password</label>
 
+                <div className="relative">
+                  <input
+                    type={showPass ? "text" : "password"}
+                    required
+                    placeholder="••••••••"
+                    value={form.password}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        password: e.target.value,
+                      })
+                    }
+                    className="pr-10"
+                  />
+
+                  {eyeBtn(showPass, () => setShowPass(!showPass))}
+                </div>
+              </div>
+
+              {mode === "register" && (
+                <div className="form-group">
+                  <label>
+                    Phone Number
+                    <span className="text-[#C0392B] ml-[3px]">*</span>
+                  </label>
+
+                  <input
+                    required
+                    type="tel"
+                    placeholder="+91 XXXXX XXXXX"
+                    value={form.phone}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        phone: e.target.value,
+                      })
+                    }
+                    pattern="[0-9+\s\-]{7,15}"
+                    title="Please enter a valid phone number"
+                  />
+                </div>
+              )}
+
+              <button className="submit-btn" type="submit" disabled={loading}>
+                {loading
+                  ? "Please wait..."
+                  : mode === "login"
+                    ? "Sign In"
+                    : "Create Account"}
+              </button>
+            </form>
+          )}
+          {mode === "forgot" && (
+            <form onSubmit={sendOtp}>
+              <div className="form-group">
+                <label>Email</label>
                 <input
+                  type="email"
                   required
-                  type="tel"
-                  placeholder="+91 XXXXX XXXXX"
-                  value={form.phone}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      phone: e.target.value,
-                    })
-                  }
-                  pattern="[0-9+\s\-]{7,15}"
-                  title="Please enter a valid phone number"
+                  placeholder="you@email.com"
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
                 />
               </div>
-            )}
+              <button className="submit-btn" type="submit" disabled={loading}>
+                {loading ? "Sending..." : "Send OTP"}
+              </button>
+            </form>
+          )}
 
-            <button
-              className="submit-btn"
-              type="submit"
-              disabled={loading}
-            >
-              {loading
-                ? "Please wait..."
-                : mode === "login"
-                  ? "Sign In"
-                  : "Create Account"}
-            </button>
-          </form>
+          {mode === "otp" && (
+            <form onSubmit={verifyOtp}>
+              <div className="form-group">
+                <label>Enter the 6-digit OTP sent to your email</label>
+                <input
+                  required
+                  placeholder="123456"
+                  maxLength={6}
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                />
+              </div>
+              <button className="submit-btn" type="submit" disabled={loading}>
+                {loading ? "Verifying..." : "Verify OTP"}
+              </button>
+            </form>
+          )}
 
+          {mode === "reset" && (
+            <form onSubmit={resetPassword}>
+              <div className="form-group">
+                <label>New Password</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Min 6 characters"
+                  value={newPass}
+                  onChange={(e) => setNewPass(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label>Confirm Password</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Re-enter password"
+                  value={confirmPass}
+                  onChange={(e) => setConfirmPass(e.target.value)}
+                />
+              </div>
+              <button className="submit-btn" type="submit" disabled={loading}>
+                {loading ? "Resetting..." : "Reset Password"}
+              </button>
+            </form>
+          )}
           {mode === "login" && (
             <div className="text-center mt-2">
-              <span className="text-[0.78rem] text-[var(--gray-400)]">
-                Forgot password? Contact hotel reception
-              </span>
+              <button
+                onClick={() => {
+                  setMode("forgot");
+                  setError("");
+                  setSuccess("");
+                }}
+                className="text-[0.78rem] text-gold font-semibold hover:underline bg-transparent border-none cursor-pointer"
+              >
+                Forgot password?
+              </button>
+            </div>
+          )}
+          {(mode === "forgot" || mode === "otp" || mode === "reset") && (
+            <div className="text-center mt-2">
+              <button
+                onClick={() => {
+                  setMode("login");
+                  setError("");
+                  setSuccess("");
+                }}
+                className="text-[0.78rem] text-gray-400 hover:underline bg-transparent border-none cursor-pointer"
+              >
+                ← Back to login
+              </button>
             </div>
           )}
 
@@ -1156,7 +1338,8 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
 
   const getNights = (checkIn, checkOut) => {
     if (!checkIn || !checkOut) return null;
-    const diff = (new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24);
+    const diff =
+      (new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24);
     return diff > 0 ? diff : null;
   };
 
@@ -1178,7 +1361,6 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
       >
         {/* ── Modal shell ── */}
         <div className="relative w-full max-w-[640px] max-h-[88vh] flex flex-col overflow-hidden rounded-[20px] bg-white shadow-2xl ring-1 ring-white/10">
-
           {/* ── Header ── */}
           <div className="relative flex-shrink-0 bg-gradient-to-br from-[#0F1923] to-[#1C2B3A] px-5 sm:px-7 pt-5 sm:pt-6 pb-5">
             {/* Decorative glow */}
@@ -1224,26 +1406,30 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                     <div
                       className="h-[80px] w-[80px] sm:h-[88px] sm:w-[88px] flex-shrink-0 rounded-[10px]"
                       style={{
-                        background: "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
+                        background:
+                          "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
                         backgroundSize: "200% 100%",
                         animation: "shimmer 1.4s infinite",
                       }}
                     />
                     <div className="flex flex-1 flex-col gap-2 justify-center">
-                      {[["55%", "0s"], ["75%", "0.1s"], ["40%", "0.2s"]].map(
-                        ([w, delay], idx) => (
-                          <div
-                            key={idx}
-                            className="h-3 rounded"
-                            style={{
-                              width: w,
-                              background: "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
-                              backgroundSize: "200% 100%",
-                              animation: `shimmer 1.4s ${delay} infinite`,
-                            }}
-                          />
-                        )
-                      )}
+                      {[
+                        ["55%", "0s"],
+                        ["75%", "0.1s"],
+                        ["40%", "0.2s"],
+                      ].map(([w, delay], idx) => (
+                        <div
+                          key={idx}
+                          className="h-3 rounded"
+                          style={{
+                            width: w,
+                            background:
+                              "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
+                            backgroundSize: "200% 100%",
+                            animation: `shimmer 1.4s ${delay} infinite`,
+                          }}
+                        />
+                      ))}
                     </div>
                   </div>
                 ))}
@@ -1258,10 +1444,14 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                   No bookings yet
                 </p>
                 <p className="m-0 max-w-[240px] text-[0.82rem] leading-relaxed text-[#8A95A3]">
-                  Ready for your next stay? Browse our rooms and make a reservation.
+                  Ready for your next stay? Browse our rooms and make a
+                  reservation.
                 </p>
                 <button
-                  onClick={() => { onClose(); onNavigateToRooms?.(); }}
+                  onClick={() => {
+                    onClose();
+                    onNavigateToRooms?.();
+                  }}
                   className="mt-2 cursor-pointer rounded-[10px] border-0 bg-[#0F1923] px-[22px] py-2.5 font-inherit text-[0.82rem] font-bold text-[#E8D5A3] transition-opacity hover:opacity-85"
                 >
                   Browse Rooms →
@@ -1275,7 +1465,8 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                   const nights = getNights(b.check_in_date, b.check_out_date);
                   const isReviewed = reviewedBookings.includes(b.booking_id);
                   const canReview =
-                    (b.status === "confirmed" || b.status === "completed") && !isReviewed;
+                    (b.status === "confirmed" || b.status === "completed") &&
+                    !isReviewed;
 
                   return (
                     <div
@@ -1285,7 +1476,10 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                       {/* ── Clickable room section ── */}
                       <div
                         className="flex cursor-pointer"
-                        onClick={() => { onClose(); onNavigateToRooms?.(b.room_id); }}
+                        onClick={() => {
+                          onClose();
+                          onNavigateToRooms?.(b.room_id);
+                        }}
                         title="View this room"
                       >
                         {/* Room image */}
@@ -1316,7 +1510,9 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                             <span
                               className={`inline-flex flex-shrink-0 items-center gap-1 sm:gap-1.5 rounded-full px-2 sm:px-2.5 py-[3px] text-[0.65rem] sm:text-[0.68rem] font-bold tracking-wide ${cfg.pill}`}
                             >
-                              <span className={`inline-block h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
+                              <span
+                                className={`inline-block h-1.5 w-1.5 rounded-full ${cfg.dot}`}
+                              />
                               {cfg.label}
                             </span>
                           </div>
@@ -1326,7 +1522,9 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                             <span className="rounded-[7px] bg-[#F0F3F7] px-2 sm:px-2.5 py-1 text-[0.68rem] sm:text-[0.72rem] font-semibold text-[#3A4A5C]">
                               {formatDate(b.check_in_date)}
                             </span>
-                            <span className="text-[0.75rem] text-[#B0B8C4]">→</span>
+                            <span className="text-[0.75rem] text-[#B0B8C4]">
+                              →
+                            </span>
                             <span className="rounded-[7px] bg-[#F0F3F7] px-2 sm:px-2.5 py-1 text-[0.68rem] sm:text-[0.72rem] font-semibold text-[#3A4A5C]">
                               {formatDate(b.check_out_date)}
                             </span>
@@ -1341,19 +1539,28 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                           <div className="mt-2 sm:mt-2.5 flex items-center justify-between">
                             <div>
                               <span className="text-[0.98rem] sm:text-[1.05rem] font-extrabold tracking-tight text-[#0F1923]">
-                                ₹{Number(b.final_total || b.total_price).toLocaleString("en-IN")}
+                                ₹
+                                {Number(
+                                  b.final_total || b.total_price,
+                                ).toLocaleString("en-IN")}
                               </span>
                               {nights && (
-                                <span className="ml-1 text-[0.68rem] sm:text-[0.7rem] text-[#8A95A3]">total</span>
+                                <span className="ml-1 text-[0.68rem] sm:text-[0.7rem] text-[#8A95A3]">
+                                  total
+                                </span>
                               )}
                             </div>
-                            <span className="hidden sm:inline text-[0.7rem] text-[#C4CAD4]">View room ↗</span>
+                            <span className="hidden sm:inline text-[0.7rem] text-[#C4CAD4]">
+                              View room ↗
+                            </span>
                           </div>
                         </div>
                       </div>
 
                       {/* ── Action footer ── */}
-                      {(b.status === "confirmed" || canReview || isReviewed) && (
+                      {(b.status === "confirmed" ||
+                        canReview ||
+                        isReviewed) && (
                         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#F0F3F7] bg-[#FAFBFC] px-3 sm:px-3.5 py-2.5">
                           {b.status === "confirmed" ? (
                             <p className="m-0 flex items-center gap-1.5 text-[0.68rem] sm:text-[0.71rem] text-[#6B7785]">
@@ -1372,7 +1579,10 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
 
                           {canReview ? (
                             <button
-                              onClick={(e) => { e.stopPropagation(); setReviewBooking(b); }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setReviewBooking(b);
+                              }}
                               className="flex flex-shrink-0 cursor-pointer items-center gap-[5px] rounded-lg border-0 bg-[#0F1923] px-3 sm:px-4 py-[6px] sm:py-[7px] font-inherit text-[0.72rem] sm:text-[0.74rem] font-bold text-[#E8D5A3] transition-opacity hover:opacity-85"
                             >
                               ★ Write a Review
@@ -1406,7 +1616,6 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
   );
 }
 
-
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -1437,7 +1646,7 @@ export default function App() {
           }
         }
       })
-      .catch(() => { })
+      .catch(() => {})
       .finally(() => setAuthLoading(false));
   }, []);
 
@@ -1454,7 +1663,7 @@ export default function App() {
   }
 
   async function handleLogout() {
-    await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => { });
+    await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
     setShowBookings(false);
     setShowAdmin(false);
@@ -1470,9 +1679,7 @@ export default function App() {
             VV GRAND PARK
           </div>
 
-          <div className="text-[0.8rem] text-white/40">
-            Loading...
-          </div>
+          <div className="text-[0.8rem] text-white/40">Loading...</div>
         </div>
       </div>
     );
@@ -1492,7 +1699,8 @@ export default function App() {
           onAuthPrompt={() => {
             setSelectedRoom(null);
             setShowAuth(true);
-          }} />
+          }}
+        />
 
         {bookingRoom && user && (
           <BookingModal
@@ -1504,10 +1712,7 @@ export default function App() {
         )}
 
         {showAuth && (
-          <AuthModal
-            onClose={() => setShowAuth(false)}
-            onLogin={handleLogin}
-          />
+          <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
         )}
 
         {toast && (
@@ -1524,10 +1729,7 @@ export default function App() {
   if (showManager && user?.role === "manager") {
     return (
       <>
-        <ManagerDashboard
-          managerUser={user}
-          onLogout={handleLogout}
-        />
+        <ManagerDashboard managerUser={user} onLogout={handleLogout} />
 
         {toast && (
           <Toast
@@ -1628,7 +1830,7 @@ export default function App() {
                   .then((room) => {
                     if (room?.room_id) setSelectedRoom(room);
                   })
-                  .catch(() => { });
+                  .catch(() => {});
               } else {
                 document
                   .getElementById("rooms-section")
@@ -1639,7 +1841,11 @@ export default function App() {
         )}
 
       {toast && (
-        <Toast msg={toast.msg} type={toast.type} onHide={() => setToast(null)} />
+        <Toast
+          msg={toast.msg}
+          type={toast.type}
+          onHide={() => setToast(null)}
+        />
       )}
 
       {user && user.role !== "admin" && user.role !== "manager" && (

@@ -568,6 +568,17 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     onRefresh();
   }
 
+  async function markAddonsPaid() {
+    const res = await apiFetch(`/api/bookings/${bookingId}/addons/mark-paid`, {
+      method: "PATCH",
+    });
+    const data = await res.json();
+    if (!res.ok) return showToast(data.error, "error");
+    showToast("Add-ons marked as paid", "success");
+    fetchBooking();
+    onRefresh();
+  }
+
   async function removeAddon(addonId) {
     await apiFetch(`/api/bookings/${bookingId}/addons/${addonId}`, {
       method: "DELETE",
@@ -581,7 +592,10 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     if (!booking) return;
     const b = booking;
     const selectedPaymentMode = paymentMode;
-    const isAddonPaid = addonPaid;
+        const addonsForPdf = b.addons || [];
+        const isAddonPaid =
+          addonsForPdf.length > 0 && addonsForPdf.every((a) => a.paid === 1);
+        const isCancelled = b.status === "cancelled";
     const ci = b.actual_checkin
       ? new Date(b.actual_checkin).toLocaleString("en-IN")
       : b.check_in_date?.slice(0, 10);
@@ -613,6 +627,16 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     const W = 210;
     const L = 18;
     const R = W - 18;
+
+    if (isCancelled) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(50);
+      doc.setTextColor(230, 180, 180);
+      doc.text("CANCELLED", W / 2, 160, {
+        align: "center",
+        angle: 30,
+      });
+    }
 
     doc.setFillColor(15, 25, 35);
     doc.rect(0, 0, W, 32, "F");
@@ -766,12 +790,16 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       doc.text(val, R, y, { align: "right" });
       y += 6;
     });
-    doc.setFillColor(232, 248, 240);
+    doc.setFillColor(...(isCancelled ? [252, 232, 232] : [232, 248, 240]));
     doc.rect(SX - 1, y - 4, R - SX + 3, 7, "F");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.setTextColor(45, 154, 110);
-    doc.text("Amount Already Paid", SX, y + 1);
+    doc.setTextColor(...(isCancelled ? [192, 57, 43] : [45, 154, 110]));
+    doc.text(
+      isCancelled ? "Refunded (Cancelled)" : "Amount Already Paid",
+      SX,
+      y + 1,
+    );
     doc.text(`Rs.${Math.round(alreadyPaidPdf).toLocaleString()}`, R, y + 1, {
       align: "right",
     });
@@ -832,7 +860,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.setFontSize(11);
     doc.setTextColor(255, 255, 255);
     doc.text(
-      `Rs.${Math.round(grandTotalPdf).toLocaleString()}`,
+      isCancelled ? "Rs.0" : `Rs.${Math.round(grandTotalPdf).toLocaleString()}`,
       (SX - 1 + R) / 2,
       y + 13,
       { align: "center" },
@@ -905,6 +933,10 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const addonGst = Math.round(addonTotal * GST_RATE * 100) / 100;
   const remainingAmount = Math.round((addonTotal + addonGst) * 100) / 100;
   const finalTotal = Math.round((alreadyPaid + remainingAmount) * 100) / 100;
+  const isCancelled = booking.status === "cancelled";
+  const addonsList = booking.addons || [];
+  const hasUnpaidAddons = addonsList.some((a) => a.paid !== 1);
+  const allAddonsPaid = addonsList.length > 0 && !hasUnpaidAddons;
 
   const paymentIcons = {
     Cash: (
@@ -1043,20 +1075,22 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               <input
                 value={addonLabel}
                 onChange={(e) => setAddonLabel(e.target.value)}
+                disabled={isCancelled}
                 placeholder="Label (e.g. Airport Transfer)"
-                className="flex-[2_1_140px] px-3 py-2 rounded-md border-[1.5px] border-gray-200 text-[0.82rem] focus:outline-none focus:border-navy/40 focus:ring-2 focus:ring-navy/10 transition"
+                className="flex-[2_1_140px] px-3 py-2 rounded-md border-[1.5px] border-gray-200 text-[0.82rem] focus:outline-none focus:border-navy/40 focus:ring-2 focus:ring-navy/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
               />
               <input
                 value={addonAmount}
                 onChange={(e) => setAddonAmount(e.target.value)}
+                disabled={isCancelled}
                 placeholder="Amount ₹"
                 type="number"
-                className="flex-[1_1_80px] px-3 py-2 rounded-md border-[1.5px] border-gray-200 text-[0.82rem] focus:outline-none focus:border-navy/40 focus:ring-2 focus:ring-navy/10 transition"
+                className="flex-[1_1_80px] px-3 py-2 rounded-md border-[1.5px] border-gray-200 text-[0.82rem] focus:outline-none focus:border-navy/40 focus:ring-2 focus:ring-navy/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
               />
               <button
                 onClick={addAddon}
-                disabled={addonLoading}
-                className="bg-gold text-white px-4 py-2 rounded-md text-[0.82rem] font-semibold whitespace-nowrap hover:bg-gold/90 transition-colors disabled:opacity-50"
+                disabled={addonLoading || isCancelled}
+                className="bg-gold text-white px-4 py-2 rounded-md text-[0.82rem] font-semibold whitespace-nowrap hover:bg-gold/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 + Add
               </button>
@@ -1077,12 +1111,19 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                       <span className="text-[0.85rem] font-bold text-navy">
                         Rs.{Number(addon.amount).toLocaleString()}
                       </span>
-                      <button
-                        onClick={() => removeAddon(addon.addon_id)}
-                        className="text-red-600 text-[0.72rem] font-bold hover:text-red-700 transition-colors"
-                      >
-                        ✕
-                      </button>
+                      {!isCancelled && addon.paid !== 1 && (
+                        <button
+                          onClick={() => removeAddon(addon.addon_id)}
+                          className="text-red-600 text-[0.72rem] font-bold hover:text-red-700 transition-colors"
+                        >
+                          ✕
+                        </button>
+                      )}
+                      {addon.paid === 1 && (
+                        <span className="text-[0.62rem] font-bold text-emerald-600 uppercase tracking-wide">
+                          Paid
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1123,6 +1164,13 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
             <div className="font-display text-[0.9rem] font-semibold text-gold mb-4">
               Bill Summary
             </div>
+            {isCancelled && (
+              <div className="mb-4 rounded-md bg-red-500/15 border border-red-500/30 px-3 py-2">
+                <span className="text-[0.82rem] font-bold text-red-400">
+                  Booking Cancelled — Payment Refunded
+                </span>
+              </div>
+            )}
 
             {/* Already paid section */}
             <div className="mb-3">
@@ -1147,11 +1195,17 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                   <span className="text-white/70 font-semibold">{val}</span>
                 </div>
               ))}
-              <div className="flex justify-between items-center mt-2 bg-emerald-600/15 rounded-md px-2.5 py-1.5 border border-emerald-600/30">
-                <span className="text-[0.82rem] text-emerald-500 font-bold">
-                  Amount Already Paid
+              <div
+                className={`flex justify-between items-center mt-2 rounded-md px-2.5 py-1.5 border ${isCancelled ? "bg-red-500/15 border-red-500/30" : "bg-emerald-600/15 border-emerald-600/30"}`}
+              >
+                <span
+                  className={`text-[0.82rem] font-bold ${isCancelled ? "text-red-400" : "text-emerald-500"}`}
+                >
+                  {isCancelled ? "Refunded (Cancelled)" : "Amount Already Paid"}
                 </span>
-                <span className="text-[0.95rem] text-emerald-500 font-bold">
+                <span
+                  className={`text-[0.95rem] font-bold ${isCancelled ? "text-red-400 line-through" : "text-emerald-500"}`}
+                >
                   Rs.{Math.round(alreadyPaid).toLocaleString()}
                 </span>
               </div>
@@ -1185,25 +1239,25 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               <div
                 className={`flex justify-between items-center mt-2 rounded-md px-2.5 py-1.5 border transition-all
                   ${
-                    addonPaid
+                    allAddonsPaid
                       ? "bg-emerald-600/15 border-emerald-600/30"
                       : "bg-gold/10 border-gold/25"
                   }`}
               >
                 <div>
                   <div
-                    className={`text-[0.82rem] font-bold ${addonPaid ? "text-emerald-500" : "text-gold"}`}
+                    className={`text-[0.82rem] font-bold ${allAddonsPaid ? "text-emerald-500" : "text-gold"}`}
                   >
-                    {addonPaid ? "Add-ons Paid" : "Remaining Amount to Pay"}
+                    {allAddonsPaid ? "Add-ons Paid" : "Remaining Amount to Pay"}
                   </div>
                   <div className="text-[0.68rem] text-white/35 mt-0.5">
-                    {addonPaid
+                    {allAddonsPaid
                       ? `Received via ${paymentMode}`
                       : `via ${paymentMode}`}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  {addonPaid && (
+                  {allAddonsPaid && (
                     <svg
                       width="16"
                       height="16"
@@ -1214,7 +1268,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                     </svg>
                   )}
                   <span
-                    className={`text-[1.1rem] font-bold font-display ${addonPaid ? "text-emerald-500" : "text-gold"}`}
+                    className={`text-[1.1rem] font-bold font-display ${allAddonsPaid ? "text-emerald-500" : "text-gold"}`}
                   >
                     Rs.{Math.round(remainingAmount).toLocaleString()}
                   </span>
@@ -1230,7 +1284,9 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                 Grand Total
               </span>
               <span className="font-body font-bold text-white text-[1.4rem]">
-                Rs.{Math.round(finalTotal).toLocaleString()}
+                {isCancelled
+                  ? "Rs.0"
+                  : `Rs.${Math.round(finalTotal).toLocaleString()}`}
               </span>
             </div>
           </div>
@@ -1246,21 +1302,21 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
             </button>
 
             <button
-              onClick={() => setAddonPaid(!addonPaid)}
-              disabled={addonTotal === 0}
+              onClick={markAddonsPaid}
+              disabled={addonTotal === 0 || isCancelled || !hasUnpaidAddons}
               title={
                 addonTotal === 0 ? "No add-on charges to mark as paid" : ""
               }
               className={`flex-1 flex items-center justify-center gap-1 py-3 rounded-lg text-[0.88rem] font-bold transition-all
-                ${
-                  addonPaid
-                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                    : addonTotal > 0
-                      ? "bg-gold text-navy hover:bg-gold/90"
-                      : "bg-gray-200 text-gray-400 cursor-not-allowed opacity-60"
-                }`}
+                                ${
+                                  allAddonsPaid
+                                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                    : addonTotal > 0 && !isCancelled
+                                      ? "bg-gold text-navy hover:bg-gold/90"
+                                      : "bg-gray-200 text-gray-400 cursor-not-allowed opacity-60"
+                                }`}
             >
-              {addonPaid ? (
+              {allAddonsPaid ? (
                 <>
                   <svg
                     width="16"
@@ -1795,7 +1851,7 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
   const roomTypes = ["Standard", "Deluxe", "Suite", "Luxury", "Presidential"];
   const typeColors = {
     Standard: {
-     border: "border-gold",
+      border: "border-gold",
       bg: "bg-gold",
       text: "text-gold",
     },
@@ -1805,7 +1861,7 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
       text: "text-gold",
     },
     Suite: {
-    border: "border-gold",
+      border: "border-gold",
       bg: "bg-gold",
       text: "text-gold",
     },
@@ -2179,9 +2235,9 @@ export default function AdminDashboard({
   const [resetPasswordUser, setResetPasswordUser] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showAddRoom, setShowAddRoom] = useState(false);
-const [bookingPage, setBookingPage] = useState(1);
-const [userPage, setUserPage] = useState(1);
-const itemsPerPage = 10;
+  const [bookingPage, setBookingPage] = useState(1);
+  const [userPage, setUserPage] = useState(1);
+  const itemsPerPage = 10;
   const fetchAll = () => {
     Promise.all([
       apiFetch("/api/admin/stats").then((r) => r.json()),
@@ -2206,18 +2262,12 @@ const itemsPerPage = 10;
     fetchAll();
   }, []);
 
-    const getPaginatedData = (data, page) =>
-  data.slice(
-    (page - 1) * itemsPerPage,
-    page * itemsPerPage
-  );
+  const getPaginatedData = (data, page) =>
+    data.slice((page - 1) * itemsPerPage, page * itemsPerPage);
 
+  const userTotalPages = Math.ceil(users.length / itemsPerPage);
 
-const userTotalPages = Math.ceil(
-  users.length / itemsPerPage
-);
-
-const paginatedUsers = getPaginatedData(users, userPage);
+  const paginatedUsers = getPaginatedData(users, userPage);
   async function confirmCancelBooking(id) {
     try {
       const res = await apiFetch(`/api/bookings/${id}/cancel`, {
@@ -2309,30 +2359,24 @@ const paginatedUsers = getPaginatedData(users, userPage);
         .reduce((sum, b) => sum + Number(b.final_total || b.total_price), 0),
     }))
     .filter((r) => r.value > 0);
-    
-    const confirmed = bookings.filter((b) => b.status === "confirmed").length;
-    const cancelled = bookings.filter((b) => b.status === "cancelled").length;
-    const completed = bookings.filter((b) => b.status === "completed").length;
-    const filteredBookings = bookings.filter(
-      (b) =>
-        !searchTerm ||
+
+  const confirmed = bookings.filter((b) => b.status === "confirmed").length;
+  const cancelled = bookings.filter((b) => b.status === "cancelled").length;
+  const completed = bookings.filter((b) => b.status === "completed").length;
+  const filteredBookings = bookings.filter(
+    (b) =>
+      !searchTerm ||
       b.guest_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       b.room_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       b.email?.toLowerCase().includes(searchTerm.toLowerCase()),
-    );
+  );
 
- const totalPages = Math.ceil(
-  filteredBookings.length / itemsPerPage
-);
+  const totalPages = Math.ceil(filteredBookings.length / itemsPerPage);
 
-const paginatedBookings = getPaginatedData(
-  filteredBookings,
-  bookingPage
-);
+  const paginatedBookings = getPaginatedData(filteredBookings, bookingPage);
   const checkedInBookings = bookings.filter(
     (b) => b.actual_checkin && !b.actual_checkout && b.status === "confirmed",
   );
-  
 
   const tabs = [
     { id: "overview", label: "Overview", icon: GridIcon },
@@ -2342,54 +2386,46 @@ const paginatedBookings = getPaginatedData(
     { id: "users", label: "Users", icon: UsersIcon },
     { id: "book", label: "New Booking", icon: CalendarIcon },
   ];
-useEffect(() => {
-  setBookingPage(1);
-  setUserPage(1);
-}, [tab]);
+  useEffect(() => {
+    setBookingPage(1);
+    setUserPage(1);
+  }, [tab]);
 
-const getPageNumbers = (currentPage, totalPages) => {
-  const pages = [];
+  const getPageNumbers = (currentPage, totalPages) => {
+    const pages = [];
 
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) {
-      pages.push(i);
-    }
-  } else {
-    if (currentPage <= 4) {
-      pages.push(
-        1,
-        2,
-        3,
-        4,
-        5,
-        "...",
-        totalPages
-      );
-    } else if (currentPage >= totalPages - 3) {
-      pages.push(
-        1,
-        "...",
-        totalPages - 4,
-        totalPages - 3,
-        totalPages - 2,
-        totalPages - 1,
-        totalPages
-      );
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
     } else {
-      pages.push(
-        1,
-        "...",
-        currentPage - 1,
-        currentPage,
-        currentPage + 1,
-        "...",
-        totalPages
-      );
+      if (currentPage <= 4) {
+        pages.push(1, 2, 3, 4, 5, "...", totalPages);
+      } else if (currentPage >= totalPages - 3) {
+        pages.push(
+          1,
+          "...",
+          totalPages - 4,
+          totalPages - 3,
+          totalPages - 2,
+          totalPages - 1,
+          totalPages,
+        );
+      } else {
+        pages.push(
+          1,
+          "...",
+          currentPage - 1,
+          currentPage,
+          currentPage + 1,
+          "...",
+          totalPages,
+        );
+      }
     }
-  }
 
-  return pages;
-};
+    return pages;
+  };
   // ── Shared cell classes ──────────────────────────────────────────────────
   const thCls =
     "px-3.5 py-2.5 text-left text-[0.62rem] font-bold text-gray-400 uppercase tracking-[1px] border-b-[1.5px] border-gray-200 bg-gray-50 whitespace-nowrap";
@@ -2789,8 +2825,8 @@ const getPageNumbers = (currentPage, totalPages) => {
                     placeholder="Search guest, room..."
                     value={searchTerm}
                     onChange={(e) => {
-  setSearchTerm(e.target.value);
-}}
+                      setSearchTerm(e.target.value);
+                    }}
                     className="border-none bg-transparent text-[0.82rem] text-gray-900 outline-none w-full"
                   />
                 </div>
@@ -2816,7 +2852,7 @@ const getPageNumbers = (currentPage, totalPages) => {
                     </tr>
                   </thead>
                   <tbody>
-                   {paginatedBookings.map((b) => (
+                    {paginatedBookings.map((b) => (
                       <tr
                         key={b.booking_id}
                         className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
@@ -2886,73 +2922,68 @@ const getPageNumbers = (currentPage, totalPages) => {
                   </tbody>
                 </table>
               </div>
-{totalPages > 1 && (
-  <div className="mt-5 pt-4 border-t border-gray-100">
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              {totalPages > 1 && (
+                <div className="mt-5 pt-4 border-t border-gray-100">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    {/* Showing Count */}
+                    <p className="text-xs sm:text-sm text-gray-500 text-center sm:text-left">
+                      Showing {(bookingPage - 1) * itemsPerPage + 1} -
+                      {Math.min(
+                        bookingPage * itemsPerPage,
+                        filteredBookings.length,
+                      )}{" "}
+                      of {filteredBookings.length}
+                    </p>
 
-      {/* Showing Count */}
-      <p className="text-xs sm:text-sm text-gray-500 text-center sm:text-left">
-        Showing {(bookingPage - 1) * itemsPerPage + 1} -
-        {Math.min(
-          bookingPage * itemsPerPage,
-          filteredBookings.length
-        )}{" "}
-        of {filteredBookings.length}
-      </p>
+                    {/* Pagination */}
+                    <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
+                      <button
+                        onClick={() =>
+                          setBookingPage((p) => Math.max(p - 1, 1))
+                        }
+                        disabled={bookingPage === 1}
+                        className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Previous
+                      </button>
 
-      {/* Pagination */}
-      <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
-        
-        <button
-          onClick={() =>
-            setBookingPage((p) => Math.max(p - 1, 1))
-          }
-          disabled={bookingPage === 1}
-          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
-          Previous
-        </button>
+                      {getPageNumbers(bookingPage, totalPages).map(
+                        (page, index) =>
+                          page === "..." ? (
+                            <span
+                              key={index}
+                              className="px-2 text-gray-400 text-sm"
+                            >
+                              ...
+                            </span>
+                          ) : (
+                            <button
+                              key={page}
+                              onClick={() => setBookingPage(page)}
+                              className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
+                                bookingPage === page
+                                  ? "bg-navy text-white"
+                                  : "border border-gray-200 text-gray-600 hover:bg-gray-50"
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          ),
+                      )}
 
-        {getPageNumbers(bookingPage, totalPages).map(
-          (page, index) =>
-            page === "..." ? (
-              <span
-                key={index}
-                className="px-2 text-gray-400 text-sm"
-              >
-                ...
-              </span>
-            ) : (
-              <button
-                key={page}
-                onClick={() => setBookingPage(page)}
-                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
-                  bookingPage === page
-                    ? "bg-navy text-white"
-                    : "border border-gray-200 text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                {page}
-              </button>
-            )
-        )}
-
-        <button
-          onClick={() =>
-            setBookingPage((p) =>
-              Math.min(p + 1, totalPages)
-            )
-          }
-          disabled={bookingPage === totalPages}
-          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
-          Next
-        </button>
-
-      </div>
-    </div>
-  </div>
-)}
+                      <button
+                        onClick={() =>
+                          setBookingPage((p) => Math.min(p + 1, totalPages))
+                        }
+                        disabled={bookingPage === totalPages}
+                        className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -3221,53 +3252,53 @@ const getPageNumbers = (currentPage, totalPages) => {
                 </div>
               ) : (
                 <>
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse min-w-[500px]">
-                    <thead>
-                      <tr>
-                        {[
-                          "#",
-                          "Name",
-                          "Email",
-                          "Role",
-                          "Joined",
-                          "Actions",
-                        ].map((h) => (
-                          <th key={h} className={thCls}>
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paginatedUsers.map((u) => (
-                        <tr
-                          key={u.user_id}
-                          className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
-                        >
-                          <td
-                            className={`${tdCls} text-[0.75rem] text-gray-400`}
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse min-w-[500px]">
+                      <thead>
+                        <tr>
+                          {[
+                            "#",
+                            "Name",
+                            "Email",
+                            "Role",
+                            "Joined",
+                            "Actions",
+                          ].map((h) => (
+                            <th key={h} className={thCls}>
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedUsers.map((u) => (
+                          <tr
+                            key={u.user_id}
+                            className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
                           >
-                            #{u.user_id}
-                          </td>
-                          <td className={tdCls}>
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-[30px] h-[30px] rounded-full bg-navy flex items-center justify-center text-[#E8D5A3] text-[0.72rem] font-bold shrink-0">
-                                {u.name?.charAt(0)}
+                            <td
+                              className={`${tdCls} text-[0.75rem] text-gray-400`}
+                            >
+                              #{u.user_id}
+                            </td>
+                            <td className={tdCls}>
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-[30px] h-[30px] rounded-full bg-navy flex items-center justify-center text-[#E8D5A3] text-[0.72rem] font-bold shrink-0">
+                                  {u.name?.charAt(0)}
+                                </div>
+                                <span className="text-[0.85rem] font-semibold text-navy">
+                                  {u.name}
+                                </span>
                               </div>
-                              <span className="text-[0.85rem] font-semibold text-navy">
-                                {u.name}
-                              </span>
-                            </div>
-                          </td>
-                          <td
-                            className={`${tdCls} text-[0.8rem] text-gray-400`}
-                          >
-                            {u.email}
-                          </td>
-                          <td className={tdCls}>
-                            <span
-                              className={`px-2.5 py-0.5 rounded text-[0.65rem] font-bold uppercase
+                            </td>
+                            <td
+                              className={`${tdCls} text-[0.8rem] text-gray-400`}
+                            >
+                              {u.email}
+                            </td>
+                            <td className={tdCls}>
+                              <span
+                                className={`px-2.5 py-0.5 rounded text-[0.65rem] font-bold uppercase
                               ${
                                 u.role === "admin"
                                   ? "bg-navy text-[#E8D5A3]"
@@ -3275,104 +3306,101 @@ const getPageNumbers = (currentPage, totalPages) => {
                                     ? "bg-blue-600 text-white"
                                     : "bg-gray-100 text-gray-600"
                               }`}
+                              >
+                                {u.role}
+                              </span>
+                            </td>
+                            <td
+                              className={`${tdCls} text-[0.8rem] text-gray-400`}
                             >
-                              {u.role}
-                            </span>
-                          </td>
-                          <td
-                            className={`${tdCls} text-[0.8rem] text-gray-400`}
+                              {u.created_at?.slice(0, 10)}
+                            </td>
+                            <td className={tdCls}>
+                              <div className="flex gap-1.5">
+                                <button
+                                  onClick={() => setSelectedUserId(u.user_id)}
+                                  className="px-2.5 py-1 rounded bg-[#0F1923] text-white border-none text-[0.72rem] font-semibold cursor-pointer transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
+                                >
+                                  View
+                                </button>
+                                {(u.role === "admin" ||
+                                  u.role === "manager") && (
+                                  <button
+                                    onClick={() => setResetPasswordUser(u)}
+                                    className="px-2.5 py-1 rounded bg-none border-[1.5px] border-gold text-[#9A7A2E] text-[0.72rem] font-semibold cursor-pointer hover:bg-gold/10 transition-colors"
+                                  >
+                                    🔑 Reset
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {userTotalPages > 1 && (
+                    <div className="mt-5 pt-4 border-t border-gray-100">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        {/* Showing Count */}
+                        <p className="text-xs sm:text-sm text-gray-500 text-center sm:text-left">
+                          Showing {(userPage - 1) * itemsPerPage + 1} -
+                          {Math.min(userPage * itemsPerPage, users.length)} of{" "}
+                          {users.length}
+                        </p>
+
+                        {/* Pagination */}
+                        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
+                          <button
+                            onClick={() =>
+                              setUserPage((p) => Math.max(p - 1, 1))
+                            }
+                            disabled={userPage === 1}
+                            className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
                           >
-                            {u.created_at?.slice(0, 10)}
-                          </td>
-                          <td className={tdCls}>
-                            <div className="flex gap-1.5">
-                              <button
-                                onClick={() => setSelectedUserId(u.user_id)}
-                                className="px-2.5 py-1 rounded bg-[#0F1923] text-white border-none text-[0.72rem] font-semibold cursor-pointer transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
-                              >
-                                View
-                              </button>
-                              <button
-                                onClick={() => setResetPasswordUser(u)}
-                                className="px-2.5 py-1 rounded bg-none border-[1.5px] border-gold text-[#9A7A2E] text-[0.72rem] font-semibold cursor-pointer hover:bg-gold/10 transition-colors"
-                              >
-                                🔑 Reset
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-{userTotalPages > 1 && (
-  <div className="mt-5 pt-4 border-t border-gray-100">
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            Previous
+                          </button>
 
-      {/* Showing Count */}
-      <p className="text-xs sm:text-sm text-gray-500 text-center sm:text-left">
-        Showing {(userPage - 1) * itemsPerPage + 1} -
-        {Math.min(
-          userPage * itemsPerPage,
-          users.length
-        )}{" "}
-        of {users.length}
-      </p>
+                          {getPageNumbers(userPage, userTotalPages).map(
+                            (page, index) =>
+                              page === "..." ? (
+                                <span
+                                  key={index}
+                                  className="px-2 text-gray-400 text-sm"
+                                >
+                                  ...
+                                </span>
+                              ) : (
+                                <button
+                                  key={page}
+                                  onClick={() => setUserPage(page)}
+                                  className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
+                                    userPage === page
+                                      ? "bg-navy text-white"
+                                      : "border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {page}
+                                </button>
+                              ),
+                          )}
 
-      {/* Pagination */}
-      <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
-
-        <button
-          onClick={() =>
-            setUserPage((p) => Math.max(p - 1, 1))
-          }
-          disabled={userPage === 1}
-          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
-          Previous
-        </button>
-
-        {getPageNumbers(userPage, userTotalPages).map(
-          (page, index) =>
-            page === "..." ? (
-              <span
-                key={index}
-                className="px-2 text-gray-400 text-sm"
-              >
-                ...
-              </span>
-            ) : (
-              <button
-                key={page}
-                onClick={() => setUserPage(page)}
-                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
-                  userPage === page
-                    ? "bg-navy text-white"
-                    : "border border-gray-200 text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                {page}
-              </button>
-            )
-        )}
-
-        <button
-          onClick={() =>
-            setUserPage((p) =>
-              Math.min(p + 1, userTotalPages)
-            )
-          }
-          disabled={userPage === userTotalPages}
-          className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
-          Next
-        </button>
-
-      </div>
-    </div>
-  </div>
-)}
-              </>
+                          <button
+                            onClick={() =>
+                              setUserPage((p) =>
+                                Math.min(p + 1, userTotalPages),
+                              )
+                            }
+                            disabled={userPage === userTotalPages}
+                            className="px-3 py-2 border rounded-lg text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

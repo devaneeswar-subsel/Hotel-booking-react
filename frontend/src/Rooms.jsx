@@ -61,21 +61,24 @@ export default function Rooms({
     }
     onBookClick(room);
   }
-const fadeUp = (delay = 0) => ({
-  initial: { opacity: 0, y: 24 },
-  whileInView: { opacity: 1, y: 0 },
-  viewport: { once: true, amount: 0.3 },
-  transition: { duration: 0.6, delay, ease: "easeOut" },
-})
+  const fadeUp = (delay = 0) => ({
+    initial: { opacity: 0, y: 24 },
+    whileInView: { opacity: 1, y: 0 },
+    viewport: { once: true, amount: 0.3 },
+    transition: { duration: 0.6, delay, ease: "easeOut" },
+  });
   return (
-    <section id="rooms" className="mx-auto max-w-7xl px-6 md:px-8 lg:px-12 py-4 sm:py-8 md:py-12 lg:py-20 " >
+    <section
+      id="rooms"
+      className="mx-auto max-w-7xl px-6 md:px-8 lg:px-12 py-4 sm:py-8 md:py-12 lg:py-20 "
+    >
       <motion.div {...fadeUp(0)} className="section-eyebrow">
-  <span>Accommodations</span>
-</motion.div>
+        <span>Accommodations</span>
+      </motion.div>
 
-<motion.h2 {...fadeUp(0.15)} className="section-title">
-  Choose Your <em>Perfect Room</em>
-</motion.h2>
+      <motion.h2 {...fadeUp(0.15)} className="section-title">
+        Choose Your <em>Perfect Room</em>
+      </motion.h2>
 
       {/* Filters */}
       <div className="rooms-filter-bar">
@@ -162,20 +165,20 @@ const fadeUp = (delay = 0) => ({
           </div>
         ) : (
           rooms.map((room, index) => (
-  <motion.div
-    key={room.room_id}
-    className="room-card"
-    onClick={() => onCardClick?.(room)}
-    initial={{ opacity: 0, y: 40 }}
-    whileInView={{ opacity: 1, y: 0 }}
-    viewport={{ once: true }}
-    transition={{
-      duration: 0.6,
-      delay: index * 0.1,
-      type: "spring",
-      stiffness: 80,
-    }}
-  >
+            <motion.div
+              key={room.room_id}
+              className="room-card"
+              onClick={() => onCardClick?.(room)}
+              initial={{ opacity: 0, y: 40 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{
+                duration: 0.6,
+                delay: index * 0.1,
+                type: "spring",
+                stiffness: 80,
+              }}
+            >
               <div className="room-card-img">
                 <img
                   src={
@@ -192,8 +195,16 @@ const fadeUp = (delay = 0) => ({
                 <div className="room-type-badge">{room.room_type}</div>
               </div>
               <div className="room-card-body">
-                <div className="font-body font-bold">Room {room.room_number || `#${room.room_id}`}</div>
-                <p>
+                <div className="font-body font-bold">
+                  Room {room.room_number || `#${room.room_id}`}
+                </div>
+                <p
+                  className="truncate"
+                  title={
+                    room.description ||
+                    "A beautifully furnished room with modern amenities and premium comfort."
+                  }
+                >
                   {room.description ||
                     "A beautifully furnished room with modern amenities and premium comfort."}
                 </p>
