@@ -113,6 +113,11 @@ async function runMigrations() {
     await db.query(
       `CREATE TABLE IF NOT EXISTS booking_addons (addon_id INT AUTO_INCREMENT PRIMARY KEY, booking_id INT NOT NULL, label VARCHAR(100) NOT NULL, amount DECIMAL(10,2) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE)`,
     );
+    try {
+      await db.query(
+        "ALTER TABLE booking_addons ADD COLUMN paid TINYINT DEFAULT 0",
+      );
+    } catch (e) {}
     await db.query(
       `CREATE TABLE IF NOT EXISTS reviews (review_id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, booking_id INT NOT NULL, room_id INT NOT NULL, rating INT NOT NULL, review_text TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE, FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE, FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE)`,
     );
@@ -406,7 +411,7 @@ app.get("/api/rooms/:roomId/booked-dates", async (req, res) => {
       WHERE room_id = ?
       AND status NOT IN ('cancelled','pending')
       `,
-      [roomId]
+      [roomId],
     );
 
     res.json(rows);
@@ -428,7 +433,6 @@ app.get("/api/rooms/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  REVIEWS
@@ -829,7 +833,9 @@ app.post("/api/payment/verify", async (req, res) => {
             <div style="padding:32px;background:#fff">
               <div style="text-align:center;margin-bottom:24px">
                 <div style="width:64px;height:64px;background:#E8F8F0;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;line-height:1">
-  <span style="color:#2D9A6E;font-size:2.2rem;font-weight:900;line-height:1;display:block;margin-top:2px">&#10003;</span>
+  <span style="color:#2D9A6E;font-size:2.2rem;font-weight:900;line-height:1;display:block;margin-top:2px;position: relative;
+    left: 19px;
+    top: 10px;">&#10003;</span>
 </div>
                 <h2 style="color:#0F1923;margin:12px 0 4px">Booking Confirmed!</h2>
                 <p style="color:#868E96;font-size:0.9rem">Thank you, ${booking.guest_name}. Your reservation is confirmed.</p>
@@ -918,6 +924,16 @@ app.patch(
         return res
           .status(400)
           .json({ error: "Password must be at least 6 characters" });
+      const [[target]] = await db.query(
+        "SELECT role FROM users WHERE user_id=?",
+        [req.params.id],
+      );
+      if (!target) return res.status(404).json({ error: "User not found" });
+      if (target.role !== "admin" && target.role !== "manager")
+        return res.status(403).json({
+          error:
+            "Admins can only reset admin or manager passwords. Guests should use the forgot-password flow.",
+        });
       const hashed = await bcrypt.hash(new_password, 12);
       const [result] = await db.query(
         "UPDATE users SET password=? WHERE user_id=?",
@@ -1060,6 +1076,15 @@ app.post("/api/bookings/:id/addons", requireAdmin, async (req, res) => {
     const { label, amount } = req.body;
     if (!label || !amount)
       return res.status(400).json({ error: "label and amount required" });
+    const [[bk]] = await db.query(
+      "SELECT status FROM bookings WHERE booking_id=?",
+      [req.params.id],
+    );
+    if (!bk) return res.status(404).json({ error: "Booking not found" });
+    if (bk.status === "cancelled")
+      return res
+        .status(400)
+        .json({ error: "Cannot add charges to a cancelled booking" });
     const [r] = await db.query(
       "INSERT INTO booking_addons (booking_id, label, amount) VALUES (?,?,?)",
       [req.params.id, label, amount],
@@ -1099,6 +1124,13 @@ app.delete(
   requireAdmin,
   async (req, res) => {
     try {
+      const [[addon]] = await db.query(
+        "SELECT paid FROM booking_addons WHERE addon_id=? AND booking_id=?",
+        [req.params.addon_id, req.params.id],
+      );
+      if (!addon) return res.status(404).json({ error: "Add-on not found" });
+      if (addon.paid === 1)
+        return res.status(400).json({ error: "Cannot remove a paid add-on" });
       await db.query(
         "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=?",
         [req.params.addon_id, req.params.id],
@@ -1131,6 +1163,34 @@ app.delete(
   },
 );
 
+app.patch(
+  "/api/bookings/:id/addons/mark-paid",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const [[bk]] = await db.query(
+        "SELECT status FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      if (!bk) return res.status(404).json({ error: "Booking not found" });
+      if (bk.status === "cancelled")
+        return res
+          .status(400)
+          .json({ error: "Cannot mark a cancelled booking as paid" });
+      await db.query(
+        "UPDATE booking_addons SET paid=1 WHERE booking_id=? AND paid=0",
+        [req.params.id],
+      );
+      const [addons] = await db.query(
+        "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at ASC",
+        [req.params.id],
+      );
+      res.json({ message: "Add-ons marked as paid", addons });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 // ══════════════════════════════════════════════════════════════════════════════
 //  ADMIN
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1497,6 +1557,15 @@ app.post(
       const { label, amount } = req.body;
       if (!label || !amount)
         return res.status(400).json({ error: "label and amount required" });
+      const [[bk]] = await db.query(
+        "SELECT status FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      if (!bk) return res.status(404).json({ error: "Booking not found" });
+      if (bk.status === "cancelled")
+        return res
+          .status(400)
+          .json({ error: "Cannot add charges to a cancelled booking" });
       const [r] = await db.query(
         "INSERT INTO booking_addons (booking_id, label, amount) VALUES (?,?,?)",
         [req.params.id, label, amount],
