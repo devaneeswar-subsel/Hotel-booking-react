@@ -684,96 +684,98 @@ app.post("/api/payment/verify", async (req, res) => {
             .text("vvgrandpark.com", 350, 162)
             .text("bookings@vvgrandpark.com", 350, 175);
 
-          const tableTop = 210;
-          doc.rect(50, tableTop, 495, 25).fill("#0F1923");
-          doc
-            .fillColor("#C9A84C")
-            .font("Helvetica-Bold")
-            .fontSize(9)
-            .text("DESCRIPTION", 60, tableTop + 8)
-            .text("DETAILS", 280, tableTop + 8)
-            .text("AMOUNT", 490, tableTop + 8, { align: "right" });
+const tableTop = 210;
+doc.rect(50, tableTop, 495, 25).fill("#0F1923");
+doc
+  .fillColor("#C9A84C")
+  .font("Helvetica-Bold")
+  .fontSize(9)
+  .text("DESCRIPTION", 60, tableTop + 8)
+  .text("DETAILS", 280, tableTop + 8)
+  .text("AMOUNT", 400, tableTop + 8, { width: 145, align: "center" });
 
-          const tableRows = [
-            [
-              `${booking.room_type} — Room ${booking.room_number || booking.room_id}`,
-              `${nights} night${nights > 1 ? "s" : ""}`,
-              `Rs.${basePrice.toLocaleString()}`,
-            ],
-            [
-              "Check-in",
-              new Date(booking.check_in_date).toLocaleDateString("en-IN", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              }),
-              "—",
-            ],
-            [
-              "Check-out",
-              new Date(booking.check_out_date).toLocaleDateString("en-IN", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              }),
-              "—",
-            ],
-            ["Guests", `${booking.guest_count || 1}`, "—"],
-            ["Payment ID", booking.payment_id || "—", "—"],
-          ];
+const tableRows = [
+  [
+    `${booking.room_type} — Room ${booking.room_number || booking.room_id}`,
+    `${nights} night${nights > 1 ? "s" : ""}`,
+    `Rs.${basePrice.toLocaleString()}`,
+  ],
+  [
+    "Check-in",
+    new Date(booking.check_in_date).toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }),
+    "—",
+  ],
+  [
+    "Check-out",
+    new Date(booking.check_out_date).toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }),
+    "—",
+  ],
+  ["Guests", `${booking.guest_count || 1}`, "—"],
+  ["Payment ID", booking.payment_id || "—", "—"],
+];
 
-          let y = tableTop + 30;
-          tableRows.forEach((row, i) => {
-            if (i % 2 === 0) doc.rect(50, y - 5, 495, 22).fill("#F8F9FA");
-            doc
-              .fillColor("#0F1923")
-              .font("Helvetica")
-              .fontSize(9)
-              .text(row[0], 60, y)
-              .text(row[1], 280, y)
-              .text(row[2], 490, y, { align: "right" });
-            y += 22;
-          });
+let y = tableTop + 30;
+tableRows.forEach((row, i) => {
+  if (i % 2 === 0) doc.rect(50, y - 5, 495, 22).fill("#F8F9FA");
+  doc
+    .fillColor("#0F1923")
+    .font("Helvetica")
+    .fontSize(9)
+    .text(row[0], 60, y)
+    .text(row[1], 280, y)
+    .text(row[2], 400, y, { width: 145, align: "center" });
+  y += 22;
+});
 
-          y += 15;
-          doc
-            .moveTo(50, y)
-            .lineTo(545, y)
-            .strokeColor("#E9ECEF")
-            .lineWidth(0.5)
-            .stroke();
-          y += 15;
-          [
-            ["Room Charges", `Rs.${basePrice.toLocaleString()}`],
-            ["GST (18%)", `Rs.${Math.round(gst).toLocaleString()}`],
-          ].forEach(([label, val]) => {
-            doc
-              .fillColor("#868E96")
-              .font("Helvetica")
-              .fontSize(10)
-              .text(label, 350, y);
-            doc
-              .fillColor("#0F1923")
-              .font("Helvetica-Bold")
-              .fontSize(10)
-              .text(val, 490, y, { align: "right" });
-            y += 20;
-          });
-          y += 5;
-          doc.rect(350, y, 195, 36).fill("#0F1923");
-          doc
-            .fillColor("#C9A84C")
-            .font("Helvetica-Bold")
-            .fontSize(11)
-            .text("TOTAL PAID", 360, y + 5);
-          doc
-            .fillColor("#ffffff")
-            .font("Helvetica-Bold")
-            .fontSize(14)
-            .text(`Rs.${Math.round(total).toLocaleString()}`, 360, y + 18, {
-              width: 175,
-              align: "right",
-            });
+y += 15;
+doc
+  .moveTo(50, y)
+  .lineTo(545, y)
+  .strokeColor("#E9ECEF")
+  .lineWidth(0.5)
+  .stroke();
+y += 15;
+[
+  ["Room Charges", `Rs.${basePrice.toLocaleString()}`],
+  ["GST (18%)", `Rs.${Math.round(gst).toLocaleString()}`],
+].forEach(([label, val]) => {
+  doc
+    .fillColor("#868E96")
+    .font("Helvetica")
+    .fontSize(10)
+    .text(label, 350, y);
+  doc
+    .fillColor("#0F1923")
+    .font("Helvetica-Bold")
+    .fontSize(10)
+    .text(val, 400, y, { width: 145, align: "center" });
+  y += 20;
+});
+
+y += 5;
+doc.rect(350, y, 195, 36).fill("#0F1923");
+doc
+  .fillColor("#C9A84C")
+  .font("Helvetica-Bold")
+  .fontSize(11)
+  .text("TOTAL PAID", 360, y + 12);
+
+doc
+  .fillColor("#ffffff")
+  .font("Helvetica-Bold")
+  .fontSize(14)
+  .text(`Rs.${Math.round(total).toLocaleString()}`, 400, y + 10, {
+    width: 145,
+    align: "center",
+  });
 
           y += 50;
           y += 10;
@@ -784,12 +786,17 @@ app.post("/api/payment/verify", async (req, res) => {
             .text("TERMS & CONDITIONS", 50, y);
           y += 8;
           const terms = [
-            "1. Valid photo ID must be presented at check-in.",
-            "2. Check-in time: 12:00 PM | Check-out time: 11:00 AM.",
-            "3. Early check-in/late check-out subject to availability.",
-            "4. Pets, outside food, and smoking are not permitted.",
-            "5. Cancellations must be made 24 hours prior to check-in for a refund.",
-          ];
+  "1. Valid photo ID must be presented at check-in.",
+  "2. Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
+  "3. Early check-in/late check-out subject to availability.",
+  "4. Pets, outside food, Alcohol and smoking are not permitted.",
+  "5. Cancellations must be made 48 hours prior to check-in for a refund.",
+  "6. No-show or late cancellation (under 48 hrs): first night's charge is non-refundable.",
+  "7. Eligible refunds are credited to the original payment method within 5-7 working days.",
+  "8. Your personal & ID data is processed as per the DPDP Act, 2023, only to manage your booking, stay, and legal compliance.",
+  "9. Payments are processed via Razorpay; we do not store your full card details, and never sell your data.",
+  "10. Full Terms, Privacy Policy & Cancellation Policy: vvgrandpark.com/policies",
+];
           doc.fillColor("#666").font("Helvetica").fontSize(7.5);
           terms.forEach((t) => {
             doc.text(t, 50, y, { width: 495 });
@@ -824,42 +831,455 @@ app.post("/api/payment/verify", async (req, res) => {
           from: "VV Grand Park Residency <bookings@vvgrandpark.com>",
           to: booking.email,
           subject: `Booking Confirmed! ${invNo} — VV Grand Park Residency`,
-          html: `
-          <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid #e9ecef">
-            <div style="background:#0F1923;padding:28px 32px;text-align:center">
-              <h1 style="color:#C9A84C;font-size:1.4rem;margin:0;letter-spacing:2px">VV GRAND PARK</h1>
-              <p style="color:rgba(255,255,255,0.5);font-size:0.75rem;margin:4px 0 0;letter-spacing:3px">RESIDENCY</p>
-            </div>
-            <div style="padding:32px;background:#fff">
-              <div style="text-align:center;margin-bottom:24px">
-                <div style="width:64px;height:64px;background:#E8F8F0;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;line-height:1">
-                  <span style="color:#2D9A6E;font-size:1.6rem;font-weight:900;line-height:1;">&#10003;</span>
-</div>
-                <h2 style="color:#0F1923;margin:12px 0 4px">Booking Confirmed!</h2>
-                <p style="color:#868E96;font-size:0.9rem">Thank you, ${booking.guest_name}. Your reservation is confirmed.</p>
-              </div>
-              <div style="background:#F8F9FA;border-radius:10px;padding:20px;margin-bottom:20px">
-                <table style="width:100%;border-collapse:collapse">
-                  <tr><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Booking ID</td><td style="text-align:right;font-weight:700;color:#0F1923">${invNo}</td></tr>
-                  <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Room</td><td style="text-align:right;font-weight:700;color:#0F1923">${booking.room_type} — Room ${booking.room_number || booking.room_id}</td></tr>
-                  <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Check-in</td><td style="text-align:right;font-weight:700;color:#0F1923">${new Date(booking.check_in_date).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</td></tr>
-                  <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Check-out</td><td style="text-align:right;font-weight:700;color:#0F1923">${new Date(booking.check_out_date).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</td></tr>
-                  <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Nights</td><td style="text-align:right;color:#0F1923">${nights}</td></tr>
-                  <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">Room Charges</td><td style="text-align:right;color:#0F1923">Rs.${basePrice.toLocaleString()}</td></tr>
-                  <tr style="border-top:1px solid #E9ECEF"><td style="color:#868E96;font-size:0.85rem;padding:6px 0">GST (18%)</td><td style="text-align:right;color:#0F1923">Rs.${Math.round(gst).toLocaleString()}</td></tr>
-                  <tr style="border-top:2px solid #C9A84C"><td style="font-weight:700;color:#0F1923;padding:8px 0;font-size:1rem">Total Paid</td><td style="text-align:right;font-weight:700;color:#C9A84C;font-size:1.1rem">Rs.${Math.round(total).toLocaleString()}</td></tr>
+   html: `
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#F1F3F5;margin:0;padding:0;border-collapse:collapse;">
+  <tr>
+    <td align="center" style="padding:24px 12px;">
+
+      <div
+        style="
+          font-family:Arial,sans-serif;
+          max-width:560px;
+          margin:0 auto;
+          border-radius:12px;
+          overflow:hidden;
+          border:1px solid #e9ecef;
+        "
+      >
+
+        <!-- Header -->
+        <div
+          style="
+            background:#0F1923;
+            padding:28px 32px;
+            text-align:center;
+          "
+        >
+          <div
+            style="
+              color:#C9A84C;
+              font-family:Arial,sans-serif;
+              font-size:22px;
+              line-height:28px;
+              font-weight:700;
+              letter-spacing:2px;
+            "
+          >
+            VV GRAND PARK
+          </div>
+
+          <div
+            style="
+              color:#8B9298;
+              font-family:Arial,sans-serif;
+              font-size:12px;
+              line-height:18px;
+              margin-top:4px;
+              letter-spacing:3px;
+            "
+          >
+            RESIDENCY
+          </div>
+        </div>
+
+
+        <!-- Content -->
+        <div style="padding:32px;background:#ffffff;">
+
+          <!-- SUCCESS SECTION -->
+          <table
+            role="presentation"
+            width="100%"
+            cellpadding="0"
+            cellspacing="0"
+            border="0"
+            style="
+              width:100%;
+              border-collapse:collapse;
+              margin:0 0 24px 0;
+            "
+          >
+
+            <tr>
+              <td
+                align="center"
+                style="text-align:center;padding:0 0 12px 0;"
+              >
+
+                <table
+                  role="presentation"
+                  cellpadding="0"
+                  cellspacing="0"
+                  border="0"
+                  align="center"
+                  style="border-collapse:collapse;margin:0 auto;"
+                >
+                  <tr>
+                    <td
+                      width="64"
+                      height="64"
+                      align="center"
+                      valign="middle"
+                      style="
+                        width:64px;
+                        height:64px;
+                        background:#E8F8F0;
+                        border-radius:50%;
+                        color:#2D9A6E;
+                        font-family:Arial,sans-serif;
+                        font-size:32px;
+                        font-weight:700;
+                        line-height:64px;
+                        text-align:center;
+                        vertical-align:middle;
+                        mso-line-height-rule:exactly;
+                      "
+                    >
+                      &#10003;
+                    </td>
+                  </tr>
                 </table>
-              </div>
-              <p style="color:#868E96;font-size:0.82rem;text-align:center;line-height:1.6">
-                Invoice PDF attached to this email.<br/>
-                Please carry a valid ID proof at check-in.<br/>
-                For queries: <a href="mailto:bookings@vvgrandpark.com" style="color:#C9A84C">bookings@vvgrandpark.com</a>
-              </p>
-            </div>
-            <div style="background:#0F1923;padding:16px;text-align:center">
-              <p style="color:rgba(255,255,255,0.3);font-size:0.72rem;margin:0">VV Grand Park Residency · vvgrandpark.com</p>
-            </div>
-          </div>`,
+
+              </td>
+            </tr>
+
+
+            <tr>
+              <td
+                align="center"
+                style="
+                  font-family:Arial,sans-serif;
+                  font-size:24px;
+                  line-height:30px;
+                  font-weight:700;
+                  color:#0F1923;
+                  text-align:center;
+                  padding:0 20px 4px;
+                "
+              >
+                Booking Confirmed!
+              </td>
+            </tr>
+
+
+            <tr>
+              <td
+                align="center"
+                style="
+                  font-family:Arial,sans-serif;
+                  font-size:14px;
+                  line-height:21px;
+                  color:#868E96;
+                  text-align:center;
+                  padding:0 20px;
+                "
+              >
+                Thank you, ${booking.guest_name}. Your reservation is confirmed.
+              </td>
+            </tr>
+
+          </table>
+
+
+          <!-- Booking Details -->
+          <div
+            style="
+              background:#F8F9FA;
+              border-radius:10px;
+              padding:20px;
+              margin-bottom:20px;
+            "
+          >
+
+            <table
+              width="100%"
+              cellpadding="0"
+              cellspacing="0"
+              border="0"
+              style="
+                width:100%;
+                border-collapse:collapse;
+              "
+            >
+
+              <tr>
+                <td
+                  style="
+                    color:#868E96;
+                    font-size:14px;
+                    padding:8px 0;
+                    white-space:nowrap;
+                  "
+                >
+                  Booking ID
+                </td>
+
+                <td
+                  style="
+                    text-align:right;
+                    font-weight:700;
+                    color:#0F1923;
+                    padding:8px 0;
+                  "
+                >
+                  ${invNo}
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    color:#868E96;
+                    font-size:14px;
+                    padding:8px 0;
+                    white-space:nowrap;
+                  "
+                >
+                  Room
+                </td>
+
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    text-align:right;
+                    font-weight:700;
+                    color:#0F1923;
+                    padding:8px 0;
+                  "
+                >
+                  ${booking.room_type} — Room ${booking.room_number || booking.room_id}
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    color:#868E96;
+                    font-size:14px;
+                    padding:8px 0;
+                    white-space:nowrap;
+                  "
+                >
+                  Check-in
+                </td>
+
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    text-align:right;
+                    font-weight:700;
+                    color:#0F1923;
+                    padding:8px 0;
+                  "
+                >
+                  ${new Date(booking.check_in_date).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric"
+                  })}
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    color:#868E96;
+                    font-size:14px;
+                    padding:8px 0;
+                    white-space:nowrap;
+                  "
+                >
+                  Check-out
+                </td>
+
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    text-align:right;
+                    font-weight:700;
+                    color:#0F1923;
+                    padding:8px 0;
+                  "
+                >
+                  ${new Date(booking.check_out_date).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric"
+                  })}
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    color:#868E96;
+                    font-size:14px;
+                    padding:8px 0;
+                    white-space:nowrap;
+                  "
+                >
+                  Nights
+                </td>
+
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    text-align:right;
+                    color:#0F1923;
+                    padding:8px 0;
+                  "
+                >
+                  ${nights}
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    color:#868E96;
+                    font-size:14px;
+                    padding:8px 0;
+                    white-space:nowrap;
+                  "
+                >
+                  Room Charges
+                </td>
+
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    text-align:right;
+                    color:#0F1923;
+                    padding:8px 0;
+                  "
+                >
+                  Rs.${basePrice.toLocaleString()}
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    color:#868E96;
+                    font-size:14px;
+                    padding:8px 0;
+                    white-space:nowrap;
+                  "
+                >
+                  GST (18%)
+                </td>
+
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    text-align:right;
+                    color:#0F1923;
+                    padding:8px 0;
+                  "
+                >
+                  Rs.${Math.round(gst).toLocaleString()}
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  style="
+                    border-top:2px solid #C9A84C;
+                    font-weight:700;
+                    color:#0F1923;
+                    font-size:16px;
+                    padding:10px 0;
+                    white-space:nowrap;
+                  "
+                >
+                  Total Paid
+                </td>
+
+                <td
+                  style="
+                    border-top:2px solid #C9A84C;
+                    text-align:right;
+                    font-weight:700;
+                    color:#C9A84C;
+                    font-size:18px;
+                    padding:10px 0;
+                  "
+                >
+                  Rs.${Math.round(total).toLocaleString()}
+                </td>
+              </tr>
+
+            </table>
+          </div>
+
+
+          <div
+            style="
+              color:#868E96;
+              font-family:Arial,sans-serif;
+              font-size:13px;
+              line-height:21px;
+              text-align:center;
+            "
+          >
+            Invoice PDF attached to this email.<br>
+            Please carry a valid ID proof at check-in.<br>
+
+            For queries:
+            <a
+              href="mailto:bookings@vvgrandpark.com"
+              style="
+                color:#C9A84C;
+                text-decoration:none;
+              "
+            >
+              bookings@vvgrandpark.com
+            </a>
+          </div>
+
+        </div>
+
+
+        <!-- Footer -->
+        <div
+          style="
+            background:#0F1923;
+            padding:16px;
+            text-align:center;
+          "
+        >
+          <div
+            style="
+              color:#8B9298;
+              font-size:12px;
+              line-height:18px;
+            "
+          >
+            VV Grand Park Residency ·
+            <a
+              href="https://vvgrandpark.com"
+              style="
+                color:#C9A84C;
+                text-decoration:none;
+              "
+            >
+              vvgrandpark.com
+            </a>
+          </div>
+        </div>
+
+      </div>
+
+    </td>
+  </tr>
+</table>
+`,
           attachments: [
             {
               filename: `${invNo}-${(booking.guest_name || "guest").replace(/\s+/g, "_")}.pdf`,

@@ -8,6 +8,7 @@ import Facilities from "./Facilities";
 import Gallery from "./Gallery";
 import Testimonials from "./Testimonials";
 import Footer from "./Footer";
+import LegalPolicy, { getLegalPolicyByPath } from "./LegalPolicy";
 import RoomDetail from "./Roomdetail";
 import AdminDashboard from "./AdminDashboard";
 import ManagerDashboard from "./ManagerDashboard";
@@ -317,7 +318,6 @@ function BookingModal({ room, user, onClose, showToast }) {
   });
   const [loading, setLoading] = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState(null);
-  const [bookedDates, setBookedDates] = useState([]);
   const nights =
     form.check_in_date && form.check_out_date
       ? Math.max(
@@ -1617,8 +1617,9 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
 }
 
 export default function App() {
+  const legalPolicy = getLegalPolicyByPath(window.location.pathname);
   const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(!legalPolicy);
   const [bookingRoom, setBookingRoom] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [showBookings, setShowBookings] = useState(false);
@@ -1632,6 +1633,8 @@ export default function App() {
     setToast({ msg, type });
   }, []);
   useEffect(() => {
+    if (legalPolicy) return;
+
     apiFetch("/api/auth/me")
       .then((r) => r.json())
       .then((data) => {
@@ -1648,7 +1651,20 @@ export default function App() {
       })
       .catch(() => {})
       .finally(() => setAuthLoading(false));
-  }, []);
+  }, [legalPolicy]);
+
+  useEffect(() => {
+    if (legalPolicy || authLoading || !window.location.hash) return;
+
+    const sectionId = decodeURIComponent(window.location.hash.slice(1));
+    const timeout = setTimeout(() => {
+      document
+        .getElementById(sectionId)
+        ?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+
+    return () => clearTimeout(timeout);
+  }, [authLoading, legalPolicy]);
 
   function handleLogin(u) {
     setUser(u);
@@ -1669,6 +1685,10 @@ export default function App() {
     setShowAdmin(false);
     setShowManager(false);
     showToast("Logged out successfully", "success");
+  }
+
+  if (legalPolicy) {
+    return <LegalPolicy policy={legalPolicy} />;
   }
 
   if (authLoading) {
@@ -1791,7 +1811,7 @@ export default function App() {
           setAvailableRoomIds(ids);
           setTimeout(() => {
             document
-              .getElementById("rooms-section")
+              .getElementById("rooms")
               ?.scrollIntoView({ behavior: "smooth" });
           }, 300);
         }}
@@ -1833,7 +1853,7 @@ export default function App() {
                   .catch(() => {});
               } else {
                 document
-                  .getElementById("rooms-section")
+                  .getElementById("rooms")
                   ?.scrollIntoView({ behavior: "smooth" });
               }
             }}

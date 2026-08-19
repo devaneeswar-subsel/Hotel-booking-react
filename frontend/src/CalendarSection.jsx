@@ -300,7 +300,7 @@ const leftRef  = useFadeSlide("left");
                       <button
                         onClick={() =>
                           document
-                            .getElementById("rooms-section")
+                            .getElementById("rooms")
                             ?.scrollIntoView({ behavior: "smooth" })
                         }
                         className="mt-2 text-[0.72rem] text-[var(--gold)] underline underline-offset-2 cursor-pointer bg-transparent border-0 p-0 font-inherit hover:text-white transition"
