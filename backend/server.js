@@ -162,6 +162,19 @@ const MANUAL_ADVANCE_PAYMENT_MODES = {
   cash: "Cash",
   online: "Online",
 };
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CUSTOMER_NAME_PATTERN = /^[A-Za-z]+(?:\s+[A-Za-z]+)*$/;
+const INDIAN_MOBILE_PATTERN = /^[6-9]\d{9}$/;
+
+function normalizeCustomerPhone(value) {
+  let phone = String(value || "")
+    .trim()
+    .replace(/[^\d+]/g, "");
+  if (phone.startsWith("+")) phone = phone.slice(1);
+  if (phone.startsWith("91") && phone.length === 12) phone = phone.slice(2);
+  if (phone.startsWith("0") && phone.length === 11) phone = phone.slice(1);
+  return phone;
+}
 
 function resolveAdvanceAmount(totalAmount, advanceAmount) {
   const defaultAdvanceAmount = Math.floor(totalAmount * ADVANCE_RATE);
@@ -305,9 +318,26 @@ async function calculateBookingAmounts({
 async function findOrCreateGuestUser({ name, email, phone }) {
   const normalizedName = String(name || "").trim();
   const normalizedEmail = String(email || "").trim().toLowerCase();
-  const normalizedPhone = String(phone || "").trim();
-  if (!normalizedName || !normalizedEmail || !normalizedPhone) {
+  const rawPhone = String(phone || "").trim();
+  if (!normalizedName || !normalizedEmail || !rawPhone) {
     const err = new Error("Customer name, email and phone are required");
+    err.status = 400;
+    throw err;
+  }
+  if (!CUSTOMER_NAME_PATTERN.test(normalizedName)) {
+    const err = new Error("Customer name must contain letters only");
+    err.status = 400;
+    throw err;
+  }
+  if (!EMAIL_PATTERN.test(normalizedEmail)) {
+    const err = new Error("Enter a valid email address");
+    err.status = 400;
+    throw err;
+  }
+
+  const normalizedPhone = normalizeCustomerPhone(rawPhone);
+  if (!INDIAN_MOBILE_PATTERN.test(normalizedPhone)) {
+    const err = new Error("Enter a valid 10-digit mobile number");
     err.status = 400;
     throw err;
   }
@@ -343,6 +373,9 @@ app.get("/api/customers/lookup", requireManager, async (req, res) => {
   try {
     const email = String(req.query.email || "").trim().toLowerCase();
     if (!email) return res.status(400).json({ error: "Email is required" });
+    if (!EMAIL_PATTERN.test(email)) {
+      return res.status(400).json({ error: "Enter a valid email address" });
+    }
 
     const [rows] = await db.query(
       "SELECT user_id, name, email, phone, role FROM users WHERE email=? LIMIT 1",
@@ -2222,6 +2255,13 @@ app.post(
 
       if (!room_id || !check_in_date || !check_out_date) {
         return res.status(400).json({ error: "Missing required fields" });
+      }
+      if (
+        advance_amount === undefined ||
+        advance_amount === null ||
+        String(advance_amount).trim() === ""
+      ) {
+        return res.status(400).json({ error: "Advance amount is required" });
       }
 
       const selectedPaymentMode =

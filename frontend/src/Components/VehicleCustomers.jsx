@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { getPaginationItems } from "../pagination";
 
 const VEHICLE_OPTIONS = ["4-seater", "7-seater", "12-seater"];
 const STATUS_OPTIONS = ["pending", "assigned", "picked_up", "completed", "cancelled"];
@@ -34,6 +35,10 @@ export default function VehicleCustomers({ bookings, apiFetch, onRefresh, showTo
     (page - 1) * itemsPerPage,
     page * itemsPerPage,
   );
+
+  useEffect(() => {
+    setPage((current) => Math.min(Math.max(current, 1), totalPages));
+  }, [totalPages]);
 
   function updateFilter(setter, value) {
     setter(value);
@@ -125,8 +130,12 @@ export default function VehicleCustomers({ bookings, apiFetch, onRefresh, showTo
         </div>
         <div className="flex items-center justify-end gap-1.5">
           <button onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1} className="rounded border border-[#E9ECEF] px-2.5 py-1.5 text-xs text-[#495057] disabled:cursor-not-allowed disabled:opacity-40">Previous</button>
-          {Array.from({ length: totalPages }, (_, index) => index + 1).map((number) => (
-            <button key={number} onClick={() => setPage(number)} className={`h-7 min-w-7 rounded px-2 text-xs font-semibold ${page === number ? "bg-[#0F1923] text-white" : "border border-[#E9ECEF] text-[#495057] hover:bg-[#F8F9FA]"}`}>{number}</button>
+          {getPaginationItems(page, totalPages).map((item) => (
+            item?.type === "ellipsis" ? (
+              <span key={item.key} className="px-1.5 text-xs text-[#868E96]">...</span>
+            ) : (
+              <button key={`page-${item}`} onClick={() => setPage(item)} className={`h-7 min-w-7 rounded px-2 text-xs font-semibold ${page === item ? "bg-[#0F1923] text-white" : "border border-[#E9ECEF] text-[#495057] hover:bg-[#F8F9FA]"}`}>{item}</button>
+            )
           ))}
           <button onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page === totalPages} className="rounded border border-[#E9ECEF] px-2.5 py-1.5 text-xs text-[#495057] disabled:cursor-not-allowed disabled:opacity-40">Next</button>
         </div>

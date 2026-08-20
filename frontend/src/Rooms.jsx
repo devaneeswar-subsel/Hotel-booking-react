@@ -28,6 +28,7 @@ export default function Rooms({
     minPrice: "",
     maxPrice: "",
   });
+  const isAdmin = user?.role === "admin";
 
   useEffect(() => {
     fetchRooms();
@@ -55,6 +56,7 @@ export default function Rooms({
 
   function handleBook(e, room) {
     e.stopPropagation();
+    if (isAdmin) return;
     if (!user) {
       onAuthPrompt();
       return;
@@ -221,8 +223,11 @@ export default function Rooms({
                 <button
                   className="book-btn"
                   onClick={(e) => handleBook(e, room)}
+                  disabled={isAdmin}
+                  title={isAdmin ? "Admin cannot book from user room cards" : ""}
                 >
-                  Book Now <ArrowRightIcon size={15} color="#fff" />
+                  {isAdmin ? "Admin Booking Disabled" : "Book Now"}
+                  {!isAdmin && <ArrowRightIcon size={15} color="#fff" />}
                 </button>
               </div>
             </motion.div>
