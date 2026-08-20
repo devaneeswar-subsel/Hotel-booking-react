@@ -1,0 +1,644 @@
+import React, { useEffect, useMemo, useState } from "react";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import {
+  ArrowLeftIcon,
+  CalendarIcon,
+  CarIcon,
+  CheckIcon,
+  MapPinIcon,
+  UserIcon,
+} from "./Icons";
+
+const GST_RATE = 0.18;
+const ADVANCE_RATE = 0.3;
+const MANUAL_PAYMENT_MODES = ["Cash", "Online"];
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const vehicles = [
+  {
+    id: "none",
+    title: "No vehicle",
+    subtitle: "Continue without pickup/drop",
+  },
+  {
+    id: "4-seater",
+    title: "4-seater Sedan",
+    subtitle: "Comfortable for small groups",
+  },
+  {
+    id: "7-seater",
+    title: "7-seater SUV",
+    subtitle: "Extra space for families",
+  },
+  {
+    id: "12-seater",
+    title: "12-seater Van",
+    subtitle: "Ideal for larger groups",
+  },
+];
+
+function formatLocalDate(date) {
+  if (!date) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function parseLocalDate(dateStr) {
+  if (!dateStr) return null;
+  const [year, month, day] = String(dateStr).slice(0, 10).split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function buildOccupiedNights(bookings = []) {
+  const nights = new Set();
+  bookings.forEach((booking) => {
+    const start = parseLocalDate(booking.check_in_date);
+    const end = parseLocalDate(booking.check_out_date);
+    if (!start || !end) return;
+
+    const current = new Date(start);
+    while (current < end) {
+      nights.add(current.toDateString());
+      current.setDate(current.getDate() + 1);
+    }
+  });
+  return nights;
+}
+
+function isStayAvailable(checkIn, checkOut, occupiedNights) {
+  if (!checkIn || !checkOut || checkOut <= checkIn) return false;
+
+  const night = new Date(checkIn);
+  while (night < checkOut) {
+    if (occupiedNights.has(night.toDateString())) return false;
+    night.setDate(night.getDate() + 1);
+  }
+  return true;
+}
+
+function money(value) {
+  return `Rs.${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
+}
+
+export default function AdminBookingForUsers({
+  room,
+  apiFetch,
+  showToast,
+  onBack,
+  onSuccess,
+}) {
+  const [form, setForm] = useState({
+    check_in_date: "",
+    check_out_date: "",
+    guest_count: 1,
+    customer_name: "",
+    customer_email: "",
+    customer_phone: "",
+    vehicle_type: "none",
+    pickup_location: "",
+    dropoff_location: "",
+    advance_amount: "",
+    payment_mode: "Cash",
+  });
+  const [occupiedNights, setOccupiedNights] = useState(new Set());
+  const [calendarLoading, setCalendarLoading] = useState(true);
+  const [customerLookup, setCustomerLookup] = useState({
+    status: "idle",
+    message: "",
+  });
+  const [paying, setPaying] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadBookedDates() {
+      setCalendarLoading(true);
+      try {
+        const res = await apiFetch(`/api/rooms/${room.room_id}/booked-dates`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Unable to load calendar");
+        if (active) setOccupiedNights(buildOccupiedNights(data));
+      } catch (err) {
+        if (active) {
+          setOccupiedNights(new Set());
+          showToast(err.message, "error");
+        }
+      } finally {
+        if (active) setCalendarLoading(false);
+      }
+    }
+
+    loadBookedDates();
+    return () => {
+      active = false;
+    };
+  }, [apiFetch, room.room_id, showToast]);
+
+  useEffect(() => {
+    const email = form.customer_email.trim().toLowerCase();
+    if (!EMAIL_PATTERN.test(email)) {
+      setCustomerLookup({ status: "idle", message: "" });
+      return undefined;
+    }
+
+    let active = true;
+    const timer = setTimeout(async () => {
+      setCustomerLookup({
+        status: "loading",
+        message: "Checking existing customer...",
+      });
+
+      try {
+        const res = await apiFetch(
+          `/api/customers/lookup?email=${encodeURIComponent(email)}`,
+        );
+        const data = await res.json();
+        if (!active) return;
+        if (!res.ok) throw new Error(data.error || "Unable to lookup customer");
+
+        if (data.exists && data.user) {
+          setForm((prev) => {
+            if (prev.customer_email.trim().toLowerCase() !== email) return prev;
+            return {
+              ...prev,
+              customer_name: data.user.name || prev.customer_name,
+              customer_phone: data.user.phone || prev.customer_phone,
+            };
+          });
+          setCustomerLookup({
+            status: "found",
+            message: "Existing customer details loaded",
+          });
+        } else {
+          setCustomerLookup({
+            status: "new",
+            message: "New customer email",
+          });
+        }
+      } catch (err) {
+        if (active) {
+          setCustomerLookup({
+            status: "error",
+            message: err.message,
+          });
+        }
+      }
+    }, 450);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [apiFetch, form.customer_email]);
+
+  const checkInDate = parseLocalDate(form.check_in_date);
+  const checkOutDate = parseLocalDate(form.check_out_date);
+  const nights =
+    checkInDate && checkOutDate
+      ? Math.max(0, Math.ceil((checkOutDate - checkInDate) / 86400000))
+      : 0;
+
+  const totals = useMemo(() => {
+    const roomSubtotal = Number(room.price_per_night || 0) * nights;
+    const gst = Math.round(roomSubtotal * GST_RATE * 100) / 100;
+    const fullAmount = Math.round((roomSubtotal + gst) * 100) / 100;
+    const suggestedAdvanceAmount = Math.floor(fullAmount * ADVANCE_RATE);
+    const manualAdvanceAmount =
+      form.advance_amount === ""
+        ? suggestedAdvanceAmount
+        : Math.round(Number(form.advance_amount || 0) * 100) / 100;
+    const advanceAmount = manualAdvanceAmount;
+    const remainingAmount =
+      Math.round(Math.max(0, fullAmount - advanceAmount) * 100) / 100;
+    return {
+      roomSubtotal,
+      gst,
+      fullAmount,
+      suggestedAdvanceAmount,
+      advanceAmount,
+      remainingAmount,
+    };
+  }, [form.advance_amount, nights, room.price_per_night]);
+
+  function update(name, value) {
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  function handleCheckInChange(date) {
+    const nextCheckIn = date ? formatLocalDate(date) : "";
+    setForm((prev) => {
+      const currentCheckOut = parseLocalDate(prev.check_out_date);
+      const keepCheckOut =
+        date && currentCheckOut
+          ? isStayAvailable(date, currentCheckOut, occupiedNights)
+          : false;
+      return {
+        ...prev,
+        check_in_date: nextCheckIn,
+        check_out_date: keepCheckOut ? prev.check_out_date : "",
+      };
+    });
+  }
+
+  function handleCheckOutChange(date) {
+    update("check_out_date", date ? formatLocalDate(date) : "");
+  }
+
+  const customerLookupClass =
+    customerLookup.status === "found"
+      ? "text-[#2D9A6E]"
+      : customerLookup.status === "error"
+        ? "text-[#C0392B]"
+        : "text-[#868E96]";
+
+  function validate() {
+    if (!nights || !isStayAvailable(checkInDate, checkOutDate, occupiedNights)) {
+      showToast("Select valid available check-in and check-out dates", "error");
+      return false;
+    }
+    if (
+      !form.customer_name.trim() ||
+      !form.customer_email.trim() ||
+      !form.customer_phone.trim()
+    ) {
+      showToast("Enter customer name, email and phone", "error");
+      return false;
+    }
+    if (!MANUAL_PAYMENT_MODES.includes(form.payment_mode)) {
+      showToast("Select Cash or Online payment mode", "error");
+      return false;
+    }
+    if (!Number.isFinite(totals.advanceAmount) || totals.advanceAmount <= 0) {
+      showToast("Enter a valid advance amount", "error");
+      return false;
+    }
+    if (totals.advanceAmount > totals.fullAmount) {
+      showToast("Advance amount cannot exceed full amount", "error");
+      return false;
+    }
+    return true;
+  }
+
+  async function payAdvance() {
+    if (!validate()) return;
+
+    setPaying(true);
+    try {
+      const payload = {
+        room_id: room.room_id,
+        check_in_date: form.check_in_date,
+        check_out_date: form.check_out_date,
+        guest_count: Number(form.guest_count) || 1,
+        customer: {
+          name: form.customer_name.trim(),
+          email: form.customer_email.trim(),
+          phone: form.customer_phone.trim(),
+        },
+        vehicle_type: form.vehicle_type,
+        advance_amount: totals.advanceAmount,
+        payment_mode: form.payment_mode,
+        pickup_location:
+          form.vehicle_type === "none" ? "" : form.pickup_location,
+        dropoff_location:
+          form.vehicle_type === "none" ? "" : form.dropoff_location,
+      };
+
+      const confirmRes = await apiFetch(
+        "/api/admin/bookings/manual-advance-confirm",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      );
+      const data = await confirmRes.json();
+      if (!confirmRes.ok) {
+        throw new Error(data.error || "Unable to confirm booking");
+      }
+      showToast(
+        `Booking confirmed. Invoice email queued to ${
+          data.invoiceEmail || form.customer_email.trim()
+        }`,
+        "success",
+      );
+      onSuccess?.(data.booking_id);
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setPaying(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <button
+            onClick={onBack}
+            className="mb-2 flex items-center gap-1 border-0 bg-transparent p-0 text-[0.82rem] font-semibold text-[#868E96] hover:text-[#0F1923]"
+          >
+            <ArrowLeftIcon size={14} /> Back to rooms
+          </button>
+          <h2 className="font-serif text-[1.35rem] font-bold text-[#0F1923]">
+            Admin Booking for User
+          </h2>
+          <p className="text-[0.85rem] text-[#868E96]">
+            Record manual advance payment and confirm the customer's stay.
+          </p>
+        </div>
+        <div className="rounded-lg border border-[#E9ECEF] bg-white px-4 py-2 text-right">
+          <div className="text-[0.62rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+            Advance Due Now
+          </div>
+          <div className="font-serif text-[1.25rem] font-bold text-[#0F1923]">
+            {money(totals.advanceAmount)}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="overflow-hidden rounded-xl border border-[#E9ECEF] bg-white shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+          <div className="h-[240px] overflow-hidden bg-[#F8F9FA]">
+            <img
+              src={room.image_url || "/hotel-hero.webp"}
+              alt={room.room_type}
+              className="h-full w-full object-cover"
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
+            {[
+              ["Room Type", room.room_type],
+              ["Room Number", room.room_number || room.room_id],
+              ["Guests", form.guest_count],
+              ["Nights", nights || "-"],
+              ["Check-in", form.check_in_date || "-"],
+              ["Check-out", form.check_out_date || "-"],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg bg-[#F8F9FA] px-4 py-3">
+                <div className="text-[0.62rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+                  {label}
+                </div>
+                <div className="mt-1 text-[0.92rem] font-semibold text-[#0F1923]">
+                  {value}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          <div className="rounded-xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+            <div className="mb-4 flex items-center gap-2 font-serif text-[1rem] font-bold text-[#0F1923]">
+              <CalendarIcon size={18} color="#C9A84C" /> Stay Details
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+                  Check-in
+                </label>
+                <DatePicker
+                  selected={checkInDate}
+                  onChange={handleCheckInChange}
+                  minDate={new Date()}
+                  filterDate={(date) =>
+                    !occupiedNights.has(date.toDateString())
+                  }
+                  dateFormat="dd/MM/yyyy"
+                  placeholderText="DD/MM/YYYY"
+                  popperClassName="vv-calendar-popper"
+                  calendarClassName="vv-calendar"
+                  disabled={calendarLoading || paying}
+                  className="w-full rounded-md border border-[#E9ECEF] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+                  Check-out
+                </label>
+                <DatePicker
+                  selected={checkOutDate}
+                  onChange={handleCheckOutChange}
+                  minDate={checkInDate || new Date()}
+                  filterDate={(date) =>
+                    isStayAvailable(checkInDate, date, occupiedNights)
+                  }
+                  dateFormat="dd/MM/yyyy"
+                  placeholderText={
+                    checkInDate ? "DD/MM/YYYY" : "Select check-in first"
+                  }
+                  popperClassName="vv-calendar-popper"
+                  calendarClassName="vv-calendar"
+                  disabled={!checkInDate || calendarLoading || paying}
+                  className="w-full rounded-md border border-[#E9ECEF] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+                Guests
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={room.capacity || 4}
+                value={form.guest_count}
+                onChange={(e) => update("guest_count", e.target.value)}
+                className="w-full rounded-md border border-[#E9ECEF] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+            <div className="mb-4 flex items-center gap-2 font-serif text-[1rem] font-bold text-[#0F1923]">
+              <UserIcon size={18} color="#C9A84C" /> Customer Details
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+              {[
+                ["customer_name", "Customer name", "text"],
+                ["customer_email", "Email address", "email"],
+                ["customer_phone", "Phone number", "tel"],
+              ].map(([name, label, type]) => (
+                <div key={name}>
+                  <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+                    {label} *
+                  </label>
+                  <input
+                    required
+                    value={form[name]}
+                    type={type}
+                    onChange={(e) => update(name, e.target.value)}
+                    placeholder={`${label} required`}
+                    className="w-full rounded-md border border-[#E9ECEF] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]"
+                  />
+                  {name === "customer_email" && customerLookup.message && (
+                    <div
+                      className={`mt-1 text-[0.72rem] font-semibold ${customerLookupClass}`}
+                    >
+                      {customerLookup.message}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="rounded-xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+          <div className="mb-4 flex items-center gap-2 font-serif text-[1rem] font-bold text-[#0F1923]">
+            <CarIcon size={18} color="#C9A84C" /> Pickup / Drop Vehicle
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {vehicles.map((vehicle) => {
+              const active = form.vehicle_type === vehicle.id;
+              return (
+                <button
+                  key={vehicle.id}
+                  type="button"
+                  onClick={() => update("vehicle_type", vehicle.id)}
+                  className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${
+                    active
+                      ? "border-[#C9A84C] bg-[#FFF8E5]"
+                      : "border-[#E9ECEF] bg-white hover:border-[#C9A84C]"
+                  }`}
+                >
+                  <span
+                    className={`mt-1 h-4 w-4 rounded-full border ${
+                      active
+                        ? "border-[#C9A84C] bg-[#C9A84C]"
+                        : "border-[#ADB5BD]"
+                    }`}
+                  />
+                  <span>
+                    <span className="block text-[0.85rem] font-bold text-[#0F1923]">
+                      {vehicle.title}
+                    </span>
+                    <span className="block text-[0.75rem] text-[#868E96]">
+                      {vehicle.subtitle}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {form.vehicle_type !== "none" && (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="relative">
+                <MapPinIcon
+                  size={14}
+                  color="#868E96"
+                  className="absolute left-3 top-3"
+                />
+                <input
+                  value={form.pickup_location}
+                  onChange={(e) => update("pickup_location", e.target.value)}
+                  placeholder="Pickup location"
+                  className="w-full rounded-md border border-[#E9ECEF] py-2.5 pl-9 pr-3 text-sm outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+              <div className="relative">
+                <MapPinIcon
+                  size={14}
+                  color="#868E96"
+                  className="absolute left-3 top-3"
+                />
+                <input
+                  value={form.dropoff_location}
+                  onChange={(e) => update("dropoff_location", e.target.value)}
+                  placeholder="Drop location"
+                  className="w-full rounded-md border border-[#E9ECEF] py-2.5 pl-9 pr-3 text-sm outline-none focus:border-[#C9A84C]"
+                />
+              </div>
+            </div>
+          )}
+          <p className="mt-3 text-[0.75rem] text-[#868E96]">
+            Vehicle selection is a reminder for hotel staff. Pricing can be
+            confirmed separately by the hotel.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+          <div className="mb-4 font-serif text-[1rem] font-bold text-[#0F1923]">
+            Payment Calculation
+          </div>
+          {[
+            ["Room subtotal", money(totals.roomSubtotal)],
+            ["GST (18%)", money(totals.gst)],
+            ["Full amount", money(totals.fullAmount)],
+          ].map(([label, value], index) => (
+            <div
+              key={label}
+              className={`flex items-center justify-between py-3 text-[0.9rem] ${
+                index > 0 ? "border-t border-[#E9ECEF]" : ""
+              }`}
+            >
+              <span className="text-[#868E96]">{label}</span>
+              <span className="font-bold text-[#0F1923]">{value}</span>
+            </div>
+          ))}
+          <div className="border-t border-[#E9ECEF] py-3">
+            <div className="mb-2 text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+              Payment mode
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {MANUAL_PAYMENT_MODES.map((mode) => {
+                const active = form.payment_mode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => update("payment_mode", mode)}
+                    disabled={paying}
+                    className={`rounded-md border px-3 py-2 text-[0.82rem] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      active
+                        ? "border-[#0F1923] bg-[#0F1923] text-[#C9A84C]"
+                        : "border-[#E9ECEF] bg-white text-[#495057] hover:border-[#C9A84C]"
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="border-t border-[#E9ECEF] py-3">
+            <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+              Advance amount
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={Math.ceil(totals.fullAmount || 0)}
+              step={1}
+              value={form.advance_amount}
+              onChange={(e) => update("advance_amount", e.target.value)}
+              placeholder={String(totals.suggestedAdvanceAmount || 0)}
+              disabled={paying || !nights}
+              className="w-full rounded-md border border-[#E9ECEF] px-3 py-2.5 text-sm font-semibold text-[#2D9A6E] outline-none focus:border-[#C9A84C] disabled:cursor-not-allowed disabled:opacity-60"
+            />
+          </div>
+          <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+            <span className="text-[#868E96]">Remaining balance</span>
+            <span className="font-bold text-[#B8872F]">
+              {money(totals.remainingAmount)}
+            </span>
+          </div>
+          <button
+            onClick={payAdvance}
+            disabled={paying || calendarLoading || !nights}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-[#0F1923] px-4 py-3 text-[0.9rem] font-bold text-white transition hover:bg-[#C9A84C] hover:text-[#0F1923] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <CheckIcon size={16} />
+            {paying
+              ? "Confirming..."
+              : `Confirm ${form.payment_mode} Advance ${money(totals.advanceAmount)}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

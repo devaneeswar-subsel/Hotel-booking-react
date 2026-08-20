@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 import {
   XIcon,
   DownloadIcon,
@@ -8,7 +10,12 @@ import {
   ArrowRightIcon,
   UserIcon,
   CheckIcon,
+  CreditCardIcon,
+  GridIcon,
+  TrendingUpIcon,
 } from "./Icons";
+import VehicleCustomers from "./Components/VehicleCustomers";
+import AdminBookingForUsers from "./AdminBookingForUsers";
 
 const API = process.env.REACT_APP_API_URL || "";
 const GST_RATE = 0.18;
@@ -21,6 +28,51 @@ const apiFetch = (url, options = {}) =>
   });
 
 /* ── LIVE TIMER ── */
+function formatLocalDate(date) {
+  if (!date) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function parseLocalDate(dateStr) {
+  if (!dateStr) return null;
+  const [year, month, day] = String(dateStr).slice(0, 10).split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function buildOccupiedNights(bookings = []) {
+  const nights = new Set();
+
+  bookings.forEach((booking) => {
+    const start = parseLocalDate(booking.check_in_date);
+    const end = parseLocalDate(booking.check_out_date);
+    if (!start || !end) return;
+
+    const current = new Date(start);
+    while (current < end) {
+      nights.add(current.toDateString());
+      current.setDate(current.getDate() + 1);
+    }
+  });
+
+  return nights;
+}
+
+function isStayAvailable(checkIn, checkOut, occupiedNights) {
+  if (!checkIn || !checkOut || checkOut <= checkIn) return false;
+
+  const night = new Date(checkIn);
+  while (night < checkOut) {
+    if (occupiedNights.has(night.toDateString())) return false;
+    night.setDate(night.getDate() + 1);
+  }
+
+  return true;
+}
+
 function LiveTimer({ checkinTime }) {
   const [elapsed, setElapsed] = useState("");
 
@@ -51,12 +103,311 @@ function LiveTimer({ checkinTime }) {
 }
 
 /* ── BOOKING DETAIL MODAL ── */
+function formatChartValue(value) {
+  return (Number(value) || 0).toLocaleString("en-IN");
+}
+
+function ChartTooltip({ item, style }) {
+  if (!item) return null;
+
+  return (
+    <div
+      className="pointer-events-none absolute z-20 -translate-x-1/2 rounded-md bg-[#0F1923] px-2.5 py-1.5 text-left shadow-lg"
+      style={style}
+    >
+      <div className="whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.8px] text-[#C9A84C]">
+        {item.label}
+      </div>
+      <div className="whitespace-nowrap text-[11px] font-semibold leading-tight text-white">
+        {formatChartValue(item.value)}
+      </div>
+    </div>
+  );
+}
+
+function BarChart({ data, color = "#C9A84C", height = 64 }) {
+  const [hovered, setHovered] = useState(null);
+
+  if (!data || !data.length) return null;
+  const max = Math.max(...data.map((d) => Number(d.value) || 0), 1);
+  const chartWidth = data.length * 28;
+
+  return (
+    <div
+      className="relative"
+      style={{ height }}
+      onMouseLeave={() => setHovered(null)}
+    >
+      <ChartTooltip
+        item={hovered}
+        style={{
+          left: hovered ? `${hovered.xPercent}%` : "0%",
+          top: hovered ? `${hovered.top}px` : 0,
+        }}
+      />
+      <svg
+        width="100%"
+        height={height}
+        viewBox={`0 0 ${chartWidth} ${height}`}
+        preserveAspectRatio="none"
+      >
+        {data.map((d, i) => {
+          const value = Number(d.value) || 0;
+          const barH = Math.max(4, (value / max) * (height - 16));
+          const x = i * 28 + 4;
+          const y = height - barH - 4;
+          const label = d.label || `Item ${i + 1}`;
+
+          return (
+            <rect
+              key={`${label}-${i}`}
+              x={x}
+              y={y}
+              width={20}
+              height={barH}
+              rx={3}
+              fill={color}
+              opacity={hovered?.index === i ? 1 : 0.85}
+              onMouseEnter={() =>
+                setHovered({
+                  index: i,
+                  label,
+                  value,
+                  xPercent: ((x + 10) / chartWidth) * 100,
+                  top: Math.max(0, Math.min(height - 32, y - 30)),
+                })
+              }
+            >
+              <title>{`${label}: ${formatChartValue(value)}`}</title>
+            </rect>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function LineChart({ data, color = "#C9A84C", height = 80 }) {
+  const [hovered, setHovered] = useState(null);
+
+  if (!data || data.length < 2) return null;
+  const max = Math.max(...data.map((d) => Number(d.value) || 0), 1);
+  const w = 280;
+  const pad = 8;
+  const pts = data.map((d, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const value = Number(d.value) || 0;
+    const y = pad + (1 - value / max) * (height - pad * 2);
+    return {
+      x,
+      y,
+      value,
+      label: d.label || `Item ${i + 1}`,
+      point: `${x},${y}`,
+    };
+  });
+  const filled = [
+    ...pts.map((pt) => pt.point),
+    `${w - pad},${height - pad}`,
+    `${pad},${height - pad}`,
+  ].join(" ");
+
+  return (
+    <div
+      className="relative"
+      style={{ height }}
+      onMouseLeave={() => setHovered(null)}
+    >
+      <ChartTooltip
+        item={hovered}
+        style={{
+          left: hovered ? `${hovered.xPercent}%` : "0%",
+          top: hovered ? `${hovered.top}px` : 0,
+        }}
+      />
+      <svg
+        width="100%"
+        height={height}
+        viewBox={`0 0 ${w} ${height}`}
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <linearGradient id="managerLineGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <polygon points={filled} fill="url(#managerLineGradient)" />
+        <polyline
+          points={pts.map((pt) => pt.point).join(" ")}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {pts.map((pt, i) => (
+          <g key={`${pt.label}-${i}`}>
+            <circle cx={pt.x} cy={pt.y} r="3" fill={color} />
+            <circle
+              cx={pt.x}
+              cy={pt.y}
+              r="9"
+              fill="transparent"
+              onMouseEnter={() =>
+                setHovered({
+                  index: i,
+                  label: pt.label,
+                  value: pt.value,
+                  xPercent: (pt.x / w) * 100,
+                  top: Math.max(0, Math.min(height - 32, pt.y - 30)),
+                })
+              }
+            >
+              <title>{`${pt.label}: ${formatChartValue(pt.value)}`}</title>
+            </circle>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function DonutChart({ confirmed, cancelled, completed, size = 100 }) {
+  const [hovered, setHovered] = useState(null);
+  const rawTotal = confirmed + cancelled + completed;
+  const total = rawTotal || 1;
+  const r = 28;
+  const cx = size / 2;
+  const cy = size / 2;
+  const circ = 2 * Math.PI * r;
+  const segments = [
+    { label: "Confirmed", val: confirmed, color: "#2D9A6E" },
+    { label: "Cancelled", val: cancelled, color: "#C0392B" },
+    { label: "Completed", val: completed, color: "#2471A3" },
+  ];
+  let offset = 0;
+  return (
+    <div
+      className="relative"
+      style={{ width: size, height: size }}
+      onMouseLeave={() => setHovered(null)}
+    >
+      <ChartTooltip
+        item={hovered}
+        style={{
+          left: hovered ? `${hovered.xPercent}%` : "0%",
+          top: hovered ? `${hovered.top}px` : 0,
+        }}
+      />
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r}
+          fill="none"
+          stroke="#F1F3F5"
+          strokeWidth="10"
+        />
+        {segments.map(({ label, val, color }) => {
+          const value = Number(val) || 0;
+          const dash = (value / total) * circ;
+          const startOffset = offset;
+          const middleAngle =
+            -90 + ((startOffset + dash / 2) / circ) * 360;
+          const rad = (middleAngle * Math.PI) / 180;
+          const tooltipX = cx + Math.cos(rad) * r;
+          const tooltipY = cy + Math.sin(rad) * r;
+          const el = (
+            <circle
+              key={label}
+              cx={cx}
+              cy={cy}
+              r={r}
+              fill="none"
+              stroke={color}
+              strokeWidth={hovered?.label === label ? "12" : "10"}
+              strokeDasharray={`${dash} ${circ - dash}`}
+              strokeDashoffset={-startOffset}
+              className="cursor-pointer transition-all"
+              style={{
+                transform: "rotate(-90deg)",
+                transformOrigin: `${cx}px ${cy}px`,
+              }}
+              onMouseEnter={() =>
+                setHovered({
+                  label,
+                  value,
+                  xPercent: (tooltipX / size) * 100,
+                  top: Math.max(0, Math.min(size - 32, tooltipY - 30)),
+                })
+              }
+            >
+              <title>{`${label}: ${formatChartValue(value)}`}</title>
+            </circle>
+          );
+          offset += dash;
+          return el;
+        })}
+        <text
+          x={cx}
+          y={cy + 5}
+          textAnchor="middle"
+          fontSize="13"
+          fontWeight="700"
+          fill="#0F1923"
+          pointerEvents="none"
+        >
+          {rawTotal}
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+  accent = "#0F1923",
+  chartData,
+  chartType = "bar",
+}) {
+  return (
+    <div className="flex flex-col rounded-2xl border border-[#E9ECEF] bg-white px-[22px] py-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+      <div className="mb-3 flex items-start justify-between">
+        <div>
+          <div className="mb-[6px] text-[0.65rem] font-bold uppercase tracking-[1.5px] text-[#868E96]">
+            {label}
+          </div>
+          <div className="font-body text-[1.5rem] font-semibold leading-none text-[#0F1923]">
+            {value}
+          </div>
+        </div>
+        <div
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+          style={{ background: accent }}
+        >
+          <Icon size={18} color="#fff" />
+        </div>
+      </div>
+      {chartData && chartType === "bar" && (
+        <BarChart data={chartData} color="#C9A84C" height={52} />
+      )}
+      {chartData && chartType === "line" && (
+        <LineChart data={chartData} color="#C9A84C" height={52} />
+      )}
+    </div>
+  );
+}
+
 function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [addonLabel, setAddonLabel] = useState("");
   const [addonAmount, setAddonAmount] = useState("");
   const [addonLoading, setAddonLoading] = useState(false);
+  const [balanceLoading, setBalanceLoading] = useState(false);
   const [paymentMode, setPaymentMode] = useState("Cash");
   const [addonPaid, setAddonPaid] = useState(false);
 
@@ -64,7 +415,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const PRESET_ADDONS = [
     "Food & Beverages",
     "Laundry",
-    "Spa/Massage",
     "Extra Bed",
     "Room Service",
   ];
@@ -133,6 +483,27 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     showToast("Addon removed", "success");
     fetchBooking();
     onRefresh();
+  }
+
+  async function markBalancePaid() {
+    if (!booking?.actual_checkin) {
+      return showToast("Record check-in before collecting balance", "error");
+    }
+    setBalanceLoading(true);
+    try {
+      const res = await apiFetch(`/api/bookings/${bookingId}/balance-paid`, {
+        method: "PATCH",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Unable to mark balance paid");
+      showToast("Remaining balance marked as paid", "success");
+      fetchBooking();
+      onRefresh();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setBalanceLoading(false);
+    }
   }
 
   async function downloadInvoice() {
@@ -213,8 +584,8 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(73, 80, 87);
-    doc.text("123 Palace Road, Chennai", W / 2 + 8, 57);
-    doc.text("hello@vvgrandpark.com | +91 12345 67890", W / 2 + 8, 63);
+    doc.text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", W / 2 + 8, 57);
+    doc.text("+91 93849 82510 | vvgrandpark@gmail.com", W / 2 + 8, 63);
     doc.text("GSTIN: 33AAAAA0000A1Z5", W / 2 + 8, 69);
     const tableTop = 76;
     doc.setFillColor(15, 25, 35);
@@ -398,9 +769,15 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.text(
-      "www.vvgrandpark.com  |  hello@vvgrandpark.com  |  +91 12345 67890",
+      "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510",
       W / 2,
       footerY + 11,
+      { align: "center" }
+    );
+    doc.text(
+      "vvgrandpark@gmail.com  |  www.vvgrandpark.com",
+      W / 2,
+      footerY + 17,
       { align: "center" }
     );
     doc.save(`${invNo}-${(b.guest_name || "guest").replace(/\s+/g, "_")}.pdf`);
@@ -424,6 +801,58 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const addonGst = Math.round(addonTotal * GST_RATE * 100) / 100;
   const remainingAmount = Math.round((addonTotal + addonGst) * 100) / 100;
   const finalTotal = Math.round((alreadyPaid + remainingAmount) * 100) / 100;
+  const paymentTotalAmount = Number(
+    booking.total_amount || booking.final_total || alreadyPaid || 0
+  );
+  const advancePaidAmount = Number(booking.advance_paid || 0);
+  const balancePaidAmount = Number(booking.balance_paid || 0);
+  const storedPaymentRemaining = Number(booking.remaining_amount || 0);
+  const calculatedPaymentRemaining = Math.max(
+    0,
+    Math.round(
+      (paymentTotalAmount - advancePaidAmount - balancePaidAmount) * 100
+    ) / 100
+  );
+  const advanceRemainingAmount =
+    storedPaymentRemaining > 0
+      ? storedPaymentRemaining
+      : calculatedPaymentRemaining;
+  const rawPaymentStatus =
+    booking.payment_status ||
+    (advanceRemainingAmount > 0 ? "PARTIALLY_PAID" : "PAID");
+  const paymentStatusLabel =
+    rawPaymentStatus === "PARTIALLY_PAID"
+      ? "Partially Paid"
+      : rawPaymentStatus.charAt(0).toUpperCase() +
+        rawPaymentStatus.slice(1).toLowerCase();
+  const hasAdvancePayment =
+    advancePaidAmount > 0 ||
+    balancePaidAmount > 0 ||
+    advanceRemainingAmount > 0 ||
+    rawPaymentStatus === "PARTIALLY_PAID";
+  const receivedBookingAmount = hasAdvancePayment
+    ? advancePaidAmount + balancePaidAmount
+    : alreadyPaid;
+  const advancePaymentMode = (() => {
+    const method = String(booking.payment_method || "").trim();
+    if (/cash/i.test(method)) return "Cash";
+    if (/online|razorpay/i.test(method)) return "Online";
+    if (/upi/i.test(method)) return "UPI";
+    if (/card/i.test(method)) return "Card";
+    if (/bank/i.test(method)) return "Bank Transfer";
+    return method.replace(/\s*advance$/i, "") || paymentMode;
+  })();
+  const bookingPaidLabel = hasAdvancePayment
+    ? `Amount Paid (${advancePaymentMode})`
+    : "Amount Already Paid";
+  const totalRemainingToPay = Math.round(
+    ((hasAdvancePayment ? advanceRemainingAmount : 0) +
+      (addonPaid ? 0 : remainingAmount)) *
+      100
+  ) / 100;
+  const allPaymentsSettled = totalRemainingToPay <= 0;
+  const formatMoney = (value) =>
+    `Rs.${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
 
   return (
     <div className="fixed inset-0 z-[600] flex justify-center p-4 bg-[#0F1923]/70 backdrop-blur-[6px] overflow-y-auto items-start sm:items-center">
@@ -497,6 +926,63 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               )}
             </div>
           </div>
+
+          {hasAdvancePayment && (
+            <div className="mb-5 rounded-xl border border-[#C9A84C]/30 bg-white px-5 py-4 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="font-['Playfair_Display',serif] text-[0.9rem] font-semibold text-[#0F1923]">
+                  Payment Details
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-[0.65rem] font-bold uppercase tracking-[0.8px] ${
+                    rawPaymentStatus === "PAID"
+                      ? "bg-[#2D9A6E]/10 text-[#2D9A6E]"
+                      : "bg-[#C9A84C]/15 text-[#9B6D12]"
+                  }`}
+                >
+                  {paymentStatusLabel}
+                </span>
+              </div>
+              {[
+                ["Total Amount", paymentTotalAmount],
+                [bookingPaidLabel, advancePaidAmount],
+                ...(balancePaidAmount > 0
+                  ? [["Balance Paid", balancePaidAmount]]
+                  : []),
+                ["Remaining Balance", advanceRemainingAmount],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="flex items-center justify-between border-t border-[#E9ECEF] py-2 text-[0.86rem]"
+                >
+                  <span className="text-[#868E96]">{label}</span>
+                  <span className="font-bold text-[#0F1923]">
+                    {formatMoney(value)}
+                  </span>
+                </div>
+              ))}
+              {advanceRemainingAmount > 0 && (
+                <button
+                  onClick={markBalancePaid}
+                  disabled={
+                    balanceLoading ||
+                    !booking.actual_checkin ||
+                    booking.status === "cancelled"
+                  }
+                  title={
+                    booking.actual_checkin
+                      ? ""
+                      : "Record check-in before collecting balance"
+                  }
+                  className="mt-3 w-full rounded-md bg-[#C9A84C] px-4 py-2.5 text-[0.84rem] font-bold text-[#0F1923] transition hover:bg-[#b8953e] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {balanceLoading
+                    ? "Updating..."
+                    : `Collect Balance ${formatMoney(advanceRemainingAmount)}`}
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Add-ons Section */}
           <div className="bg-[#F8F9FA] rounded-xl px-5 py-4 mb-5">
@@ -634,7 +1120,9 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
             {/* Room Payments Block */}
             <div className="mb-2.5">
               <div className="text-[0.6rem] font-bold text-white/30 tracking-[1.5px] uppercase mb-1.5">
-                Booking Payment (Already Paid)
+                {hasAdvancePayment
+                  ? "Booking Payment"
+                  : "Booking Payment (Already Paid)"}
               </div>
               {[
                 { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
@@ -650,10 +1138,10 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               ))}
               <div className="flex justify-between items-center mt-2 bg-[#2D9A6E]/15 rounded-md px-2.5 py-[7px] border border-[#2D9A6E]/30">
                 <span className="text-[0.82rem] text-[#2D9A6E] font-bold">
-                  Amount Already Paid
+                  {bookingPaidLabel}
                 </span>
                 <span className="text-[0.95rem] text-[#2D9A6E] font-bold">
-                  Rs.{Math.round(alreadyPaid).toLocaleString()}
+                  Rs.{Math.round(receivedBookingAmount).toLocaleString()}
                 </span>
               </div>
             </div>
@@ -680,15 +1168,15 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
 
               {/* Remaining / Extra Due Row */}
               <div className={`flex justify-between items-center mt-2 rounded-md px-2.5 py-[7px] border ${
-                addonPaid
+                allPaymentsSettled
                   ? "bg-[#2D9A6E]/15 border-[#2D9A6E]/30 text-[#2D9A6E]"
                   : "bg-[#FFf8dc]/15 border-[#FFf8dc]/30 text-[#b47814]"
               }`}>
                 <span className="text-[0.82rem] font-bold">
-                  {addonPaid ? "Add-ons Paid" : "Remaining to Pay"}
+                  {allPaymentsSettled ? "All Paid" : "Remaining to Pay"}
                 </span>
                 <span className="text-[0.95rem] font-bold">
-                  Rs.{Math.round(remainingAmount).toLocaleString()}
+                  Rs.{Math.round(totalRemainingToPay).toLocaleString()}
                 </span>
               </div>
             </div>
@@ -746,15 +1234,47 @@ function ManagerBookingForm({
     guest_count: 1,
   });
   const [loading, setLoading] = useState(false);
+  const [calendarLoading, setCalendarLoading] = useState(true);
+  const [occupiedNights, setOccupiedNights] = useState(new Set());
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadBookedDates() {
+      setCalendarLoading(true);
+
+      try {
+        const res = await apiFetch(`/api/rooms/${room.room_id}/booked-dates`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Unable to load calendar");
+
+        if (active) setOccupiedNights(buildOccupiedNights(data));
+      } catch (err) {
+        console.error(err);
+        if (active) {
+          setOccupiedNights(new Set());
+          showToast("Unable to load booked dates", "error");
+        }
+      } finally {
+        if (active) setCalendarLoading(false);
+      }
+    }
+
+    loadBookedDates();
+
+    return () => {
+      active = false;
+    };
+  }, [room.room_id, showToast]);
+
+  const checkInDate = parseLocalDate(form.check_in_date);
+  const checkOutDate = parseLocalDate(form.check_out_date);
 
   const nights =
-    form.check_in_date && form.check_out_date
+    checkInDate && checkOutDate
       ? Math.max(
           0,
-          Math.ceil(
-            (new Date(form.check_out_date) - new Date(form.check_in_date)) /
-              86400000
-          )
+          Math.ceil((checkOutDate - checkInDate) / 86400000)
         )
       : 0;
 
@@ -765,7 +1285,11 @@ function ManagerBookingForm({
   async function submit(e) {
     e.preventDefault();
     if (nights <= 0) {
-      showToast("Invalid dates", "error");
+      showToast("Check-out must be after check-in!", "error");
+      return;
+    }
+    if (!isStayAvailable(checkInDate, checkOutDate, occupiedNights)) {
+      showToast("Selected dates are already booked", "error");
       return;
     }
     setLoading(true);
@@ -792,6 +1316,31 @@ function ManagerBookingForm({
     }
   }
 
+  function handleCheckInChange(date) {
+    const nextCheckIn = date ? formatLocalDate(date) : "";
+
+    setForm((prev) => {
+      const currentCheckOut = parseLocalDate(prev.check_out_date);
+      const keepCheckOut =
+        date && currentCheckOut
+          ? isStayAvailable(date, currentCheckOut, occupiedNights)
+          : false;
+
+      return {
+        ...prev,
+        check_in_date: nextCheckIn,
+        check_out_date: keepCheckOut ? prev.check_out_date : "",
+      };
+    });
+  }
+
+  function handleCheckOutChange(date) {
+    setForm((prev) => ({
+      ...prev,
+      check_out_date: date ? formatLocalDate(date) : "",
+    }));
+  }
+
   const inputClass =
     "w-full px-[13px] py-[10px] rounded-md border-[1.5px] border-[#E9ECEF] text-sm text-[#212529] focus:outline-none";
   const labelClass =
@@ -803,29 +1352,53 @@ function ManagerBookingForm({
       <div className="grid grid-cols-1 gap-3.5 mb-3.5">
         <div>
           <label className={labelClass}>Check-in</label>
-          <input
-            type="date"
+          <DatePicker
             required
-            className={inputClass}
-            min={new Date().toISOString().split("T")[0]}
-            value={form.check_in_date}
-            onChange={(e) =>
-              setForm({ ...form, check_in_date: e.target.value })
+            selected={checkInDate}
+            onChange={handleCheckInChange}
+            minDate={new Date()}
+            filterDate={(date) =>
+              !occupiedNights.has(date.toDateString())
             }
+            dateFormat="dd/MM/yyyy"
+            placeholderText="DD/MM/YYYY"
+            popperPlacement="bottom"
+            popperClassName="vv-calendar-popper"
+            calendarClassName="vv-calendar"
+            disabled={loading || calendarLoading}
+            className={inputClass}
           />
         </div>
         <div>
           <label className={labelClass}>Check-out</label>
-          <input
-            type="date"
+          <DatePicker
             required
-            className={inputClass}
-            min={form.check_in_date || new Date().toISOString().split("T")[0]}
-            value={form.check_out_date}
-            onChange={(e) =>
-              setForm({ ...form, check_out_date: e.target.value })
+            selected={checkOutDate}
+            onChange={handleCheckOutChange}
+            minDate={checkInDate || new Date()}
+            filterDate={(date) =>
+              isStayAvailable(checkInDate, date, occupiedNights)
             }
+            dateFormat="dd/MM/yyyy"
+            placeholderText={checkInDate ? "DD/MM/YYYY" : "Select check-in first"}
+            popperPlacement="bottom"
+            popperClassName="vv-calendar-popper"
+            calendarClassName="vv-calendar"
+            disabled={!checkInDate || loading || calendarLoading}
+            className={inputClass}
           />
+        </div>
+      </div>
+
+      <div className="mb-3.5 flex items-center justify-between rounded-md border border-[#E9ECEF] bg-[#F8F9FA] px-3 py-2 text-xs">
+        <div className="flex items-center gap-1.5 text-[#495057]">
+          <span className="font-semibold text-[#0F1923]">Check-in</span>
+          <span className="text-[#868E96]">from 1:00 PM</span>
+        </div>
+        <div className="h-4 w-px bg-[#E9ECEF]" />
+        <div className="flex items-center gap-1.5 text-[#495057]">
+          <span className="font-semibold text-[#0F1923]">Check-out</span>
+          <span className="text-[#868E96]">by 11:00 AM</span>
         </div>
       </div>
 
@@ -875,11 +1448,15 @@ function ManagerBookingForm({
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || calendarLoading}
         className="w-full p-3 bg-[#0F1923] text-white border-none rounded-md font-inherit font-semibold text-[0.9rem] cursor-pointer flex items-center justify-center gap-2 disabled:opacity-70"
       >
         <CheckIcon size={15} color="#fff" />
-        {loading ? "Confirming..." : "Confirm Booking"}
+        {calendarLoading
+          ? "Loading calendar..."
+          : loading
+            ? "Confirming..."
+            : "Confirm Booking"}
       </button>
     </form>
   );
@@ -1326,7 +1903,7 @@ function ReportsTab({ showToast }) {
    MAIN MANAGER DASHBOARD
 ══════════════════════════════════════════════════════════════════════════════ */
 export default function ManagerDashboard({ managerUser, onLogout }) {
-  const [tab, setTab] = useState("bookings");
+  const [tab, setTab] = useState("overview");
   const [bookings, setBookings] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [, setLoading] = useState(true);
@@ -1381,9 +1958,65 @@ const paginatedBookings = filteredBookings.slice(
   const checkedInBookings = bookings.filter(
     (b) => b.actual_checkin && !b.actual_checkout && b.status === "confirmed"
   );
+  const dateKey = (value = new Date()) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  };
+  const paidBookings = bookings.filter(
+    (b) => b.status === "confirmed" || b.status === "completed"
+  );
+  const totalRevenue = paidBookings.reduce(
+    (sum, b) => sum + Number(b.final_total || b.total_price || 0),
+    0
+  );
+  const last7 = Array(7)
+    .fill(0)
+    .map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      const key = dateKey(d);
+      return {
+        label: d.toLocaleDateString("en-IN", { weekday: "short" }),
+        value: bookings.filter((b) => dateKey(b.check_in_date) === key).length,
+      };
+    });
+  const revenueByRoom = Object.entries(
+    paidBookings.reduce((acc, booking) => {
+      const key = booking.room_type || "Room";
+      acc[key] = (acc[key] || 0) + Number(booking.final_total || booking.total_price || 0);
+      return acc;
+    }, {})
+  )
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6);
+  const confirmed = bookings.filter((b) => b.status === "confirmed").length;
+  const cancelled = bookings.filter((b) => b.status === "cancelled").length;
+  const completed = bookings.filter((b) => b.status === "completed").length;
+  const roomAvailabilityData = [
+    {
+      label: "Open",
+      value: rooms.filter((r) => Number(r.is_available) !== 0).length,
+    },
+    {
+      label: "Blocked",
+      value: rooms.filter((r) => Number(r.is_available) === 0).length,
+    },
+  ];
+  const recentBookings = [...bookings]
+    .sort(
+      (a, b) =>
+        new Date(b.created_at || b.check_in_date || 0) -
+        new Date(a.created_at || a.check_in_date || 0)
+    )
+    .slice(0, 5);
 
   const tabs = [
+    { id: "overview", label: "Overview", icon: GridIcon },
     { id: "bookings", label: "Bookings", icon: BookingIcon },
+    { id: "vehicles", label: "Vehicle Customers", icon: BookingIcon },
     { id: "checkins", label: "Check-in Details", icon: BedIcon },
     { id: "book", label: "New Booking", icon: CalendarIcon },
     { id: "reports", label: "Reports", icon: DownloadIcon },
@@ -1455,6 +2088,7 @@ const getPageNumbers = (currentPage, totalPages) => {
             <div
               key={id}
               onClick={() => {
+                setBookingRoom(null);
                 setTab(id);
                 setSidebarOpen(false);
               }}
@@ -1505,9 +2139,12 @@ const getPageNumbers = (currentPage, totalPages) => {
   );
 
   const tabLabels = {
+    overview: "Overview",
     bookings: "Bookings",
+    vehicles: "Vehicle Customers",
     checkins: "Check-in Details",
     book: "New Booking",
+    admin_booking_for_users: "Admin Booking for User",
     reports: "Reports",
   };
 
@@ -1573,6 +2210,200 @@ const getPageNumbers = (currentPage, totalPages) => {
         </div>
 
         <div className="p-5 pt-20 md:pt-16">
+          {tab === "overview" && (
+            <>
+              <div className="mb-6 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 max-sm:grid-cols-2 max-[480px]:grid-cols-1">
+                <StatCard
+                  label="Total Rooms"
+                  value={rooms.length}
+                  icon={BedIcon}
+                  accent="#0F1923"
+                  chartData={roomAvailabilityData}
+                />
+                <StatCard
+                  label="Total Bookings"
+                  value={bookings.length}
+                  icon={BookingIcon}
+                  accent="#2471A3"
+                  chartData={last7}
+                />
+                <StatCard
+                  label="Active Check-ins"
+                  value={checkedInBookings.length}
+                  icon={UserIcon}
+                  accent="#2D9A6E"
+                  chartData={[
+                    { label: "Confirmed", value: confirmed },
+                    { label: "Completed", value: completed },
+                    { label: "Cancelled", value: cancelled },
+                  ]}
+                />
+                <StatCard
+                  label="Total Revenue"
+                  value={`Rs.${Number(totalRevenue).toLocaleString("en-IN")}`}
+                  icon={CreditCardIcon}
+                  accent="#C9A84C"
+                  chartData={revenueByRoom}
+                />
+              </div>
+
+              <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-2xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <div className="mb-0.5 text-[0.65rem] uppercase tracking-[1.5px] text-[#868E96]">
+                        Bookings This Week
+                      </div>
+                      <div className="font-body text-[1.4rem] font-semibold text-[#0F1923]">
+                        {last7.reduce((sum, item) => sum + item.value, 0)}
+                      </div>
+                    </div>
+                    <TrendingUpIcon size={18} color="#C9A84C" />
+                  </div>
+                  <LineChart data={last7} color="#C9A84C" height={80} />
+                  <div className="mt-1.5 flex justify-between">
+                    {last7.map((d) => (
+                      <div key={d.label} className="text-center text-[0.6rem] text-[#868E96]">
+                        {d.label}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <div className="mb-0.5 text-[0.65rem] uppercase tracking-[1.5px] text-[#868E96]">
+                        Revenue by Room
+                      </div>
+                      <div className="font-body text-[1.4rem] font-semibold text-[#0F1923]">
+                        Rs.{Number(totalRevenue).toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                    <CreditCardIcon size={18} color="#C9A84C" />
+                  </div>
+                  {revenueByRoom.length > 0 ? (
+                    <>
+                      <BarChart data={revenueByRoom} color="#0F1923" height={72} />
+                      <div className="mt-1.5 flex justify-between">
+                        {revenueByRoom.map((d) => (
+                          <div key={d.label} className="text-center text-[0.58rem] text-[#868E96]">
+                            {d.label.slice(0, 3)}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="py-6 text-center text-[0.82rem] text-[#868E96]">
+                      No revenue data yet
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+                  <div className="text-[0.65rem] uppercase tracking-[1.5px] text-[#868E96]">
+                    Booking Status
+                  </div>
+                  <DonutChart
+                    confirmed={confirmed}
+                    cancelled={cancelled}
+                    completed={completed}
+                    size={100}
+                  />
+                  <div className="flex w-full flex-col gap-2">
+                    {[
+                      { label: "Confirmed", val: confirmed, color: "#2D9A6E" },
+                      { label: "Completed", val: completed, color: "#2471A3" },
+                      { label: "Cancelled", val: cancelled, color: "#C0392B" },
+                    ].map(({ label, val, color }) => (
+                      <div key={label} className="flex items-center justify-between text-[0.78rem]">
+                        <div className="flex items-center gap-1.5">
+                          <div className="h-2 w-2 rounded-full" style={{ background: color }} />
+                          <span className="text-[#495057]">{label}</span>
+                        </div>
+                        <span className="font-bold text-[#0F1923]">{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="font-serif text-[1rem] font-semibold text-[#0F1923]">
+                    Recent Bookings
+                  </div>
+                  <button
+                    onClick={() => setTab("bookings")}
+                    className="flex items-center gap-1 border-0 bg-transparent text-[0.78rem] font-semibold text-[#C9A84C]"
+                  >
+                    View all <ArrowRightIcon size={12} color="#C9A84C" />
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[620px] border-collapse">
+                    <thead>
+                      <tr>
+                        {["#", "Guest", "Room", "Check-in", "Total", "Status"].map((h) => (
+                          <th key={h} className="border-b border-[#E9ECEF] bg-[#F8F9FA] px-3 py-3 text-left text-[0.62rem] uppercase tracking-[1px] text-[#868E96]">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentBookings.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-6 text-center text-[#868E96]">
+                            No bookings yet
+                          </td>
+                        </tr>
+                      ) : (
+                        recentBookings.map((b) => (
+                          <tr
+                            key={b.booking_id}
+                            className="cursor-pointer border-t border-[#F1F3F5] hover:bg-[#F8F9FA]"
+                            onClick={() => setSelectedBookingId(b.booking_id)}
+                          >
+                            <td className="px-3 py-3 text-[0.78rem] text-[#868E96]">#{b.booking_id}</td>
+                            <td className="px-3 py-3 text-[0.85rem] font-semibold text-[#0F1923]">{b.guest_name}</td>
+                            <td className="px-3 py-3 text-[0.82rem] text-[#495057]">{b.room_type}</td>
+                            <td className="px-3 py-3 text-[0.82rem] text-[#495057]">{b.check_in_date?.slice(0, 10)}</td>
+                            <td className="px-3 py-3 text-[0.85rem] font-bold text-[#0F1923]">
+                              Rs.{Number(b.final_total || b.total_price || 0).toLocaleString("en-IN")}
+                            </td>
+                            <td className="px-3 py-3">
+                              <span
+                                className={`inline-block rounded-[3px] px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide ${
+                                  b.status === "confirmed"
+                                    ? "bg-[#E8F8F0] text-[#2D9A6E]"
+                                    : b.status === "cancelled"
+                                      ? "bg-[#FDECEA] text-[#C0392B]"
+                                      : "bg-[#EAF2FB] text-[#2471A3]"
+                                }`}
+                              >
+                                {b.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === "vehicles" && (
+            <VehicleCustomers
+              bookings={bookings}
+              apiFetch={apiFetch}
+              onRefresh={fetchAll}
+              showToast={showToast}
+            />
+          )}
+
           {tab === "bookings" && (
             <div className="bg-white rounded-[14px] px-[22px] py-5 border border-[#E9ECEF]">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
@@ -1794,6 +2625,24 @@ const getPageNumbers = (currentPage, totalPages) => {
             </div>
           )}
 
+          {tab === "admin_booking_for_users" && bookingRoom && (
+            <AdminBookingForUsers
+              room={bookingRoom}
+              apiFetch={apiFetch}
+              showToast={showToast}
+              onBack={() => {
+                setBookingRoom(null);
+                setTab("book");
+              }}
+              onSuccess={(bookingId) => {
+                setBookingRoom(null);
+                fetchAll();
+                setSelectedBookingId(bookingId);
+                setTab("bookings");
+              }}
+            />
+          )}
+
           {tab === "book" && (
             <div>
               <div className="mb-4">
@@ -1801,7 +2650,9 @@ const getPageNumbers = (currentPage, totalPages) => {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {rooms.map((r) => {
+                {rooms
+                  .filter((r) => Number(r.is_available) !== 0)
+                  .map((r) => {
                   const roomImage = r.image_url || r.image || r.photo || r.thumbnail || "/room-placeholder.jpg";
                   return (
                     <div key={r.room_id} className="bg-white rounded-[10px] overflow-hidden shadow-sm">
@@ -1825,7 +2676,10 @@ const getPageNumbers = (currentPage, totalPages) => {
                           </div>
                           <div>
                               <button
-  onClick={() => setBookingRoom(r)}
+  onClick={() => {
+    setBookingRoom(r);
+    setTab("admin_booking_for_users");
+  }}
   className="px-3 py-1.5 bg-[#0F1923] text-white rounded-md transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
 >
   Book
@@ -1854,7 +2708,7 @@ const getPageNumbers = (currentPage, totalPages) => {
         />
       )}
 
-      {bookingRoom && (
+      {bookingRoom && tab === "legacy_booking_modal" && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-[rgba(15,25,35,0.7)] backdrop-blur-md overflow-y-auto">
           <div className="w-full max-w-[440px] bg-white rounded-[20px] shadow-[0_16px_48px_rgba(0,0,0,0.2)] overflow-hidden max-h-[90vh] flex flex-col">
 
@@ -1891,7 +2745,7 @@ const getPageNumbers = (currentPage, totalPages) => {
 
       {toast && (
         <div
-          className={`fixed bottom-6 right-6 z-[9999] text-white px-5 py-3 rounded-[10px] text-[0.85rem] font-semibold shadow-[0_4px_20px_rgba(0,0,0,0.2)] ${
+          className={`fixed left-1/2 top-6 z-[9999] -translate-x-1/2 text-white px-5 py-3 rounded-[10px] text-[0.85rem] font-semibold shadow-[0_4px_20px_rgba(0,0,0,0.2)] ${
             toast.type === "error"
               ? "bg-[#C0392B]"
               : "bg-[#2D9A6E]"

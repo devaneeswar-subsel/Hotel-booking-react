@@ -26,6 +26,12 @@ const navLinks = [
   { label: "Rooms", id: "rooms", href: "/#rooms" },
   { label: "Facilities", id: "facilities", href: "/#facilities" },
   { label: "Gallery", id: "gallery", href: "/#gallery" },
+  {
+    label: "Nearby Attractions",
+    id: "nearby-attractions",
+    href: "/#nearby-attractions",
+  },
+  { label: "Contact", id: "contact", href: "/#contact" },
 ];
 
 const fadeUp = (delay = 0) => ({
@@ -149,7 +155,7 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 24,
+            gap: 18,
             flex: "1 1 auto",
             justifyContent: "center",
             minWidth: 0,
@@ -162,7 +168,7 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
               onClick={(event) => handleSectionLink(event, link.id)}
               style={{
                 cursor: "pointer",
-                fontSize: "0.82rem",
+                fontSize: "0.78rem",
                 fontWeight: 500,
                 color: "rgba(255,255,255,0.75)",
                 padding: "4px 0",
@@ -597,8 +603,8 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
         .hero-nav-actions { display: flex !important; }
         .hero-hamburger { display: none !important; }
 
-        /* Switch to hamburger at 820px — handles 100%–150% zoom gracefully */
-        @media (max-width: 820px) {
+        /* Switch to hamburger early enough for the expanded nav menu */
+        @media (max-width: 1080px) {
           .hero-nav-links { display: none !important; }
           .hero-nav-actions { display: none !important; }
           .hero-hamburger { display: flex !important; }

@@ -18,6 +18,14 @@ const hotel = {
   effectiveDate: "18 August 2026",
 };
 
+const guestChildPolicyBullets = [
+  "Maximum occupancy: 2 adults + 1 child per room.",
+  "Children below 5 years: Stay free of charge when sharing the existing bed with parents.",
+  "Complimentary food: One child below 5 years is eligible for complimentary food during the stay.",
+  "Extra bed: An extra bed is not included unless specifically requested and approved by the hotel.",
+  "Age verification: The hotel may request proof of the child's age at check-in.",
+];
+
 const policies = {
   terms: {
     title: "Terms & Conditions",
@@ -43,7 +51,7 @@ const policies = {
       {
         title: "Check-in / Check-out",
         bullets: [
-          "Check-in: 2:00 PM. Check-out: 11:00 AM.",
+          "Check-in: 1:00 PM. Check-out: 11:00 AM.",
           "Early check-in and late check-out are subject to availability and may attract additional charges.",
           "Retention of the room beyond check-out time without prior approval may be charged as an additional day.",
         ],
@@ -63,6 +71,10 @@ const policies = {
           "Only Guests registered at check-in may occupy the room. The maximum occupancy per room type must not be exceeded.",
           "Visitors who are not registered Guests are not permitted in guest rooms and may be asked to leave.",
         ],
+      },
+      {
+        title: "Guest & Child Policy",
+        bullets: guestChildPolicyBullets,
       },
       {
         title: "House Rules",
@@ -162,6 +174,10 @@ const policies = {
         title: "Children's Data",
         body:
           "We do not knowingly process the personal data of children under 18 without verifiable parental or guardian consent.",
+      },
+      {
+        title: "Guest & Child Policy",
+        bullets: guestChildPolicyBullets,
       },
     ],
   },
