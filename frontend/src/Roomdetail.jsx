@@ -296,6 +296,7 @@ export default function RoomDetail({
 }) {
   const [activeImg, setActiveImg] = useState(0);
   const [imgLoading, setImgLoading] = useState(false);
+  const isAdmin = user?.role === "admin";
   const extra = ROOM_EXTRAS[room.room_type] || ROOM_EXTRAS.Standard;
   const images = room.image_url
     ? [room.image_url, ...extra.images.slice(1)]
@@ -549,13 +550,34 @@ export default function RoomDetail({
             {/* Book Button */}
             <div className="bg-white px-5 pb-3 pt-5">
               <button
-                onClick={() => { if (!user) { onAuthPrompt(); return; } onBook(room); }}
+                onClick={() => {
+                  if (isAdmin) return;
+                  if (!user) {
+                    onAuthPrompt();
+                    return;
+                  }
+                  onBook(room);
+                }}
+                disabled={isAdmin}
+                title={isAdmin ? "Admin cannot book from user room details" : ""}
                 className="w-full rounded-xl py-4 text-base font-bold transition-all hover:-translate-y-[1px]"
-                style={{ backgroundColor: "#0f1923", color: "white" }}
-                onMouseEnter={(e) => { e.target.style.backgroundColor = "#c9a84c"; e.target.style.color = "black"; }}
-                onMouseLeave={(e) => { e.target.style.backgroundColor = "#0f1923"; e.target.style.color = "white"; }}
+                style={{
+                  backgroundColor: isAdmin ? "#DEE2E6" : "#0f1923",
+                  color: isAdmin ? "#868E96" : "white",
+                  cursor: isAdmin ? "not-allowed" : "pointer",
+                }}
+                onMouseEnter={(e) => {
+                  if (isAdmin) return;
+                  e.target.style.backgroundColor = "#c9a84c";
+                  e.target.style.color = "black";
+                }}
+                onMouseLeave={(e) => {
+                  if (isAdmin) return;
+                  e.target.style.backgroundColor = "#0f1923";
+                  e.target.style.color = "white";
+                }}
               >
-                Book Now
+                {isAdmin ? "Admin Booking Disabled" : "Book Now"}
               </button>
               <p className="mt-2 text-center text-xs text-[var(--c-muted)]">
                 Free cancellation · No hidden charges

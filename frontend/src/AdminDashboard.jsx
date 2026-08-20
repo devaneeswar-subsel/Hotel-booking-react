@@ -18,6 +18,7 @@ import {
 } from "./Icons";
 import VehicleCustomers from "./Components/VehicleCustomers";
 import AdminBookingForUsers from "./AdminBookingForUsers";
+import { getPaginationItems } from "./pagination";
 
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
@@ -2772,41 +2773,17 @@ export default function AdminDashboard({
     setUserPage(1);
   }, [tab]);
 
-  const getPageNumbers = (currentPage, totalPages) => {
-    const pages = [];
+  useEffect(() => {
+    setBookingPage((page) =>
+      Math.min(Math.max(page, 1), Math.max(totalPages, 1)),
+    );
+  }, [totalPages]);
 
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
-    } else {
-      if (currentPage <= 4) {
-        pages.push(1, 2, 3, 4, 5, "...", totalPages);
-      } else if (currentPage >= totalPages - 3) {
-        pages.push(
-          1,
-          "...",
-          totalPages - 4,
-          totalPages - 3,
-          totalPages - 2,
-          totalPages - 1,
-          totalPages,
-        );
-      } else {
-        pages.push(
-          1,
-          "...",
-          currentPage - 1,
-          currentPage,
-          currentPage + 1,
-          "...",
-          totalPages,
-        );
-      }
-    }
-
-    return pages;
-  };
+  useEffect(() => {
+    setUserPage((page) =>
+      Math.min(Math.max(page, 1), Math.max(userTotalPages, 1)),
+    );
+  }, [userTotalPages]);
   // ── Shared cell classes ──────────────────────────────────────────────────
   const thCls =
     "px-3.5 py-2.5 text-left text-[0.62rem] font-bold text-gray-400 uppercase tracking-[1px] border-b-[1.5px] border-gray-200 bg-gray-50 whitespace-nowrap";
@@ -3221,6 +3198,7 @@ export default function AdminDashboard({
                     value={searchTerm}
                     onChange={(e) => {
                       setSearchTerm(e.target.value);
+                      setBookingPage(1);
                     }}
                     className="border-none bg-transparent text-[0.82rem] text-gray-900 outline-none w-full"
                   />
@@ -3358,26 +3336,26 @@ export default function AdminDashboard({
                         Previous
                       </button>
 
-                      {getPageNumbers(bookingPage, totalPages).map(
-                        (page, index) =>
-                          page === "..." ? (
+                      {getPaginationItems(bookingPage, totalPages).map(
+                        (item) =>
+                          item?.type === "ellipsis" ? (
                             <span
-                              key={index}
+                              key={item.key}
                               className="px-2 text-gray-400 text-sm"
                             >
                               ...
                             </span>
                           ) : (
                             <button
-                              key={page}
-                              onClick={() => setBookingPage(page)}
+                              key={`page-${item}`}
+                              onClick={() => setBookingPage(item)}
                               className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
-                                bookingPage === page
+                                bookingPage === item
                                   ? "bg-navy text-white"
                                   : "border border-gray-200 text-gray-600 hover:bg-gray-50"
                               }`}
                             >
-                              {page}
+                              {item}
                             </button>
                           ),
                       )}
@@ -3772,26 +3750,26 @@ export default function AdminDashboard({
                             Previous
                           </button>
 
-                          {getPageNumbers(userPage, userTotalPages).map(
-                            (page, index) =>
-                              page === "..." ? (
+                          {getPaginationItems(userPage, userTotalPages).map(
+                            (item) =>
+                              item?.type === "ellipsis" ? (
                                 <span
-                                  key={index}
+                                  key={item.key}
                                   className="px-2 text-gray-400 text-sm"
                                 >
                                   ...
                                 </span>
                               ) : (
                                 <button
-                                  key={page}
-                                  onClick={() => setUserPage(page)}
+                                  key={`page-${item}`}
+                                  onClick={() => setUserPage(item)}
                                   className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
-                                    userPage === page
+                                    userPage === item
                                       ? "bg-navy text-white"
                                       : "border border-gray-200 text-gray-600 hover:bg-gray-50"
                                   }`}
                                 >
-                                  {page}
+                                  {item}
                                 </button>
                               ),
                           )}

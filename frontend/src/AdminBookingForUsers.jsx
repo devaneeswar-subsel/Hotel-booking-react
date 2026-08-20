@@ -14,6 +14,22 @@ const GST_RATE = 0.18;
 const ADVANCE_RATE = 0.3;
 const MANUAL_PAYMENT_MODES = ["Cash", "Online"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CUSTOMER_NAME_PATTERN = /^[A-Za-z]+(?:\s+[A-Za-z]+)*$/;
+const INDIAN_MOBILE_PATTERN = /^[6-9]\d{9}$/;
+
+function normalizePhone(value) {
+  let phone = String(value || "")
+    .trim()
+    .replace(/[^\d+]/g, "");
+  if (phone.startsWith("+")) phone = phone.slice(1);
+  if (phone.startsWith("91") && phone.length === 12) phone = phone.slice(2);
+  if (phone.startsWith("0") && phone.length === 11) phone = phone.slice(1);
+  return phone;
+}
+
+function isValidPhone(value) {
+  return INDIAN_MOBILE_PATTERN.test(normalizePhone(value));
+}
 
 const vehicles = [
   {
@@ -110,6 +126,7 @@ export default function AdminBookingForUsers({
     status: "idle",
     message: "",
   });
+  const [fieldErrors, setFieldErrors] = useState({});
   const [paying, setPaying] = useState(false);
 
   useEffect(() => {
@@ -209,7 +226,7 @@ export default function AdminBookingForUsers({
     const suggestedAdvanceAmount = Math.floor(fullAmount * ADVANCE_RATE);
     const manualAdvanceAmount =
       form.advance_amount === ""
-        ? suggestedAdvanceAmount
+        ? 0
         : Math.round(Number(form.advance_amount || 0) * 100) / 100;
     const advanceAmount = manualAdvanceAmount;
     const remainingAmount =
@@ -226,6 +243,12 @@ export default function AdminBookingForUsers({
 
   function update(name, value) {
     setForm((prev) => ({ ...prev, [name]: value }));
+    setFieldErrors((prev) => {
+      if (!prev[name]) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   }
 
   function handleCheckInChange(date) {
@@ -255,28 +278,92 @@ export default function AdminBookingForUsers({
         ? "text-[#C0392B]"
         : "text-[#868E96]";
 
+  function getCustomerFieldError(name, value) {
+    const text = String(value || "").trim();
+    if (name === "customer_name") {
+      if (!text) return "Customer name is required";
+      if (!CUSTOMER_NAME_PATTERN.test(text)) {
+        return "Customer name must contain letters only";
+      }
+    }
+    if (name === "customer_email") {
+      if (!text) return "Email address is required";
+      if (!EMAIL_PATTERN.test(text.toLowerCase())) {
+        return "Enter a valid email address";
+      }
+    }
+    if (name === "customer_phone") {
+      if (!text) return "Phone number is required";
+      if (!isValidPhone(text)) return "Enter a valid 10-digit mobile number";
+    }
+    return "";
+  }
+
+  function getCustomerFieldErrors() {
+    const errors = {};
+    ["customer_name", "customer_email", "customer_phone"].forEach((name) => {
+      const error = getCustomerFieldError(name, form[name]);
+      if (error) errors[name] = error;
+    });
+    return errors;
+  }
+
+  function handleCustomerBlur(name) {
+    const error = getCustomerFieldError(name, form[name]);
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      if (error) next[name] = error;
+      else delete next[name];
+      return next;
+    });
+
+    if (error) return;
+    const value =
+      name === "customer_email"
+        ? form[name].trim().toLowerCase()
+        : name === "customer_phone"
+          ? normalizePhone(form[name])
+          : form[name].trim();
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }
+
   function validate() {
     if (!nights || !isStayAvailable(checkInDate, checkOutDate, occupiedNights)) {
       showToast("Select valid available check-in and check-out dates", "error");
       return false;
     }
-    if (
-      !form.customer_name.trim() ||
-      !form.customer_email.trim() ||
-      !form.customer_phone.trim()
-    ) {
-      showToast("Enter customer name, email and phone", "error");
+
+    const customerErrors = getCustomerFieldErrors();
+    setFieldErrors(customerErrors);
+    if (Object.keys(customerErrors).length) {
+      showToast(Object.values(customerErrors)[0], "error");
       return false;
     }
     if (!MANUAL_PAYMENT_MODES.includes(form.payment_mode)) {
       showToast("Select Cash or Online payment mode", "error");
       return false;
     }
+    if (String(form.advance_amount).trim() === "") {
+      setFieldErrors((prev) => ({
+        ...prev,
+        advance_amount: "Advance amount is required",
+      }));
+      showToast("Enter advance amount", "error");
+      return false;
+    }
     if (!Number.isFinite(totals.advanceAmount) || totals.advanceAmount <= 0) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        advance_amount: "Enter a valid advance amount",
+      }));
       showToast("Enter a valid advance amount", "error");
       return false;
     }
     if (totals.advanceAmount > totals.fullAmount) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        advance_amount: "Advance amount cannot exceed full amount",
+      }));
       showToast("Advance amount cannot exceed full amount", "error");
       return false;
     }
@@ -288,6 +375,8 @@ export default function AdminBookingForUsers({
 
     setPaying(true);
     try {
+      const customerEmail = form.customer_email.trim().toLowerCase();
+      const customerPhone = normalizePhone(form.customer_phone);
       const payload = {
         room_id: room.room_id,
         check_in_date: form.check_in_date,
@@ -295,8 +384,8 @@ export default function AdminBookingForUsers({
         guest_count: Number(form.guest_count) || 1,
         customer: {
           name: form.customer_name.trim(),
-          email: form.customer_email.trim(),
-          phone: form.customer_phone.trim(),
+          email: customerEmail,
+          phone: customerPhone,
         },
         vehicle_type: form.vehicle_type,
         advance_amount: totals.advanceAmount,
@@ -320,7 +409,7 @@ export default function AdminBookingForUsers({
       }
       showToast(
         `Booking confirmed. Invoice email queued to ${
-          data.invoiceEmail || form.customer_email.trim()
+          data.invoiceEmail || customerEmail
         }`,
         "success",
       );
@@ -354,7 +443,9 @@ export default function AdminBookingForUsers({
             Advance Due Now
           </div>
           <div className="font-serif text-[1.25rem] font-bold text-[#0F1923]">
-            {money(totals.advanceAmount)}
+            {String(form.advance_amount).trim()
+              ? money(totals.advanceAmount)
+              : "Required"}
           </div>
         </div>
       </div>
@@ -469,11 +560,37 @@ export default function AdminBookingForUsers({
                     required
                     value={form[name]}
                     type={type}
+                    inputMode={name === "customer_phone" ? "numeric" : undefined}
+                    maxLength={name === "customer_phone" ? 17 : undefined}
+                    autoComplete={
+                      name === "customer_name"
+                        ? "name"
+                        : name === "customer_email"
+                          ? "email"
+                          : "tel"
+                    }
                     onChange={(e) => update(name, e.target.value)}
-                    placeholder={`${label} required`}
-                    className="w-full rounded-md border border-[#E9ECEF] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]"
+                    onBlur={() => handleCustomerBlur(name)}
+                    placeholder={
+                      name === "customer_phone"
+                        ? "+91 98765 43210"
+                        : `${label} required`
+                    }
+                    aria-invalid={fieldErrors[name] ? "true" : "false"}
+                    className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${
+                      fieldErrors[name]
+                        ? "border-[#C0392B] focus:border-[#C0392B]"
+                        : "border-[#E9ECEF] focus:border-[#C9A84C]"
+                    }`}
                   />
-                  {name === "customer_email" && customerLookup.message && (
+                  {fieldErrors[name] && (
+                    <div className="mt-1 text-[0.72rem] font-semibold text-[#C0392B]">
+                      {fieldErrors[name]}
+                    </div>
+                  )}
+                  {name === "customer_email" &&
+                    !fieldErrors[name] &&
+                    customerLookup.message && (
                     <div
                       className={`mt-1 text-[0.72rem] font-semibold ${customerLookupClass}`}
                     >
@@ -611,15 +728,30 @@ export default function AdminBookingForUsers({
             </label>
             <input
               type="number"
+              required
               min={1}
               max={Math.ceil(totals.fullAmount || 0)}
               step={1}
               value={form.advance_amount}
               onChange={(e) => update("advance_amount", e.target.value)}
-              placeholder={String(totals.suggestedAdvanceAmount || 0)}
+              placeholder="Enter amount"
+              aria-invalid={fieldErrors.advance_amount ? "true" : "false"}
               disabled={paying || !nights}
-              className="w-full rounded-md border border-[#E9ECEF] px-3 py-2.5 text-sm font-semibold text-[#2D9A6E] outline-none focus:border-[#C9A84C] disabled:cursor-not-allowed disabled:opacity-60"
+              className={`w-full rounded-md border px-3 py-2.5 text-sm font-semibold text-[#2D9A6E] outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+                fieldErrors.advance_amount
+                  ? "border-[#C0392B] focus:border-[#C0392B]"
+                  : "border-[#E9ECEF] focus:border-[#C9A84C]"
+              }`}
             />
+            {fieldErrors.advance_amount ? (
+              <div className="mt-1 text-[0.72rem] font-semibold text-[#C0392B]">
+                {fieldErrors.advance_amount}
+              </div>
+            ) : (
+              <div className="mt-1 text-[0.72rem] text-[#868E96]">
+                Suggested: {money(totals.suggestedAdvanceAmount)}
+              </div>
+            )}
           </div>
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
             <span className="text-[#868E96]">Remaining balance</span>
@@ -635,7 +767,9 @@ export default function AdminBookingForUsers({
             <CheckIcon size={16} />
             {paying
               ? "Confirming..."
-              : `Confirm ${form.payment_mode} Advance ${money(totals.advanceAmount)}`}
+              : String(form.advance_amount).trim()
+                ? `Confirm ${form.payment_mode} Advance ${money(totals.advanceAmount)}`
+                : `Confirm ${form.payment_mode} Advance`}
           </button>
         </div>
       </div>

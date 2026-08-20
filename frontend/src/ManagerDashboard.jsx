@@ -16,6 +16,7 @@ import {
 } from "./Icons";
 import VehicleCustomers from "./Components/VehicleCustomers";
 import AdminBookingForUsers from "./AdminBookingForUsers";
+import { getPaginationItems } from "./pagination";
 
 const API = process.env.REACT_APP_API_URL || "";
 const GST_RATE = 0.18;
@@ -2021,41 +2022,12 @@ const paginatedBookings = filteredBookings.slice(
     { id: "book", label: "New Booking", icon: CalendarIcon },
     { id: "reports", label: "Reports", icon: DownloadIcon },
   ];
-const getPageNumbers = (currentPage, totalPages) => {
-  const pages = [];
+  useEffect(() => {
+    setBookingPage((page) =>
+      Math.min(Math.max(page, 1), Math.max(totalPages, 1)),
+    );
+  }, [totalPages]);
 
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) {
-      pages.push(i);
-    }
-  } else {
-    if (currentPage <= 4) {
-      pages.push(1, 2, 3, 4, 5, "...", totalPages);
-    } else if (currentPage >= totalPages - 3) {
-      pages.push(
-        1,
-        "...",
-        totalPages - 4,
-        totalPages - 3,
-        totalPages - 2,
-        totalPages - 1,
-        totalPages
-      );
-    } else {
-      pages.push(
-        1,
-        "...",
-        currentPage - 1,
-        currentPage,
-        currentPage + 1,
-        "...",
-        totalPages
-      );
-    }
-  }
-
-  return pages;
-};
   const SIDEBAR_W = 210;
 
   const SidebarContent = () => (
@@ -2513,28 +2485,28 @@ const getPageNumbers = (currentPage, totalPages) => {
           Previous
         </button>
 
-        {getPageNumbers(
+        {getPaginationItems(
           bookingPage,
           totalPages
-        ).map((page, index) =>
-          page === "..." ? (
+        ).map((item) =>
+          item?.type === "ellipsis" ? (
             <span
-              key={index}
+              key={item.key}
               className="px-2 text-gray-400 text-sm"
             >
               ...
             </span>
           ) : (
             <button
-              key={page}
-              onClick={() => setBookingPage(page)}
+              key={`page-${item}`}
+              onClick={() => setBookingPage(item)}
               className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-xs sm:text-sm flex items-center justify-center ${
-                bookingPage === page
+                bookingPage === item
                   ? "bg-[#0F1923] text-white"
                   : "border border-[#E9ECEF] bg-white"
               }`}
             >
-              {page}
+              {item}
             </button>
           )
         )}
