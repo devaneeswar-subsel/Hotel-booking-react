@@ -1,22 +1,23 @@
 import React from "react";
 import {
   WifiIcon,
-  SwimmingIcon,
-  DumbbellIcon,
+  SnowflakeIcon,
+  TvIcon,
+  DropletIcon,
   CoffeeIcon,
   CarIcon,
-  SparklesIcon,
+  // SparklesIcon,
   PhoneIcon,
   AwardIcon,
 } from "./Icons";
 import FacilityCard from "./Components/FacilityCard";
 import { motion } from "framer-motion";
 const facilities = [
-  { icon: SwimmingIcon, name: "Infinity Pool", desc: "Heated year-round" },
-  { icon: SparklesIcon, name: "Spa & Wellness", desc: "Full-body therapy" },
-  { icon: DumbbellIcon, name: "Fitness Center", desc: "Open 24 hours" },
+  { icon: SnowflakeIcon, name: "Air Conditioning", desc: "Comfortable rooms" },
+  { icon: TvIcon, name: "TV & Entertainment", desc: "Smart TV in rooms" },
+  { icon: DropletIcon, name: "24/7 Hot Water", desc: "Hot & cold water" },
   { icon: CoffeeIcon, name: "Fine Dining", desc: "Multi-cuisine" },
-  { icon: CarIcon, name: "Valet Parking", desc: "Secure & free" },
+  { icon: CarIcon, name: "Safety Parking", desc: "Secure & free" },
   { icon: WifiIcon, name: "High-Speed WiFi", desc: "Fibre broadband" },
   { icon: PhoneIcon, name: "24/7 Concierge", desc: "Always available" },
   { icon: AwardIcon, name: "Airport Transfer", desc: "Private luxury car" },

@@ -103,6 +103,21 @@ async function runMigrations() {
       "addon_charges DECIMAL(10,2) DEFAULT 0",
       "gst_amount DECIMAL(10,2) DEFAULT 0",
       "final_total DECIMAL(10,2) DEFAULT NULL",
+      "total_amount DECIMAL(10,2) DEFAULT NULL",
+      "advance_amount DECIMAL(10,2) DEFAULT 0",
+      "advance_paid DECIMAL(10,2) DEFAULT 0",
+      "balance_paid DECIMAL(10,2) DEFAULT 0",
+      "remaining_amount DECIMAL(10,2) DEFAULT 0",
+      "payment_status VARCHAR(30) DEFAULT 'PAID'",
+      "advance_payment_id VARCHAR(100) DEFAULT NULL",
+      "advance_order_id VARCHAR(100) DEFAULT NULL",
+      "payment_method VARCHAR(30) DEFAULT NULL",
+      "booking_source VARCHAR(30) DEFAULT NULL",
+      "vehicle_type VARCHAR(30) DEFAULT NULL",
+      "vehicle_price DECIMAL(10,2) DEFAULT 0",
+      "vehicle_status VARCHAR(30) DEFAULT 'pending'",
+      "pickup_location VARCHAR(255) DEFAULT NULL",
+      "dropoff_location VARCHAR(255) DEFAULT NULL",
       "notes TEXT DEFAULT NULL",
     ];
     for (const col of cols) {
@@ -136,6 +151,41 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 const GST_RATE = 0.18;
+const VEHICLE_PRICES = {
+  none: 0,
+  "4-seater": 600,
+  "7-seater": 900,
+  "12-seater": 1400,
+};
+const ADVANCE_RATE = 0.3;
+const MANUAL_ADVANCE_PAYMENT_MODES = {
+  cash: "Cash",
+  online: "Online",
+};
+
+function resolveAdvanceAmount(totalAmount, advanceAmount) {
+  const defaultAdvanceAmount = Math.floor(totalAmount * ADVANCE_RATE);
+  if (
+    advanceAmount === undefined ||
+    advanceAmount === null ||
+    advanceAmount === ""
+  ) {
+    return defaultAdvanceAmount;
+  }
+
+  const requestedAdvance = Math.round(Number(advanceAmount) * 100) / 100;
+  if (!Number.isFinite(requestedAdvance) || requestedAdvance <= 0) {
+    const err = new Error("Enter a valid advance amount");
+    err.status = 400;
+    throw err;
+  }
+  if (requestedAdvance > totalAmount) {
+    const err = new Error("Advance amount cannot exceed full amount");
+    err.status = 400;
+    throw err;
+  }
+  return requestedAdvance;
+}
 
 // ─── AUTH COOKIE ─────────────────────────────────────────────────────────────
 function setAuthCookie(res, user) {
@@ -184,6 +234,459 @@ function requireManager(req, res, next) {
     if (req.user.role !== "admin" && req.user.role !== "manager")
       return res.status(403).json({ error: "Manager access required" });
     next();
+  });
+}
+
+async function calculateBookingAmounts({
+  room_id,
+  check_in_date,
+  check_out_date,
+  advance_amount,
+}) {
+  const [roomRows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
+    room_id,
+  ]);
+  if (!roomRows.length) {
+    const err = new Error("Room not found");
+    err.status = 404;
+    throw err;
+  }
+
+  const room = roomRows[0];
+  if (Number(room.is_available) === 0) {
+    const err = new Error("Room is not available for booking");
+    err.status = 400;
+    throw err;
+  }
+
+  const nights = Math.ceil(
+    (new Date(check_out_date) - new Date(check_in_date)) / 86400000,
+  );
+  if (nights <= 0) {
+    const err = new Error("Invalid dates");
+    err.status = 400;
+    throw err;
+  }
+
+  const [conflicts] = await db.query(
+    `SELECT booking_id
+     FROM bookings
+     WHERE room_id = ?
+       AND status NOT IN ('cancelled','pending')
+       AND check_in_date < ?
+       AND check_out_date > ?
+     LIMIT 1`,
+    [room_id, check_out_date, check_in_date],
+  );
+  if (conflicts.length) {
+    const err = new Error("Selected dates are already booked for this room");
+    err.status = 409;
+    throw err;
+  }
+
+  const roomSubtotal = Number(room.price_per_night) * nights;
+  const gstAmount = Math.round(roomSubtotal * GST_RATE * 100) / 100;
+  const totalAmount = Math.round((roomSubtotal + gstAmount) * 100) / 100;
+  const advanceAmount = resolveAdvanceAmount(totalAmount, advance_amount);
+  const remainingAmount =
+    Math.round(Math.max(0, totalAmount - advanceAmount) * 100) / 100;
+
+  return {
+    room,
+    nights,
+    roomSubtotal,
+    gstAmount,
+    totalAmount,
+    advanceAmount,
+    remainingAmount,
+  };
+}
+
+async function findOrCreateGuestUser({ name, email, phone }) {
+  const normalizedName = String(name || "").trim();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedPhone = String(phone || "").trim();
+  if (!normalizedName || !normalizedEmail || !normalizedPhone) {
+    const err = new Error("Customer name, email and phone are required");
+    err.status = 400;
+    throw err;
+  }
+
+  const [existing] = await db.query(
+    "SELECT user_id, role FROM users WHERE email=? LIMIT 1",
+    [normalizedEmail],
+  );
+  if (existing.length) {
+    if (existing[0].role !== "guest") {
+      const err = new Error("Use a guest/customer email address");
+      err.status = 400;
+      throw err;
+    }
+    await db.query("UPDATE users SET name=?, phone=? WHERE user_id=?", [
+      normalizedName,
+      normalizedPhone,
+      existing[0].user_id,
+    ]);
+    return existing[0].user_id;
+  }
+
+  const randomPassword = crypto.randomBytes(12).toString("hex");
+  const hashed = await bcrypt.hash(randomPassword, 12);
+  const [result] = await db.query(
+    "INSERT INTO users (name,email,password,phone,role) VALUES (?,?,?,?,'guest')",
+    [normalizedName, normalizedEmail, hashed, normalizedPhone],
+  );
+  return result.insertId;
+}
+
+app.get("/api/customers/lookup", requireManager, async (req, res) => {
+  try {
+    const email = String(req.query.email || "").trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: "Email is required" });
+
+    const [rows] = await db.query(
+      "SELECT user_id, name, email, phone, role FROM users WHERE email=? LIMIT 1",
+      [email],
+    );
+    if (!rows.length) return res.json({ exists: false });
+
+    const user = rows[0];
+    if (user.role !== "guest") {
+      return res
+        .status(400)
+        .json({ error: "Use a guest/customer email address" });
+    }
+
+    res.json({
+      exists: true,
+      user: {
+        user_id: user.user_id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function formatInvoiceMoney(value) {
+  return `Rs.${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
+}
+
+const INVOICE_TERMS = [
+  "A valid government-issued photo ID must be presented at check-in.",
+  "Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
+  "Early check-in and late check-out are subject to availability and may incur additional charges.",
+  "Pets, outside food and beverages, alcohol, and smoking are not permitted on the hotel premises.",
+  "Cancellations must be made at least 48 hours before the scheduled check-in time to be eligible for a refund, subject to the applicable booking rate and cancellation policy.",
+  "For no-shows or cancellations made within 48 hours of check-in, a cancellation charge equivalent to the first night's room tariff may apply, subject to the booking terms.",
+  "Eligible refunds will be processed to the original payment method within 5-7 working days. The actual credit time may vary depending on the bank or payment provider.",
+  "Personal and identification data is processed for booking management, guest services, payment processing, security, and legal or regulatory compliance.",
+  "Payments are securely processed through approved payment methods. The hotel does not store full card details. Personal data is not sold to third parties.",
+  "Full Terms & Conditions, Privacy Policy, and Cancellation Policy are available at: https://vvgrandpark.com/policies",
+  "Please verify the booking dates, room type, guest count, tariff, and contact details shown on this invoice and report any discrepancy promptly.",
+  "Vehicle pickup and drop-off requests are subject to availability, applicable charges, and separate confirmation by the hotel.",
+  "Guests are responsible for room keys/cards and hotel property provided during their stay. Reasonable charges may apply for loss or damage caused during the stay.",
+  "Hotel policies may be updated from time to time for legal, safety, or operational reasons.",
+  "For booking assistance or invoice corrections, please contact the hotel as soon as possible and preferably before check-in.",
+  "The room tariff does not include additional services or charges unless expressly included in the booking.",
+  "Visitors are permitted only with hotel approval and may be required to provide valid identification.",
+  "All guests must comply with hotel quiet hours, safety instructions, and reasonable house rules during their stay.",
+  "Lost-property claims will be handled in accordance with hotel records, hotel policy, and applicable law.",
+  "This is an electronically generated invoice and does not require a physical signature where permitted under applicable law.",
+];
+
+function formatInvoiceDate(value) {
+  return new Date(value).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+async function loadBookingForInvoice(bookingId) {
+  const [rows] = await db.query(
+    `SELECT b.*, u.name AS guest_name, u.email, u.phone,
+            r.room_type, r.room_number, r.price_per_night, r.image_url
+     FROM bookings b
+     JOIN users u ON b.user_id = u.user_id
+     JOIN rooms r ON b.room_id = r.room_id
+     WHERE b.booking_id = ?`,
+    [bookingId],
+  );
+  return rows[0] || null;
+}
+
+async function generateAdvanceInvoicePdf(booking) {
+  const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
+  const nights = Math.max(
+    1,
+    Math.ceil(
+      (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
+        86400000,
+    ),
+  );
+  const roomSubtotal = Number(booking.total_price || 0);
+  const gstAmount = Number(booking.gst_amount || 0);
+  const totalAmount = Number(
+    booking.total_amount || booking.final_total || roomSubtotal + gstAmount,
+  );
+  const advancePaid = Number(booking.advance_paid || 0);
+  const remainingAmount = Number(
+    booking.remaining_amount || Math.max(0, totalAmount - advancePaid),
+  );
+
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50, size: "A4" });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.rect(0, 0, 595, 96).fill("#0F1923");
+    doc
+      .fillColor("#C9A84C")
+      .font("Helvetica-Bold")
+      .fontSize(22)
+      .text("VV GRAND PARK", 50, 28);
+    doc.fillColor("#C9A84C").font("Helvetica").fontSize(10).text("RESIDENCY", 50, 54);
+    doc
+      .fillColor("#ffffff")
+      .font("Helvetica-Bold")
+      .fontSize(20)
+      .text("INVOICE", 395, 28, { align: "right" });
+    doc.fillColor("#AAB2BA").font("Helvetica").fontSize(9).text(invNo, 395, 54, {
+      align: "right",
+    });
+
+    doc.moveTo(50, 115).lineTo(545, 115).strokeColor("#C9A84C").lineWidth(1).stroke();
+
+    doc.fillColor("#868E96").font("Helvetica-Bold").fontSize(8).text("BILL TO", 50, 132);
+    doc
+      .fillColor("#0F1923")
+      .font("Helvetica-Bold")
+      .fontSize(13)
+      .text(booking.guest_name || "Guest", 50, 148);
+    doc.fillColor("#495057").font("Helvetica").fontSize(9).text(booking.email || "", 50, 166);
+    if (booking.phone) doc.text(booking.phone, 50, 180);
+
+    doc.fillColor("#868E96").font("Helvetica-Bold").fontSize(8).text("FROM", 350, 132);
+    doc
+      .fillColor("#0F1923")
+      .font("Helvetica-Bold")
+      .fontSize(13)
+      .text("VV Grand Park Residency", 350, 148);
+    doc
+      .fillColor("#495057")
+      .font("Helvetica")
+      .fontSize(9)
+      .text("3/4/D, Thanjai Saalai", 350, 166)
+      .text("Thiruvarur - 610004", 350, 180)
+      .text("+91 93849 82510", 350, 194);
+
+    const tableTop = 230;
+    doc.rect(50, tableTop, 495, 25).fill("#0F1923");
+    doc
+      .fillColor("#C9A84C")
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .text("DESCRIPTION", 60, tableTop + 8)
+      .text("DETAILS", 285, tableTop + 8)
+      .text("AMOUNT", 430, tableTop + 8);
+
+    let y = tableTop + 34;
+    const rows = [
+      [
+        `${booking.room_type} - Room ${booking.room_number || booking.room_id}`,
+        `${nights} night${nights > 1 ? "s" : ""}`,
+        formatInvoiceMoney(roomSubtotal),
+      ],
+      ["Check-in", formatInvoiceDate(booking.check_in_date), "-"],
+      ["Check-out", formatInvoiceDate(booking.check_out_date), "-"],
+      ["Guests", String(booking.guest_count || 1), "-"],
+      ["Payment Mode", booking.payment_method || "-", "-"],
+      ["Payment ID", booking.payment_id || "-", "-"],
+    ];
+
+    rows.forEach((row, index) => {
+      if (index % 2 === 0) doc.rect(50, y - 6, 495, 23).fill("#F8F9FA");
+      doc
+        .fillColor("#0F1923")
+        .font("Helvetica")
+        .fontSize(9)
+        .text(row[0], 60, y)
+        .text(row[1], 285, y)
+        .text(row[2], 430, y, { width: 110, align: "right" });
+      y += 24;
+    });
+
+    y += 14;
+    [
+      ["Room Charges", roomSubtotal],
+      ["GST (18%)", gstAmount],
+      ["Total Amount", totalAmount],
+      ["Advance Paid", advancePaid],
+      ["Remaining Balance", remainingAmount],
+    ].forEach(([label, amount], index) => {
+      const strong = index >= 2;
+      doc
+        .fillColor(strong ? "#0F1923" : "#868E96")
+        .font(strong ? "Helvetica-Bold" : "Helvetica")
+        .fontSize(strong ? 10 : 9)
+        .text(label, 330, y);
+      doc
+        .fillColor(strong ? "#0F1923" : "#495057")
+        .font(strong ? "Helvetica-Bold" : "Helvetica")
+        .fontSize(strong ? 10 : 9)
+        .text(formatInvoiceMoney(amount), 430, y, { width: 110, align: "right" });
+      y += 20;
+    });
+
+    y += 8;
+    doc.rect(330, y, 215, 38).fill("#0F1923");
+    doc
+      .fillColor("#C9A84C")
+      .font("Helvetica-Bold")
+      .fontSize(11)
+      .text("AMOUNT PAID", 342, y + 13);
+    doc
+      .fillColor("#ffffff")
+      .font("Helvetica-Bold")
+      .fontSize(14)
+      .text(formatInvoiceMoney(advancePaid), 430, y + 11, {
+        width: 105,
+        align: "right",
+      });
+
+    const termsTop = y + 52;
+    doc
+      .fillColor("#0F1923")
+      .font("Helvetica-Bold")
+      .fontSize(7)
+      .text("TERMS & CONDITIONS", 50, termsTop);
+    doc
+      .fillColor("#666666")
+      .font("Helvetica")
+      .fontSize(4.6)
+      .text(
+        INVOICE_TERMS.map((term, index) => `${index + 1}. ${term}`).join(" "),
+        50,
+        termsTop + 10,
+        { width: 495, lineGap: 0, height: 126 },
+      );
+
+    const footerY = 760;
+    doc
+      .moveTo(50, footerY)
+      .lineTo(545, footerY)
+      .strokeColor("#C9A84C")
+      .lineWidth(0.5)
+      .stroke();
+    doc
+      .fillColor("#868E96")
+      .font("Helvetica-Oblique")
+      .fontSize(9)
+      .text("Thank you for choosing VV Grand Park Residency!", 50, footerY + 8, {
+        width: 495,
+        align: "center",
+      });
+    doc
+      .fillColor("#868E96")
+      .font("Helvetica")
+      .fontSize(8)
+      .text("vvgrandpark.com | vvgrandpark@gmail.com", 50, footerY + 22, {
+        width: 495,
+        align: "center",
+      });
+
+    doc.end();
+  });
+}
+
+async function sendAdvanceInvoiceEmail(booking) {
+  if (!booking?.email) return;
+
+  const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
+  const pdfBuffer = await generateAdvanceInvoicePdf(booking);
+  const totalAmount = Number(
+    booking.total_amount || booking.final_total || booking.total_price || 0,
+  );
+  const advancePaid = Number(booking.advance_paid || 0);
+  const remainingAmount = Number(
+    booking.remaining_amount || Math.max(0, totalAmount - advancePaid),
+  );
+  const roomLabel = `${escapeHtml(booking.room_type)} - Room ${escapeHtml(
+    booking.room_number || booking.room_id,
+  )}`;
+  const emailTermsHtml = INVOICE_TERMS.map(
+    (term) =>
+      `<li style="margin:0 0 6px;color:#6B7280;line-height:18px;">${escapeHtml(
+        term,
+      )}</li>`,
+  ).join("");
+
+  await resend.emails.send({
+    from: "VV Grand Park Residency <bookings@vvgrandpark.com>",
+    to: booking.email,
+    subject: `Booking Confirmed! ${invNo} - VV Grand Park Residency`,
+    html: `
+      <div style="background:#F1F3F5;padding:24px 12px;font-family:Arial,sans-serif;">
+        <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #E9ECEF;border-radius:12px;overflow:hidden;">
+          <div style="background:#0F1923;padding:26px 30px;text-align:center;">
+            <div style="color:#C9A84C;font-size:22px;font-weight:700;letter-spacing:2px;">VV GRAND PARK</div>
+            <div style="color:#8B9298;font-size:12px;letter-spacing:3px;margin-top:4px;">RESIDENCY</div>
+          </div>
+          <div style="padding:28px 30px;">
+            <h2 style="margin:0 0 8px;color:#0F1923;font-size:24px;">Booking Confirmed!</h2>
+            <p style="margin:0 0 20px;color:#868E96;font-size:14px;">Dear ${escapeHtml(
+              booking.guest_name || "Guest",
+            )}, your booking is confirmed. Invoice PDF is attached.</p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#F8F9FA;border-radius:10px;overflow:hidden;">
+              <tr><td style="padding:10px 14px;color:#868E96;">Booking ID</td><td style="padding:10px 14px;text-align:right;font-weight:700;color:#0F1923;">${invNo}</td></tr>
+              <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Room</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#0F1923;">${roomLabel}</td></tr>
+              <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Check-in</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;color:#0F1923;">${formatInvoiceDate(
+                booking.check_in_date,
+              )}</td></tr>
+              <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Check-out</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;color:#0F1923;">${formatInvoiceDate(
+                booking.check_out_date,
+              )}</td></tr>
+              <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Payment Mode</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;color:#0F1923;">${escapeHtml(
+                booking.payment_method || "-",
+              )}</td></tr>
+              <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Advance Paid</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#2D9A6E;">${formatInvoiceMoney(
+                advancePaid,
+              )}</td></tr>
+              <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Remaining Balance</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#B8872F;">${formatInvoiceMoney(
+                remainingAmount,
+              )}</td></tr>
+            </table>
+            <div style="margin-top:20px;border-top:1px solid #E9ECEF;padding-top:16px;">
+              <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:#0F1923;text-transform:uppercase;margin-bottom:8px;">Terms & Conditions</div>
+              <ol style="margin:0;padding-left:18px;font-size:12px;">${emailTermsHtml}</ol>
+            </div>
+            <p style="margin:20px 0 0;color:#868E96;font-size:12px;text-align:center;">VV Grand Park Residency | +91 93849 82510 | vvgrandpark@gmail.com</p>
+          </div>
+        </div>
+      </div>
+    `,
+    attachments: [
+      {
+        filename: `${invNo}-${(booking.guest_name || "guest").replace(/\s+/g, "_")}.pdf`,
+        content: pdfBuffer.toString("base64"),
+        type: "application/pdf",
+      },
+    ],
   });
 }
 
@@ -500,10 +1003,20 @@ app.get("/api/reviews/user/:user_id", requireAuth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 app.post("/api/payment/create-order", requireAuth, async (req, res) => {
   try {
-    const { user_id, room_id, check_in_date, check_out_date, guest_count } =
-      req.body;
+    const {
+      user_id,
+      room_id,
+      check_in_date,
+      check_out_date,
+      guest_count,
+      vehicle_type,
+    } = req.body;
     if (!user_id || !room_id || !check_in_date || !check_out_date)
       return res.status(400).json({ error: "Missing required fields" });
+    if (Number(user_id) !== Number(req.user.user_id))
+      return res.status(403).json({ error: "You can only book for yourself" });
+    if (!Object.prototype.hasOwnProperty.call(VEHICLE_PRICES, vehicle_type))
+      return res.status(400).json({ error: "Invalid vehicle type" });
     const [roomRows] = await db.query(
       "SELECT * FROM rooms WHERE room_id=? AND is_available=1",
       [room_id],
@@ -524,19 +1037,23 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
     );
     if (nights <= 0) return res.status(400).json({ error: "Invalid dates" });
     const base_price = nights * room.price_per_night;
-    const gst_amount = Math.round(base_price * GST_RATE * 100) / 100;
-    const total_price = Math.round((base_price + gst_amount) * 100) / 100;
+    const vehicle_price = 0;
+    const room_subtotal = base_price + vehicle_price;
+    const gst_amount = Math.round(room_subtotal * GST_RATE * 100) / 100;
+    const total_price = Math.round((room_subtotal + gst_amount) * 100) / 100;
     const [result] = await db.query(
-      `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,gst_amount,final_total,status) VALUES (?,?,?,?,?,?,?,?,'pending')`,
+      `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,gst_amount,final_total,vehicle_type,vehicle_price,status) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending')`,
       [
         user_id,
         room_id,
         check_in_date,
         check_out_date,
         guest_count || 1,
-        base_price,
+        room_subtotal,
         gst_amount,
         total_price,
+        vehicle_type,
+        vehicle_price,
       ],
     );
     const booking_id = result.insertId;
@@ -550,6 +1067,9 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
       booking_id,
       total_price,
       base_price,
+      vehicle_type,
+      vehicle_price,
+      room_subtotal,
       gst_amount,
       nights,
       razorpay_order_id: razorpayOrder.id,
@@ -562,7 +1082,7 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/payment/verify", async (req, res) => {
+app.post("/api/payment/verify", requireAuth, async (req, res) => {
   try {
     const {
       razorpay_order_id,
@@ -581,6 +1101,12 @@ app.post("/api/payment/verify", async (req, res) => {
       );
       return res.status(400).json({ error: "Payment verification failed." });
     }
+    const [ownedBooking] = await db.query(
+      "SELECT booking_id FROM bookings WHERE booking_id=? AND user_id=? AND status='pending'",
+      [booking_id, req.user.user_id],
+    );
+    if (!ownedBooking.length)
+      return res.status(403).json({ error: "Booking not found or already processed" });
     await db.query(
       "UPDATE bookings SET status='confirmed', payment_id=? WHERE booking_id=?",
       [razorpay_payment_id, booking_id],
@@ -598,9 +1124,13 @@ app.post("/api/payment/verify", async (req, res) => {
           (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
             86400000,
         );
-        const basePrice = Number(booking.total_price);
-        const gst = Math.round(basePrice * 0.18 * 100) / 100;
-        const total = Math.round((basePrice + gst) * 100) / 100;
+        const basePrice = Number(booking.total_price || 0);
+        const gst = Number(
+          booking.gst_amount || Math.round(basePrice * GST_RATE * 100) / 100,
+        );
+        const total = Number(
+          booking.final_total || Math.round((basePrice + gst) * 100) / 100,
+        );
         const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
 
         // Generate PDF
@@ -628,12 +1158,12 @@ app.post("/api/payment/verify", async (req, res) => {
             .fontSize(22)
             .text("INVOICE", 400, 30, { align: "right" });
           doc
-            .fillColor("rgba(255,255,255,0.5)")
+            .fillColor("#8B9298")
             .font("Helvetica")
             .fontSize(10)
             .text(invNo, 400, 56, { align: "right" });
           doc
-            .fillColor("rgba(255,255,255,0.5)")
+            .fillColor("#8B9298")
             .fontSize(9)
             .text(
               new Date().toLocaleDateString("en-IN", {
@@ -681,8 +1211,8 @@ app.post("/api/payment/verify", async (req, res) => {
             .fillColor("#495057")
             .font("Helvetica")
             .fontSize(9)
-            .text("vvgrandpark.com", 350, 162)
-            .text("bookings@vvgrandpark.com", 350, 175);
+            .text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", 350, 162)
+            .text("+91 93849 82510 | vvgrandpark@gmail.com", 350, 175);
 
 const tableTop = 210;
 doc.rect(50, tableTop, 495, 25).fill("#0F1923");
@@ -784,28 +1314,25 @@ doc
             .font("Helvetica-Bold")
             .fontSize(8)
             .text("TERMS & CONDITIONS", 50, y);
-          y += 8;
-          const terms = [
-  "1. Valid photo ID must be presented at check-in.",
-  "2. Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
-  "3. Early check-in/late check-out subject to availability.",
-  "4. Pets, outside food, Alcohol and smoking are not permitted.",
-  "5. Cancellations must be made 48 hours prior to check-in for a refund.",
-  "6. No-show or late cancellation (under 48 hrs): first night's charge is non-refundable.",
-  "7. Eligible refunds are credited to the original payment method within 5-7 working days.",
-  "8. Your personal & ID data is processed as per the DPDP Act, 2023, only to manage your booking, stay, and legal compliance.",
-  "9. Payments are processed via Razorpay; we do not store your full card details, and never sell your data.",
-  "10. Full Terms, Privacy Policy & Cancellation Policy: vvgrandpark.com/policies",
-];
-          doc.fillColor("#666").font("Helvetica").fontSize(7.5);
-          terms.forEach((t) => {
-            doc.text(t, 50, y, { width: 495 });
-            y += 12;
-          });
+          doc
+            .moveTo(50, y + 12)
+            .lineTo(545, y + 12)
+            .strokeColor("#C9A84C")
+            .lineWidth(0.4)
+            .stroke();
+          y += 18;
+          doc.fillColor("#666").font("Helvetica").fontSize(4.6);
+          doc.text(
+            INVOICE_TERMS.map((term, index) => `${index + 1}. ${term}`).join(" "),
+            50,
+            y,
+            { width: 495, lineGap: 0, height: 136 },
+          );
+          const footerY = 760;
 
           doc
-            .moveTo(50, 750)
-            .lineTo(545, 750)
+            .moveTo(50, footerY)
+            .lineTo(545, footerY)
             .strokeColor("#C9A84C")
             .lineWidth(0.5)
             .stroke();
@@ -813,16 +1340,28 @@ doc
             .fillColor("#868E96")
             .font("Helvetica-Oblique")
             .fontSize(9)
-            .text("Thank you for choosing VV Grand Park Residency!", 50, 758, {
+            .text("Thank you for choosing VV Grand Park Residency!", 50, footerY + 10, {
+              width: 495,
               align: "center",
             });
           doc
             .fillColor("#868E96")
             .font("Helvetica")
             .fontSize(8)
-            .text("vvgrandpark.com  |  bookings@vvgrandpark.com", 50, 772, {
+            .text("vvgrandpark.com  |  bookings@vvgrandpark.com", 50, footerY + 24, {
+              width: 495,
               align: "center",
             });
+          doc
+            .fillColor("#868E96")
+            .font("Helvetica")
+            .fontSize(8)
+            .text(
+              "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510  |  vvgrandpark@gmail.com",
+              50,
+              footerY + 38,
+              { width: 495, align: "center" },
+            );
           doc.end();
         });
 
@@ -1062,6 +1601,32 @@ doc
                     white-space:nowrap;
                   "
                 >
+                  Payment ID
+                </td>
+
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    text-align:right;
+                    font-weight:700;
+                    color:#0F1923;
+                    padding:8px 0;
+                  "
+                >
+                  ${booking.payment_id || "—"}
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  style="
+                    border-top:1px solid #E9ECEF;
+                    color:#868E96;
+                    font-size:14px;
+                    padding:8px 0;
+                    white-space:nowrap;
+                  "
+                >
                   Check-in
                 </td>
 
@@ -1271,6 +1836,8 @@ doc
             >
               vvgrandpark.com
             </a>
+            <br>
+            3/4/D, Thanjai Saalai, Thiruvarur - 610004 · +91 93849 82510 · vvgrandpark@gmail.com
           </div>
         </div>
 
@@ -1368,6 +1935,28 @@ app.patch(
 
 app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
   try {
+    const [bookings] = await db.query(
+      "SELECT booking_id, user_id, status, actual_checkin FROM bookings WHERE booking_id=?",
+      [req.params.id],
+    );
+    if (!bookings.length)
+      return res.status(404).json({ error: "Booking not found" });
+
+    const booking = bookings[0];
+    const canManageBookings =
+      req.user.role === "admin" || req.user.role === "manager";
+    if (!canManageBookings && Number(booking.user_id) !== Number(req.user.user_id)) {
+      return res.status(403).json({ error: "You cannot cancel this booking" });
+    }
+    if (booking.actual_checkin) {
+      return res
+        .status(400)
+        .json({ error: "Checked-in bookings cannot be cancelled" });
+    }
+    if (booking.status === "cancelled") {
+      return res.status(400).json({ error: "Booking is already cancelled" });
+    }
+
     const [result] = await db.query(
       "UPDATE bookings SET status='cancelled' WHERE booking_id=?",
       [req.params.id],
@@ -1396,6 +1985,21 @@ app.post("/api/bookings", requireAuth, async (req, res) => {
       (new Date(check_out_date) - new Date(check_in_date)) / 86400000,
     );
     if (nights <= 0) return res.status(400).json({ error: "Invalid dates" });
+    const [conflicts] = await db.query(
+      `SELECT booking_id
+       FROM bookings
+       WHERE room_id = ?
+         AND status NOT IN ('cancelled','pending')
+         AND check_in_date < ?
+         AND check_out_date > ?
+       LIMIT 1`,
+      [room_id, check_out_date, check_in_date],
+    );
+    if (conflicts.length) {
+      return res.status(409).json({
+        error: "Selected dates are already booked for this room",
+      });
+    }
     const base_price = nights * room.price_per_night;
     const gst_amount = Math.round(base_price * GST_RATE * 100) / 100;
     const total_price = Math.round((base_price + gst_amount) * 100) / 100;
@@ -1416,6 +2020,329 @@ app.post("/api/bookings", requireAuth, async (req, res) => {
       message: "Booking confirmed",
       booking_id: result.insertId,
       total_price,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) => {
+  try {
+    const { room_id, check_in_date, check_out_date, advance_amount } = req.body;
+    if (!room_id || !check_in_date || !check_out_date)
+      return res.status(400).json({ error: "Missing required fields" });
+
+    const amounts = await calculateBookingAmounts({
+      room_id,
+      check_in_date,
+      check_out_date,
+      advance_amount,
+    });
+    const requestedGuests = Math.max(1, Number(req.body.guest_count) || 1);
+    if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
+      return res.status(400).json({
+        error: `This room allows up to ${amounts.room.capacity} guests`,
+      });
+    }
+
+    const order = await razorpay.orders.create({
+      amount: Math.round(amounts.advanceAmount * 100),
+      currency: "INR",
+      receipt: `ADV-${Date.now()}`,
+      notes: {
+        room_id: String(room_id),
+        check_in_date,
+        check_out_date,
+        advance_amount: String(amounts.advanceAmount),
+        created_by: String(req.user.user_id),
+      },
+    });
+
+    res.json({
+      razorpay_key: process.env.RAZORPAY_KEY_ID,
+      order_id: order.id,
+      currency: order.currency,
+      ...amounts,
+      room: undefined,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res) => {
+  try {
+    const {
+      room_id,
+      check_in_date,
+      check_out_date,
+      guest_count,
+      customer,
+      vehicle_type = "none",
+      advance_amount,
+      pickup_location,
+      dropoff_location,
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+    } = req.body;
+
+    if (
+      !room_id ||
+      !check_in_date ||
+      !check_out_date ||
+      !razorpay_order_id ||
+      !razorpay_payment_id ||
+      !razorpay_signature
+    ) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+    if (expectedSignature !== razorpay_signature) {
+      return res.status(400).json({ error: "Payment verification failed" });
+    }
+
+    const validVehicleTypes = ["none", "4-seater", "7-seater", "12-seater"];
+    if (!validVehicleTypes.includes(vehicle_type)) {
+      return res.status(400).json({ error: "Invalid vehicle type" });
+    }
+
+    const amounts = await calculateBookingAmounts({
+      room_id,
+      check_in_date,
+      check_out_date,
+      advance_amount,
+    });
+    const requestedGuests = Math.max(1, Number(guest_count) || 1);
+    if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
+      return res.status(400).json({
+        error: `This room allows up to ${amounts.room.capacity} guests`,
+      });
+    }
+
+    const paidOrder = await razorpay.orders.fetch(razorpay_order_id);
+    const orderNotes = paidOrder.notes || {};
+    if (
+      String(orderNotes.room_id || "") !== String(room_id) ||
+      orderNotes.check_in_date !== check_in_date ||
+      orderNotes.check_out_date !== check_out_date
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Paid order does not match this booking" });
+    }
+    if (Number(paidOrder.amount) !== Math.round(amounts.advanceAmount * 100)) {
+      return res
+        .status(400)
+        .json({ error: "Advance amount does not match paid order" });
+    }
+
+    const userId = await findOrCreateGuestUser(customer || {});
+
+    const [result] = await db.query(
+      `INSERT INTO bookings (
+        user_id, room_id, check_in_date, check_out_date, guest_count,
+        total_price, gst_amount, final_total, total_amount,
+        advance_amount, advance_paid, balance_paid, remaining_amount,
+        payment_status, payment_id, advance_payment_id, advance_order_id,
+        payment_method, booking_source, vehicle_type, vehicle_price,
+        vehicle_status, pickup_location, dropoff_location, status
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+      [
+        userId,
+        room_id,
+        check_in_date,
+        check_out_date,
+        requestedGuests,
+        amounts.roomSubtotal,
+        amounts.gstAmount,
+        amounts.totalAmount,
+        amounts.totalAmount,
+        amounts.advanceAmount,
+        amounts.advanceAmount,
+        0,
+        amounts.remainingAmount,
+        amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+        razorpay_payment_id,
+        razorpay_payment_id,
+        razorpay_order_id,
+        "Razorpay Advance",
+        req.user.role === "admin" ? "ADMIN_ADVANCE" : "MANAGER_ADVANCE",
+        vehicle_type,
+        0,
+        vehicle_type === "none" ? "not_required" : "pending",
+        pickup_location || null,
+        dropoff_location || null,
+      ],
+    );
+
+    const bookingId = result.insertId;
+    loadBookingForInvoice(bookingId)
+      .then((booking) => booking && sendAdvanceInvoiceEmail(booking))
+      .catch((emailErr) =>
+        console.error("Advance booking invoice email error:", emailErr.message),
+      );
+
+    res.status(201).json({
+      message: "Booking confirmed with advance payment",
+      booking_id: bookingId,
+      totalAmount: amounts.totalAmount,
+      advanceAmount: amounts.advanceAmount,
+      advancePaid: amounts.advanceAmount,
+      remainingAmount: amounts.remainingAmount,
+      paymentStatus: amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+      bookingStatus: "CONFIRMED",
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post(
+  "/api/admin/bookings/manual-advance-confirm",
+  requireManager,
+  async (req, res) => {
+    try {
+      const {
+        room_id,
+        check_in_date,
+        check_out_date,
+        guest_count,
+        customer,
+        vehicle_type = "none",
+        advance_amount,
+        payment_mode,
+        pickup_location,
+        dropoff_location,
+      } = req.body;
+
+      if (!room_id || !check_in_date || !check_out_date) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      const selectedPaymentMode =
+        MANUAL_ADVANCE_PAYMENT_MODES[
+          String(payment_mode || "").trim().toLowerCase()
+        ];
+      if (!selectedPaymentMode) {
+        return res
+          .status(400)
+          .json({ error: "Select Cash or Online payment mode" });
+      }
+
+      const validVehicleTypes = ["none", "4-seater", "7-seater", "12-seater"];
+      if (!validVehicleTypes.includes(vehicle_type)) {
+        return res.status(400).json({ error: "Invalid vehicle type" });
+      }
+
+      const amounts = await calculateBookingAmounts({
+        room_id,
+        check_in_date,
+        check_out_date,
+        advance_amount,
+      });
+      const requestedGuests = Math.max(1, Number(guest_count) || 1);
+      if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
+        return res.status(400).json({
+          error: `This room allows up to ${amounts.room.capacity} guests`,
+        });
+      }
+
+      const userId = await findOrCreateGuestUser(customer || {});
+      const manualPaymentId = `${selectedPaymentMode.toUpperCase()}-${Date.now()}-${req.user.user_id}`;
+
+      const [result] = await db.query(
+        `INSERT INTO bookings (
+          user_id, room_id, check_in_date, check_out_date, guest_count,
+          total_price, gst_amount, final_total, total_amount,
+          advance_amount, advance_paid, balance_paid, remaining_amount,
+          payment_status, payment_id, advance_payment_id, advance_order_id,
+          payment_method, booking_source, vehicle_type, vehicle_price,
+          vehicle_status, pickup_location, dropoff_location, status
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        [
+          userId,
+          room_id,
+          check_in_date,
+          check_out_date,
+          requestedGuests,
+          amounts.roomSubtotal,
+          amounts.gstAmount,
+          amounts.totalAmount,
+          amounts.totalAmount,
+          amounts.advanceAmount,
+          amounts.advanceAmount,
+          0,
+          amounts.remainingAmount,
+          amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+          manualPaymentId,
+          manualPaymentId,
+          null,
+          `${selectedPaymentMode} Advance`,
+          req.user.role === "admin"
+            ? "ADMIN_MANUAL_ADVANCE"
+            : "MANAGER_MANUAL_ADVANCE",
+          vehicle_type,
+          0,
+          vehicle_type === "none" ? "not_required" : "pending",
+          pickup_location || null,
+          dropoff_location || null,
+        ],
+      );
+
+      const bookingId = result.insertId;
+      loadBookingForInvoice(bookingId)
+        .then((booking) => booking && sendAdvanceInvoiceEmail(booking))
+        .catch((emailErr) =>
+          console.error("Manual booking invoice email error:", emailErr.message),
+        );
+
+      res.status(201).json({
+        message: "Booking confirmed with manual advance payment",
+        booking_id: bookingId,
+        totalAmount: amounts.totalAmount,
+        advanceAmount: amounts.advanceAmount,
+        advancePaid: amounts.advanceAmount,
+        remainingAmount: amounts.remainingAmount,
+        invoiceEmail: customer?.email,
+        paymentMode: selectedPaymentMode,
+        paymentStatus: amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+        bookingStatus: "CONFIRMED",
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  },
+);
+
+app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
+      req.params.id,
+    ]);
+    if (!rows.length) return res.status(404).json({ error: "Booking not found" });
+
+    const booking = rows[0];
+    const remaining = Number(booking.remaining_amount || 0);
+    const currentBalancePaid = Number(booking.balance_paid || 0);
+    const newBalancePaid = currentBalancePaid + remaining;
+
+    await db.query(
+      "UPDATE bookings SET balance_paid=?, remaining_amount=0, payment_status='PAID' WHERE booking_id=?",
+      [newBalancePaid, req.params.id],
+    );
+
+    res.json({
+      message: "Balance marked as paid",
+      totalAmount: Number(booking.total_amount || booking.final_total || 0),
+      advancePaid: Number(booking.advance_paid || 0),
+      balancePaid: newBalancePaid,
+      remainingAmount: 0,
+      paymentStatus: "PAID",
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1903,6 +2830,44 @@ app.get("/api/manager/bookings/:id", requireManager, async (req, res) => {
       [req.params.id],
     );
     res.json({ ...rows[0], addons });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/manager/bookings/:id/vehicle", requireManager, async (req, res) => {
+  try {
+    const {
+      vehicle_type,
+      vehicle_price,
+      vehicle_status,
+      pickup_location,
+      dropoff_location,
+    } = req.body;
+    const validTypes = ["4-seater", "7-seater", "12-seater"];
+    const validStatuses = ["pending", "assigned", "picked_up", "completed", "cancelled"];
+    if (!validTypes.includes(vehicle_type))
+      return res.status(400).json({ error: "Invalid vehicle type" });
+    if (!validStatuses.includes(vehicle_status))
+      return res.status(400).json({ error: "Invalid vehicle status" });
+    if (!Number.isFinite(Number(vehicle_price)) || Number(vehicle_price) < 0)
+      return res.status(400).json({ error: "Invalid vehicle price" });
+
+    const [rows] = await db.query(
+      "SELECT total_price, vehicle_price, addon_charges FROM bookings WHERE booking_id=? AND vehicle_type IS NOT NULL AND vehicle_type != 'none'",
+      [req.params.id],
+    );
+    if (!rows.length) return res.status(404).json({ error: "Vehicle booking not found" });
+
+    const roomSubtotal = Number(rows[0].total_price || 0) - Number(rows[0].vehicle_price || 0);
+    const updatedSubtotal = roomSubtotal + Number(vehicle_price);
+    const gstAmount = Math.round(updatedSubtotal * GST_RATE * 100) / 100;
+    const finalTotal = Math.round((updatedSubtotal + gstAmount + Number(rows[0].addon_charges || 0) * (1 + GST_RATE)) * 100) / 100;
+    await db.query(
+      "UPDATE bookings SET vehicle_type=?, vehicle_price=?, vehicle_status=?, pickup_location=?, dropoff_location=?, total_price=?, gst_amount=?, final_total=? WHERE booking_id=?",
+      [vehicle_type, Number(vehicle_price), vehicle_status, pickup_location || null, dropoff_location || null, updatedSubtotal, gstAmount, finalTotal, req.params.id],
+    );
+    res.json({ message: "Vehicle details updated", vehicle_price: Number(vehicle_price), vehicle_status, pickup_location, dropoff_location, final_total: finalTotal });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -304,12 +304,17 @@ export default function RoomDetail({
     window.scrollTo({ top: 0, behavior: "instant" });
   }, []);
   const policies = [
-    { icon: <IconClock />, text: "Check-in from 2:00 PM" },
+    { icon: <IconClock />, text: "Check-in from 1:00 PM" },
     { icon: <IconClock />, text: "Check-out by 11:00 AM" },
     { icon: <IconSmoke />, text: "Non-smoking room" },
     { icon: <IconX />, text: "No pets allowed" },
     { icon: <IconCheck />, text: "Free cancellation within 48 hrs" },
     { icon: <IconCoffee />, text: "Breakfast available (extra charge)" },
+    { icon: <IconCheck />, text: "Maximum occupancy: 2 adults + 1 child per room." },
+    { icon: <IconCheck />, text: "Children below 5 years: Stay free of charge when sharing the existing bed with parents." },
+    { icon: <IconCoffee />, text: "Complimentary food: One child below 5 years is eligible for complimentary food during the stay." },
+    { icon: <IconCheck />, text: "Extra bed: An extra bed is not included unless specifically requested and approved by the hotel." },
+    { icon: <IconCheck />, text: "Age verification: The hotel may request proof of the child's age at check-in." },
   ];
 
   const handleThumbClick = (i) => {

@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useCallback } from "react";
 import "./App.css";
-
 import Hero from "./Hero";
 import Rooms from "./Rooms";
 import CalendarSection from "./CalendarSection";
+import NearbyAttractions from "./NearbyAttractions";
 import Facilities from "./Facilities";
 import Gallery from "./Gallery";
 import Testimonials from "./Testimonials";
 import Footer from "./Footer";
 import LegalPolicy, { getLegalPolicyByPath } from "./LegalPolicy";
 import RoomDetail from "./Roomdetail";
+import CheckoutPage from "./pages/CheckoutPage";
 import AdminDashboard from "./AdminDashboard";
 import ManagerDashboard from "./ManagerDashboard";
 import { XIcon, CheckIcon, BookingIcon, DownloadIcon } from "./Icons";
@@ -310,14 +311,41 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
   );
 }
 
+function BookingSuccessRoute() {
+  let booking = null;
+  try {
+    booking = JSON.parse(
+      sessionStorage.getItem("vvgrandpark_booking_success") || "null",
+    );
+  } catch {}
+
+  return (
+    <div className="min-h-screen bg-[#F7F5F0] px-6 py-16">
+      <div className="mx-auto max-w-lg rounded-2xl bg-white p-8 text-center shadow-xl">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border-2 border-[#2D9A6E] text-3xl text-[#2D9A6E]">✓</div>
+        <h1 className="mt-5 font-display text-2xl font-semibold text-[#0F1923]">Booking Confirmed!</h1>
+        <p className="mt-2 text-sm text-gray-500">Payment successful. Your room is reserved.</p>
+        {booking && (
+          <div className="mt-6 space-y-2 border-t border-gray-100 pt-5 text-sm text-gray-600">
+            <p>Booking ID: <strong className="text-[#0F1923]">#{booking.booking_id}</strong></p>
+            <p>{booking.room_type} · {booking.check_in_date?.slice(0, 10)} to {booking.check_out_date?.slice(0, 10)}</p>
+            <p className="text-base font-bold text-[#0F1923]">Total paid: Rs.{Math.round(Number(booking.final_total || 0)).toLocaleString("en-IN")}</p>
+          </div>
+        )}
+        <button onClick={() => window.location.assign("/")} className="mt-7 w-full rounded-xl bg-[#0F1923] py-3 text-sm font-semibold text-white">Back to hotel</button>
+      </div>
+    </div>
+  );
+}
+
 function BookingModal({ room, user, onClose, showToast }) {
   const [form, setForm] = useState({
     check_in_date: "",
     check_out_date: "",
     guest_count: 1,
   });
-  const [loading, setLoading] = useState(false);
-  const [confirmedBooking, setConfirmedBooking] = useState(null);
+  const [loading] = useState(false);
+  const [confirmedBooking] = useState(null);
   const nights =
     form.check_in_date && form.check_out_date
       ? Math.max(
@@ -333,95 +361,123 @@ function BookingModal({ room, user, onClose, showToast }) {
   const gst = Math.round(basePrice * GST_RATE * 100) / 100;
   const total = basePrice + gst;
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (nights <= 0) {
-      showToast("Check-out must be after check-in!", "error");
-      return;
-    }
-    setLoading(true);
-    try {
-      const orderRes = await apiFetch("/api/payment/create-order", {
-        method: "POST",
-        body: JSON.stringify({
-          user_id: user.user_id,
-          room_id: room.room_id,
-          ...form,
-        }),
-      });
-      const orderData = await orderRes.json();
-      if (!orderRes.ok) throw new Error(orderData.error);
+  // async function handleSubmit(e) {
 
-      const {
-        booking_id,
-        total_price,
-        razorpay_order_id,
-        razorpay_key,
-        room_name,
-      } = orderData;
+  //   e.preventDefault();
+  //   if (nights <= 0) {
+  //     showToast("Check-out must be after check-in!", "error");
+  //     return;
+  //   }
+  //   setLoading(true);
+  //   try {
+  //     const orderRes = await apiFetch("/api/payment/create-order", {
+  //       method: "POST",
+  //       body: JSON.stringify({
+  //         user_id: user.user_id,
+  //         room_id: room.room_id,
+  //         ...form,
+  //       }),
+  //     });
+  //     const orderData = await orderRes.json();
+  //     if (!orderRes.ok) throw new Error(orderData.error);
 
-      const options = {
-        key: razorpay_key,
-        amount: Math.round(total_price * 100),
-        currency: "INR",
-        name: "VV Grand Park Residency",
-        description: room_name,
-        order_id: razorpay_order_id,
-        prefill: {
-          name: user.name,
-          email: user.email,
-          contact: user.phone || "",
-        },
-        theme: { color: "#0F1923" },
-        modal: {
-          ondismiss: async () => {
-            await apiFetch("/api/payment/failed", {
-              method: "POST",
-              body: JSON.stringify({ booking_id }),
-            });
-            showToast("Payment cancelled.", "error");
-            setLoading(false);
-          },
-        },
-        handler: async (response) => {
-          try {
-            const verifyRes = await apiFetch("/api/payment/verify", {
-              method: "POST",
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                booking_id,
-              }),
-            });
-            const verifyData = await verifyRes.json();
-            if (!verifyRes.ok) throw new Error(verifyData.error);
-            setConfirmedBooking(verifyData.booking);
-          } catch (err) {
-            showToast(err.message, "error");
-          } finally {
-            setLoading(false);
-          }
-        },
-      };
+  //     const {
+  //       booking_id,
+  //       total_price,
+  //       razorpay_order_id,
+  //       razorpay_key,
+  //       room_name,
+  //     } = orderData;
 
-      const rzp = new window.Razorpay(options);
-      rzp.on("payment.failed", async (resp) => {
-        await apiFetch("/api/payment/failed", {
-          method: "POST",
-          body: JSON.stringify({ booking_id }),
-        });
-        showToast(`Payment failed: ${resp.error.description}`, "error");
-        setLoading(false);
-      });
-      rzp.open();
-    } catch (err) {
-      showToast(err.message, "error");
-      setLoading(false);
-    }
-  }
+  //     const options = {
+  //       key: razorpay_key,
+  //       amount: Math.round(total_price * 100),
+  //       currency: "INR",
+  //       name: "VV Grand Park Residency",
+  //       description: room_name,
+  //       order_id: razorpay_order_id,
+  //       prefill: {
+  //         name: user.name,
+  //         email: user.email,
+  //         contact: user.phone || "",
+  //       },
+  //       theme: { color: "#0F1923" },
+  //       modal: {
+  //         ondismiss: async () => {
+  //           await apiFetch("/api/payment/failed", {
+  //             method: "POST",
+  //             body: JSON.stringify({ booking_id }),
+  //           });
+  //           showToast("Payment cancelled.", "error");
+  //           setLoading(false);
+  //         },
+  //       },
+  //       handler: async (response) => {
+  //         try {
+  //           const verifyRes = await apiFetch("/api/payment/verify", {
+  //             method: "POST",
+  //             body: JSON.stringify({
+  //               razorpay_order_id: response.razorpay_order_id,
+  //               razorpay_payment_id: response.razorpay_payment_id,
+  //               razorpay_signature: response.razorpay_signature,
+  //               booking_id,
+  //             }),
+  //           });
+  //           const verifyData = await verifyRes.json();
+  //           if (!verifyRes.ok) throw new Error(verifyData.error);
+  //           setConfirmedBooking(verifyData.booking);
+  //         } catch (err) {
+  //           showToast(err.message, "error");
+  //         } finally {
+  //           setLoading(false);
+  //         }
+  //       },
+  //     };
+
+  //     const rzp = new window.Razorpay(options);
+  //     rzp.on("payment.failed", async (resp) => {
+  //       await apiFetch("/api/payment/failed", {
+  //         method: "POST",
+  //         body: JSON.stringify({ booking_id }),
+  //       });
+  //       showToast(`Payment failed: ${resp.error.description}`, "error");
+  //       setLoading(false);
+  //     });
+  //     rzp.open();
+  //   } catch (err) {
+  //     showToast(err.message, "error");
+  //     setLoading(false);
+  //   }
+  // }
   //Greyout the dates that are already booked for the selected room. This is done by fetching the booked dates from the backend and storing them in the `bookedDates` state. The `useEffect` hook is used to load the booked dates whenever the `room.room_id` changes.
-    const [occupiedNights, setOccupiedNights] = useState(new Set());
+  function handleSubmit(e) {
+  e.preventDefault();
+
+  if (nights <= 0) {
+    showToast("Check-out must be after check-in!", "error");
+    return;
+  }
+
+  const checkoutData = {
+    room,
+    user,
+    form,
+    nights,
+    basePrice,
+    gst,
+    roomTotal: total,
+  };
+
+  // refresh ஆனாலும் checkout data போகாமல் இருக்க
+  sessionStorage.setItem(
+    "vvgrandpark_checkout",
+    JSON.stringify(checkoutData)
+  );
+
+  window.location.assign("/checkout");
+}  
+  const [occupiedNights, setOccupiedNights] = useState(new Set());
+
 
     useEffect(() => {
       async function loadBookedDates() {
@@ -521,7 +577,8 @@ function BookingModal({ room, user, onClose, showToast }) {
     doc.text("VV Grand Park Residency", W / 2 + 8, 51);
     doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(73, 80, 87);
     doc.text("vvgrandpark.com", W / 2 + 8, 57);
-    doc.text("vvgrandpark.hotel@gmail.com", W / 2 + 8, 63);
+    doc.text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", W / 2 + 8, 63);
+    doc.text("+91 93849 82510 | vvgrandpark@gmail.com", W / 2 + 8, 69);
 
     // Table header
     const tableTop = 76;
@@ -620,10 +677,13 @@ function BookingModal({ room, user, onClose, showToast }) {
     y += 22;
     doc.setFont("helvetica", "bold").setFontSize(7).setTextColor(80, 80, 80);
     doc.text("TERMS & CONDITIONS", L, y);
-    y += 5;
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.2);
+    doc.line(L, y + 2.5, R, y + 2.5);
+    y += 7;
     const terms = [
       "1. Valid photo ID must be presented at check-in.",
-      "2. Check-in: 12:00 PM | Check-out: 11:00 AM.",
+      "2. Check-in: 1:00 PM | Check-out: 11:00 AM.",
       "3. Early check-in/late check-out subject to availability.",
       "4. Pets, outside food, and smoking are not permitted.",
       "5. Cancellations must be made 24 hours prior to check-in for a refund.",
@@ -655,9 +715,15 @@ function BookingModal({ room, user, onClose, showToast }) {
     );
     doc.setFont("helvetica", "normal").setFontSize(7.5);
     doc.text(
-      "vvgrandpark.com  |  vvgrandpark.hotel@gmail.com",
+      "3/4/D, Thanjai Saalai, Thiruvarur - 610004",
       W / 2,
       footerY + 11,
+      { align: "center" },
+    );
+    doc.text(
+      "+91 93849 82510  |  vvgrandpark@gmail.com  |  vvgrandpark.com",
+      W / 2,
+      footerY + 17,
       { align: "center" },
     );
 
@@ -786,7 +852,7 @@ function BookingModal({ room, user, onClose, showToast }) {
             <div className="flex items-center justify-between rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-xs">
               <div className="flex items-center gap-1.5 text-gray-600">
                 <span className="font-semibold text-navy">Check-in</span>
-                <span className="text-gray-500">from 12:00 PM</span>
+                <span className="text-gray-500">from 1:00 PM</span>
               </div>
               <div className="h-4 w-px bg-gray-200" />
               <div className="flex items-center gap-1.5 text-gray-600">
@@ -842,28 +908,13 @@ function BookingModal({ room, user, onClose, showToast }) {
             )}
 
             {/* Submit */}
-            <button
-              type="submit"
-              disabled={loading || nights <= 0}
-              className="w-full flex items-center justify-center gap-2 bg-navy text-white font-semibold text-sm py-3 rounded-xl hover:bg-navy/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                "Opening Payment..."
-              ) : (
-                <>
-                  <svg
-                    width="17"
-                    height="17"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                  >
-                    <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
-                  </svg>
-                  Pay Now — Rs.
-                  {nights > 0 ? Math.round(total).toLocaleString() : "0"}
-                </>
-              )}
-            </button>
+           <button
+  type="submit"
+  disabled={nights <= 0}
+  className="w-full flex items-center justify-center gap-2 bg-navy text-white font-semibold text-sm py-3 rounded-xl hover:bg-navy/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+>
+  Confirm Booking
+</button>
 
             {/* Security note */}
             <p className="flex items-center justify-center gap-1.5 text-[0.7rem] text-gray-400">
@@ -1567,10 +1618,10 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                               <span className="text-sm">📞</span>
                               To cancel:{" "}
                               <a
-                                href="tel:+911234567890"
+                                href="tel:+919384982510"
                                 className="font-semibold text-blue-800 no-underline"
                               >
-                                +91 12345 67890
+                                +91 93849 82510
                               </a>
                             </p>
                           ) : (
@@ -1705,6 +1756,14 @@ export default function App() {
     );
   }
 
+  if (window.location.pathname.startsWith("/booking-success/")) {
+    return <BookingSuccessRoute />;
+  }
+
+  if (window.location.pathname === "/checkout") {
+    return <CheckoutPage user={user} showToast={showToast} />;
+  }
+
   if (selectedRoom) {
     return (
       <>
@@ -1816,6 +1875,7 @@ export default function App() {
           }, 300);
         }}
       />
+      <NearbyAttractions />
       <Facilities />
       <Gallery />
       <Testimonials />

@@ -1151,8 +1151,8 @@ button {
 /* TOAST */
 .toast {
   position: fixed;
-  bottom: 28px;
-  right: 28px;
+  top: 24px;
+  left: 50%;
   z-index: 999;
   background: var(--navy);
   color: var(--white);
@@ -1166,6 +1166,7 @@ button {
   align-items: center;
   gap: 10px;
   max-width: 320px;
+  transform: translateX(-50%);
 }
 .toast.success {
   border-left: 3px solid var(--success);
@@ -1175,11 +1176,11 @@ button {
 }
 @keyframes toastIn {
   from {
-    transform: translateY(20px);
+    transform: translate(-50%, -16px);
     opacity: 0;
   }
   to {
-    transform: translateY(0);
+    transform: translate(-50%, 0);
     opacity: 1;
   }
 }
@@ -1669,11 +1670,18 @@ tbody tr:hover td {
 }
 
 /* Disabled Booked Dates */
-.react-datepicker__day--excluded {
+.react-datepicker__day--excluded,
+.react-datepicker__day--disabled {
   background: #ececec !important;
   color: #9ca3af !important;
   text-decoration: line-through;
   cursor: not-allowed !important;
+}
+
+.react-datepicker__day--excluded:hover,
+.react-datepicker__day--disabled:hover {
+  background: #ececec !important;
+  color: #9ca3af !important;
 }
 
 /* Navigation Arrows */

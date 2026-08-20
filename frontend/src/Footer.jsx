@@ -3,7 +3,10 @@ import { MapPinIcon, PhoneIcon, MailIcon } from "./Icons";
 
 export default function Footer() {
   return (
-    <footer className="border-t border-[#C9A84C]/15 bg-[#0F1923] px-[5%]  pt-[72px] pb-[36px]">
+    <footer
+      id="contact"
+      className="border-t border-[#C9A84C]/15 bg-[#0F1923] px-[5%]  pt-[72px] pb-[36px]"
+    >
       <div className="mx-auto mb-12 grid max-w-[1200px] grid-cols-1 gap-12 md:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1.2fr]">
         {/* Logo Section */}
         <div>
@@ -59,6 +62,8 @@ export default function Footer() {
               { label: "Rooms & Suites", link: "/#rooms" },
               { label: "Facilities", link: "/#facilities" },
               { label: "Gallery", link: "/#gallery" },
+              { label: "Nearby Attractions", link: "/#nearby-attractions" },
+              { label: "Contact", link: "/#contact" },
               { label: "Book Now", link: "/#calendar" },
             ].map((item) => (
               <li key={item.label} className="mb-[11px]">
@@ -101,7 +106,7 @@ export default function Footer() {
             <li className="mb-[11px]">
               <span className="flex items-center gap-2 text-[0.82rem] text-white/45">
                 <MapPinIcon size={13} color="rgba(255,255,255,0.4)" />
-                <span>3/4/D, Thanjai Saalai<br/>near Navajeevan Hospital<br/>Thiruvarur - 610004</span>
+                <span>3/4/D, Thanjai Saalai<br />near Navajeevan Hospital<br />Thiruvarur - 610004</span>
               </span>
             </li>
 

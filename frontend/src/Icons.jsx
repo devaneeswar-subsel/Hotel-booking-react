@@ -225,6 +225,30 @@ export const SwimmingIcon = (p) => (
     <path d="M5 18c1.5 0 3-1 3-1s1.5 1 3 1 3-1 3-1 1.5 1 3 1" />
   </Icon>
 );
+export const SnowflakeIcon = (p) => (
+  <Icon {...p}>
+    <line x1="12" y1="2" x2="12" y2="22" />
+    <line x1="4.93" y1="6" x2="19.07" y2="18" />
+    <line x1="19.07" y1="6" x2="4.93" y2="18" />
+    <line x1="12" y1="2" x2="9" y2="5" />
+    <line x1="12" y1="2" x2="15" y2="5" />
+    <line x1="12" y1="22" x2="9" y2="19" />
+    <line x1="12" y1="22" x2="15" y2="19" />
+  </Icon>
+);
+export const TvIcon = (p) => (
+  <Icon {...p}>
+    <rect x="3" y="5" width="18" height="14" rx="1" />
+    <line x1="8" y1="2" x2="12" y2="5" />
+    <line x1="16" y1="2" x2="12" y2="5" />
+  </Icon>
+);
+export const DropletIcon = (p) => (
+  <Icon {...p}>
+    <path d="M12 2.5S5 10 5 14.5a7 7 0 0014 0C19 10 12 2.5 12 2.5z" />
+    <path d="M9 16a3 3 0 003 2" />
+  </Icon>
+);
 export const AwardIcon = (p) => (
   <Icon {...p}>
     <circle cx="12" cy="8" r="7" />

@@ -214,9 +214,9 @@ export default function Rooms({
                     <span> /night</span>
                   </div>
                   <div className="font-body room-capacity">
-                    <UserIcon size={13} color="var(--gray-400)" />
-                    {room.capacity || 2} guests
-                  </div>
+  <UserIcon size={13} color="var(--gray-400)" />
+  {room.capacity || 2 } Adults + 1 Child(Below 5 Years)
+</div>
                 </div>
                 <button
                   className="book-btn"
