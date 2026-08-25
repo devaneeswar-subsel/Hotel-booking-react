@@ -2050,7 +2050,7 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
                   setForm({ ...form, room_type: e.target.value })
                 }
               >
-                {["Standard", "Deluxe", "Suite", "Luxury", "Presidential"].map(
+                {["Standard AC Room", "Suite Room", "Suite with Balcony"].map(
                   (t) => (
                     <option key={t}>{t}</option>
                   ),
@@ -2146,7 +2146,7 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
 function AddRoomModal({ onClose, showToast, onRefresh }) {
   const [form, setForm] = useState({
     room_number: "",
-    room_type: "Standard",
+    room_type: "Standard AC Room",
     price_per_night: "",
     capacity: 2,
     description: "",
@@ -2175,25 +2175,15 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
   const labelCls =
     "block text-[0.62rem] font-bold text-gray-400 mb-1.5 tracking-[0.8px] uppercase";
 
-  const roomTypes = ["Standard", "Deluxe", "Suite", "Luxury", "Presidential"];
+  const roomTypes = ["Standard AC Room", "Suite Room", "Suite with Balcony"];
   const typeColors = {
-    Standard: {
+    "Standard AC Room": {
       border: "border-gold",
       bg: "bg-gold",
       text: "text-gold",
     },
-    Deluxe: {
-      border: "border-gold",
-      bg: "bg-gold",
-      text: "text-gold",
-    },
-    Suite: {
-      border: "border-gold",
-      bg: "bg-gold",
-      text: "text-gold",
-    },
-    Luxury: { border: "border-gold", bg: "bg-gold", text: "text-gold" },
-    Presidential: {
+    "Suite Room": { border: "border-gold", bg: "bg-gold", text: "text-gold" },
+    "Suite with Balcony": {
       border: "border-gold",
       bg: "bg-gold",
       text: "text-gold",
