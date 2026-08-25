@@ -20,6 +20,7 @@ export default function Rooms({
   onCardClick,
   onAuthPrompt,
 }) {
+  const [showAll, setShowAll] = useState(false);
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -37,6 +38,7 @@ export default function Rooms({
   async function fetchRooms(currentFilters = filters) {
     setLoading(true);
     setError("");
+    setShowAll(false);
     try {
       const p = new URLSearchParams();
       if (currentFilters.type) p.set("type", currentFilters.type);
@@ -69,6 +71,8 @@ export default function Rooms({
     viewport: { once: true, amount: 0.3 },
     transition: { duration: 0.6, delay, ease: "easeOut" },
   });
+  const INITIAL_COUNT = 9;
+  const visibleRooms = showAll ? rooms : rooms.slice(0, INITIAL_COUNT);
   return (
     <section
       id="rooms"
@@ -90,11 +94,9 @@ export default function Rooms({
           onChange={(e) => setFilters({ ...filters, type: e.target.value })}
         >
           <option value="">All Room Types</option>
-          <option>Standard</option>
-          <option>Deluxe</option>
-          <option>Suite</option>
-          <option>Luxury</option>
-          <option>Presidential</option>
+          <option>Standard Ac Room</option>
+          <option>Suite Room</option>
+          <option>Suite with Balcony</option>
         </select>
         <input
           className="filter-input"
@@ -166,7 +168,7 @@ export default function Rooms({
             <p>No rooms found. Try adjusting your filters.</p>
           </div>
         ) : (
-          rooms.map((room, index) => (
+          visibleRooms.map((room, index) => (
             <motion.div
               key={room.room_id}
               className="room-card"
@@ -216,15 +218,17 @@ export default function Rooms({
                     <span> /night</span>
                   </div>
                   <div className="font-body room-capacity">
-  <UserIcon size={13} color="var(--gray-400)" />
-  {room.capacity || 2 } Adults + 1 Child(Below 5 Years)
-</div>
+                    <UserIcon size={13} color="var(--gray-400)" />
+                    {room.capacity || 2} Adults + 1 Child(Below 5 Years)
+                  </div>
                 </div>
                 <button
                   className="book-btn"
                   onClick={(e) => handleBook(e, room)}
                   disabled={isAdmin}
-                  title={isAdmin ? "Admin cannot book from user room cards" : ""}
+                  title={
+                    isAdmin ? "Admin cannot book from user room cards" : ""
+                  }
                 >
                   {isAdmin ? "Admin Booking Disabled" : "Book Now"}
                   {!isAdmin && <ArrowRightIcon size={15} color="#fff" />}
@@ -234,6 +238,19 @@ export default function Rooms({
           ))
         )}
       </div>
+      {/* Show More / Show Less */}
+      {!loading && rooms.length > INITIAL_COUNT && (
+        <div className="flex justify-center mt-8">
+          <button
+            className="btn btn-outline"
+            onClick={() => setShowAll((prev) => !prev)}
+          >
+            {showAll
+              ? "Show Less"
+              : `Show More (${rooms.length - INITIAL_COUNT} more)`}
+          </button>
+        </div>
+      )}
     </section>
   );
 }
