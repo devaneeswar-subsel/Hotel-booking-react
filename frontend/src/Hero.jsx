@@ -15,10 +15,10 @@ import {
 const phrases = ["Comfort", "Elegance", "Serenity", "Indulgence", "Perfection"];
 
 const stats = [
-  { num: "250+", label: "Luxury Rooms" },
+  { num: "20+", label: "Luxury Rooms" },
   { num: "4.9", label: "Guest Rating" },
-  { num: "25+", label: "Years of Excellence" },
-  { num: "18K+", label: "Happy Guests" },
+  { num: "24/7", label: "Guest Assistance" },
+  { num: "100 %", label: "AC Rooms " },
 ];
 
 const navLinks = [
@@ -571,7 +571,7 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
               <div key={i}>
                 <div
                   style={{
-                    fontFamily: "var(--font-display)",
+                    fontFamily: "var(--font-body)",
                     fontSize: "clamp(1.2rem, 2.5vw, 1.7rem)",
                     fontWeight: 600,
                     color: "#fff",
