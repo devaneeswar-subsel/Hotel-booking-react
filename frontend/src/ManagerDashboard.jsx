@@ -18,6 +18,7 @@ import VehicleCustomers from "./Components/VehicleCustomers";
 import AdminBookingForUsers from "./AdminBookingForUsers";
 import { getPaginationItems } from "./pagination";
 
+
 const API = process.env.REACT_APP_API_URL || "";
 const GST_RATE = 0.18;
 
@@ -403,34 +404,36 @@ function StatCard({
 }
 
 function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
+
+
+
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [addonLabel, setAddonLabel] = useState("");
   const [addonAmount, setAddonAmount] = useState("");
   const [addonLoading, setAddonLoading] = useState(false);
   const [balanceLoading, setBalanceLoading] = useState(false);
-  const [paymentMode, setPaymentMode] = useState("Cash");
-  const [addonPaid, setAddonPaid] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("Online");
 
-  const PAYMENT_MODES = ["Cash", "UPI", "Card", "Online", "Bank Transfer"];
   const PRESET_ADDONS = [
     "Food & Beverages",
     "Laundry",
     "Extra Bed",
     "Room Service",
   ];
+  const PAYMENT_MODES = ["Cash", "UPI", "Card", "Online", "Bank Transfer"];
 
-  const fetchBooking = useCallback(() => {
+  const fetchBooking = () => {
     setLoading(true);
     apiFetch(`/api/manager/bookings/${bookingId}`)
       .then((r) => r.json())
       .then(setBooking)
       .finally(() => setLoading(false));
-  }, [bookingId]);
+  };
 
   useEffect(() => {
     fetchBooking();
-  }, [fetchBooking]);
+  }, [bookingId]); // eslint-disable-line
 
   async function handleCheckin() {
     const res = await apiFetch(`/api/manager/bookings/${bookingId}/checkin`, {
@@ -453,7 +456,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     if (!res.ok) return showToast(data.error, "error");
     showToast(
       `Checked out! Total: Rs.${Number(data.final_total).toLocaleString()}`,
-      "success"
+      "success",
     );
     fetchBooking();
     onRefresh();
@@ -477,11 +480,13 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     onRefresh();
   }
 
-  async function removeAddon(addonId) {
-    await apiFetch(`/api/manager/bookings/${bookingId}/addons/${addonId}`, {
-      method: "DELETE",
+  async function markAddonsPaid() {
+    const res = await apiFetch(`/api/manager/bookings/${bookingId}/addons/mark-paid`, {
+      method: "PATCH",
     });
-    showToast("Addon removed", "success");
+    const data = await res.json();
+    if (!res.ok) return showToast(data.error, "error");
+    showToast("Add-ons marked as paid", "success");
     fetchBooking();
     onRefresh();
   }
@@ -507,11 +512,23 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     }
   }
 
+  async function removeAddon(addonId) {
+    await apiFetch(`/api/mana/bookings/${bookingId}/addons/${addonId}`, {
+      method: "DELETE",
+    });
+    showToast("Addon removed", "success");
+    fetchBooking();
+    onRefresh();
+  }
+
   async function downloadInvoice() {
     if (!booking) return;
     const b = booking;
     const selectedPaymentMode = paymentMode;
-    const isAddonPaid = addonPaid;
+    const addonsForPdf = b.addons || [];
+    const isAddonPaid =
+      addonsForPdf.length > 0 && addonsForPdf.every((a) => a.paid === 1);
+    const isCancelled = b.status === "cancelled";
     const ci = b.actual_checkin
       ? new Date(b.actual_checkin).toLocaleString("en-IN")
       : b.check_in_date?.slice(0, 10);
@@ -521,16 +538,63 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     const nights =
       b.check_in_date && b.check_out_date
         ? Math.ceil(
-            (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000
+            (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
           )
         : 1;
-    const basePrice = Number(b.total_price);
-    const roomGst = Math.round(basePrice * GST_RATE * 100) / 100;
-    const alreadyPaid = Math.round((basePrice + roomGst) * 100) / 100;
-    const addonTotal = Number(b.addon_charges || 0);
-    const addonGst = Math.round(addonTotal * GST_RATE * 100) / 100;
-    const remaining = Math.round((addonTotal + addonGst) * 100) / 100;
-    const grandTotal = Math.round((alreadyPaid + remaining) * 100) / 100;
+  const basePrice = Number(b.total_price || 0);
+
+const roomGstPdf =
+  Math.round(basePrice * GST_RATE * 100) / 100;
+
+const roomTotalPdf =
+  Math.round((basePrice + roomGstPdf) * 100) / 100;
+
+const advancePaidPdf = Number(b.advance_paid || 0);
+const balancePaidPdf = Number(b.balance_paid || 0);
+
+const paymentTotalPdf = Number(
+  b.total_amount || b.final_total || roomTotalPdf
+);
+
+// Room booking remaining balance
+const roomRemainingPdf = Math.max(
+  0,
+  Math.round(
+    (paymentTotalPdf - advancePaidPdf - balancePaidPdf) * 100
+  ) / 100
+);
+
+// Add-ons
+const addonTotalPdf = Number(b.addon_charges || 0);
+
+const addonGstPdf =
+  Math.round(addonTotalPdf * GST_RATE * 100) / 100;
+
+// Only unpaid add-ons
+const unpaidAddonTotalPdf =
+  (b.addons || [])
+    .filter((addon) => addon.paid !== 1)
+    .reduce(
+      (sum, addon) => sum + Number(addon.amount || 0),
+      0
+    );
+
+const unpaidAddonGstPdf =
+  Math.round(unpaidAddonTotalPdf * GST_RATE * 100) / 100;
+
+// Final remaining amount
+const remainingPdf = Math.round(
+  (roomRemainingPdf +
+    unpaidAddonTotalPdf +
+    unpaidAddonGstPdf) *
+    100
+) / 100;
+
+// Grand total
+const grandTotalPdf = Math.round(
+  (paymentTotalPdf + addonTotalPdf + addonGstPdf) *
+    100
+) / 100;
     const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
     const today = new Date().toLocaleDateString("en-IN", {
       day: "numeric",
@@ -542,6 +606,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     const W = 210;
     const L = 18;
     const R = W - 18;
+
     doc.setFillColor(15, 25, 35);
     doc.rect(0, 0, W, 32, "F");
     doc.setFont("times", "bold");
@@ -561,6 +626,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.setTextColor(150, 140, 120);
     doc.text(invNo, R, 20, { align: "right" });
     doc.text(`Date: ${today}`, R, 27, { align: "right" });
+
     doc.setDrawColor(201, 168, 76);
     doc.setLineWidth(0.4);
     doc.line(L, 37, R, 37);
@@ -585,9 +651,10 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(73, 80, 87);
-    doc.text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", W / 2 + 8, 57);
-    doc.text("+91 93849 82510 | vvgrandpark@gmail.com", W / 2 + 8, 63);
-    doc.text("GSTIN: 33AAAAA0000A1Z5", W / 2 + 8, 69);
+    doc.text("vvgrandpark.com", W / 2 + 8, 57);
+    doc.text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", W / 2 + 8, 63);
+    doc.text("+91 93849 82510 | vvgrandpark@gmail.com", W / 2 + 8, 69);
+
     const tableTop = 76;
     doc.setFillColor(15, 25, 35);
     doc.rect(L, tableTop, W - 36, 8, "F");
@@ -597,6 +664,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.text("DESCRIPTION", L + 4, tableTop + 5.5);
     doc.text("DETAILS", 108, tableTop + 5.5);
     doc.text("AMOUNT", R, tableTop + 5.5, { align: "right" });
+
     const rows = [
       {
         desc: `${b.room_type} — Room ${b.room_number || b.room_id}`,
@@ -616,6 +684,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
         : []),
       { desc: "Guests", detail: `${b.guest_count || 1}`, amount: "—" },
     ];
+
     let y = tableTop + 13;
     rows.forEach((row, i) => {
       if (i % 2 === 0) {
@@ -631,6 +700,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       doc.text(row.amount, R, y, { align: "right" });
       y += 8;
     });
+
     if (b.addons && b.addons.length > 0) {
       y += 2;
       doc.setFillColor(235, 235, 235);
@@ -653,7 +723,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
         doc.text(
           new Date(addon.created_at).toLocaleDateString("en-IN"),
           108,
-          y
+          y,
         );
         doc.text(`Rs.${Number(addon.amount).toLocaleString()}`, R, y, {
           align: "right",
@@ -661,12 +731,14 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
         y += 8;
       });
     }
+
     y += 5;
     doc.setDrawColor(220, 220, 220);
     doc.setLineWidth(0.3);
     doc.line(L, y, R, y);
     y += 5;
     const SX = W - 90;
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(6.5);
     doc.setTextColor(160, 160, 160);
@@ -674,7 +746,10 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     y += 6;
     [
       { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
-      { label: "GST (18%)", val: `Rs.${Math.round(roomGst).toLocaleString()}` },
+      {
+        label: "GST (18%)",
+        val: `Rs.${Math.round(roomGstPdf).toLocaleString()}`,
+      },
     ].forEach(({ label, val }) => {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
@@ -685,26 +760,37 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       doc.text(val, R, y, { align: "right" });
       y += 6;
     });
-    doc.setFillColor(232, 248, 240);
+    doc.setFillColor(...(isCancelled ? [252, 232, 232] : [232, 248, 240]));
     doc.rect(SX - 1, y - 4, R - SX + 3, 7, "F");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.setTextColor(45, 154, 110);
-    doc.text("Amount Already Paid", SX, y + 1);
-    doc.text(`Rs.${Math.round(alreadyPaid).toLocaleString()}`, R, y + 1, {
-      align: "right",
-    });
-    y += 9;
+    doc.setTextColor(...(isCancelled ? [192, 57, 43] : [45, 154, 110]));
+    doc.text(
+      isCancelled ? "Refunded (Cancelled)" : "Amount Already Paid",
+      SX,
+      y + 1,
+    );
+ doc.text(
+  `Rs.${Math.round(
+    advancePaidPdf + balancePaidPdf
+  ).toLocaleString()}`,
+  R,
+  y + 1,
+  {
+    align: "right",
+  }
+);
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(6.5);
     doc.setTextColor(160, 160, 160);
     doc.text("ADD-ON CHARGES", L, y + 1);
     y += 6;
     [
-      { label: "Add-on Charges", val: `Rs.${addonTotal.toLocaleString()}` },
+      { label: "Add-on Charges", val: `Rs.${addonTotalPdf.toLocaleString()}` },
       {
         label: "GST on Add-ons (18%)",
-        val: `Rs.${Math.round(addonGst).toLocaleString()}`,
+        val: `Rs.${Math.round(addonGstPdf).toLocaleString()}`,
       },
     ].forEach(({ label, val }) => {
       doc.setFont("helvetica", "normal");
@@ -724,7 +810,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.setFontSize(8);
     doc.setTextColor(...remTxt);
     doc.text(isAddonPaid ? "Add-ons Paid" : "Remaining to Pay", SX, y + 1);
-    doc.text(`Rs.${Math.round(remaining).toLocaleString()}`, R, y + 1, {
+    doc.text(`Rs.${Math.round(remainingPdf).toLocaleString()}`, R, y + 1, {
       align: "right",
     });
     y += 8;
@@ -734,9 +820,10 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.text(
       `Payment Mode: ${selectedPaymentMode}   Status: ${isAddonPaid ? "PAID" : "PENDING"}`,
       SX,
-      y
+      y,
     );
     y += 8;
+
     doc.setDrawColor(201, 168, 76);
     doc.setLineWidth(0.5);
     doc.line(SX - 1, y - 1, R, y - 1);
@@ -749,12 +836,66 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     doc.setFontSize(11);
     doc.setTextColor(255, 255, 255);
     doc.text(
-      `Rs.${Math.round(grandTotal).toLocaleString()}`,
+      isCancelled ? "Rs.0" : `Rs.${Math.round(grandTotalPdf).toLocaleString()}`,
       (SX - 1 + R) / 2,
       y + 13,
-      { align: "center" }
+      { align: "center" },
     );
-    const footerY = 282;
+
+    // Terms & Conditions
+    y += 24;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(80, 80, 80);
+    doc.text("TERMS & CONDITIONS", L, y);
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.2);
+    doc.line(L, y + 2.5, R, y + 2.5);
+    y += 6;
+
+    const terms = [
+      "1. A valid government-issued photo ID must be presented at check-in.",
+      "2. Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
+      "3. Early check-in and late check-out are subject to availability and may incur additional charges.",
+      "4. Pets, outside food and beverages, alcohol, and smoking are not permitted on the hotel premises.",
+      "5. Cancellations must be made at least 48 hours before the scheduled check-in time to be eligible for a refund, subject to the applicable booking rate and cancellation policy.",
+      "6. For no-shows or cancellations made within 48 hours of check-in, a cancellation charge equivalent to the first night's room tariff may apply, subject to the booking terms.",
+      "7. Eligible refunds will be processed to the original payment method within 5-7 working days. The actual credit time may vary depending on the bank or payment provider.",
+      "8. Personal and identification data is processed in accordance with applicable data protection and privacy laws for purposes including booking management, guest services, payment processing, security, and legal or regulatory compliance.",
+      "9. Payments are securely processed through Razorpay and its payment partners. The hotel does not store full card details. Personal data is not sold to third parties.",
+      "10. Full Terms & Conditions, Privacy Policy, and Cancellation Policy are available at: https://vvgrandpark.com/policies",
+      "11. Please verify the booking dates, room type, guest count, tariff, and contact details shown on this invoice and report any discrepancy promptly.",
+      "12. Vehicle pickup and drop-off requests are subject to availability, applicable charges, and separate confirmation by the hotel.",
+      "13. Guests are responsible for room keys/cards and hotel property provided during their stay. Reasonable charges may apply for loss or damage caused during the stay.",
+      "14. Hotel policies may be updated from time to time for legal, safety, or operational reasons. The terms applicable at the time of booking will generally apply unless a change is required by applicable law or safety requirements.",
+      "15. For booking assistance or invoice corrections, please contact the hotel as soon as possible and preferably before check-in.",
+      "16. The room tariff does not include additional services or charges unless expressly included in the booking, including transport, minibar, laundry, unapproved extras, or damage to hotel property.",
+      "17. Visitors are permitted only with hotel approval and may be required to provide valid identification.",
+      "18. All guests must comply with hotel quiet hours, safety instructions, and reasonable house rules during their stay.",
+      "19. Lost-property claims will be handled in accordance with hotel records, hotel policy, and applicable law.",
+      "20. This is an electronically generated invoice and does not require a physical signature where permitted under applicable law.",
+    ];
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(5.6);
+    doc.setTextColor(120, 120, 120);
+
+    const colWidth = (R - L - 6) / 2;
+    const drawColumn = (items, x, startY) => {
+      let colY = startY;
+      items.forEach((term) => {
+        const lines = doc.splitTextToSize(term, colWidth);
+        doc.text(lines, x, colY);
+        colY += lines.length * 3.1 + 1;
+      });
+      return colY;
+    };
+
+    const leftEndY = drawColumn(terms.slice(0, 10), L, y);
+    const rightEndY = drawColumn(terms.slice(10), L + colWidth + 6, y);
+    y = Math.max(leftEndY, rightEndY);
+
+    const footerY = Math.max(282, y + 6);
     doc.setDrawColor(201, 168, 76);
     doc.setLineWidth(0.3);
     doc.line(L, footerY, R, footerY);
@@ -765,29 +906,44 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       "Thank you for choosing VV Grand Park Residency. We look forward to welcoming you again.",
       W / 2,
       footerY + 5,
-      { align: "center" }
+      { align: "center" },
     );
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.text(
-      "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510",
+      "3/4/D, Thanjai Saalai, Thiruvarur - 610004",
       W / 2,
       footerY + 11,
-      { align: "center" }
+      { align: "center" },
     );
     doc.text(
-      "vvgrandpark@gmail.com  |  www.vvgrandpark.com",
+      "+91 93849 82510  |  vvgrandpark@gmail.com  |  vvgrandpark.com",
       W / 2,
       footerY + 17,
-      { align: "center" }
+      { align: "center" },
     );
+
+    if (isCancelled) {
+      doc.saveGraphicsState();
+      doc.setGState(new doc.GState({ opacity: 0.18 }));
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(60);
+      doc.setTextColor(192, 57, 43);
+      doc.text("CANCELLED", W / 2, 160, {
+        align: "center",
+        angle: 30,
+      });
+      doc.restoreGraphicsState();
+    }
+
     doc.save(`${invNo}-${(b.guest_name || "guest").replace(/\s+/g, "_")}.pdf`);
   }
 
+  // ── Loading state ──────────────────────────────────────────────────────────
   if (loading)
     return (
-      <div className="fixed inset-0 bg-[#0F1923]/70 z-[600] flex items-center justify-center">
-        <div className="bg-white rounded-2xl p-10 text-[#868E96]">
+      <div className="fixed inset-0 z-[600] flex items-center justify-center bg-navy/70 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl px-10 py-8 text-gray-400 text-sm">
           Loading booking details...
         </div>
       </div>
@@ -802,25 +958,37 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const addonGst = Math.round(addonTotal * GST_RATE * 100) / 100;
   const remainingAmount = Math.round((addonTotal + addonGst) * 100) / 100;
   const finalTotal = Math.round((alreadyPaid + remainingAmount) * 100) / 100;
+  const isCancelled = booking.status === "cancelled";
+  const addonsList = booking.addons || [];
+  const hasUnpaidAddons = addonsList.some((a) => a.paid !== 1);
+  const allAddonsPaid = addonsList.length > 0 && !hasUnpaidAddons;
   const paymentTotalAmount = Number(
-    booking.total_amount || booking.final_total || alreadyPaid || 0
+    booking.total_amount || booking.final_total || alreadyPaid || 0,
   );
-  const advancePaidAmount = Number(booking.advance_paid || 0);
-  const balancePaidAmount = Number(booking.balance_paid || 0);
-  const storedPaymentRemaining = Number(booking.remaining_amount || 0);
-  const calculatedPaymentRemaining = Math.max(
-    0,
-    Math.round(
-      (paymentTotalAmount - advancePaidAmount - balancePaidAmount) * 100
-    ) / 100
-  );
-  const advanceRemainingAmount =
-    storedPaymentRemaining > 0
+const advancePaidAmount = Number(booking.advance_paid || 0);
+const balancePaidAmount = Number(booking.balance_paid || 0);
+const storedPaymentRemaining = Number(booking.remaining_amount || 0);
+
+const normalizedPaymentStatus = String(
+  booking.payment_status || "",
+).toUpperCase();
+
+const calculatedPaymentRemaining = Math.max(
+  0,
+  Math.round(
+    (paymentTotalAmount - advancePaidAmount - balancePaidAmount) * 100,
+  ) / 100,
+);
+
+const advanceRemainingAmount =
+  normalizedPaymentStatus === "PAID"
+    ? 0
+    : storedPaymentRemaining > 0
       ? storedPaymentRemaining
       : calculatedPaymentRemaining;
-  const rawPaymentStatus =
-    booking.payment_status ||
-    (advanceRemainingAmount > 0 ? "PARTIALLY_PAID" : "PAID");
+const rawPaymentStatus =
+  normalizedPaymentStatus ||
+  (advanceRemainingAmount > 0 ? "PARTIALLY_PAID" : "PAID");
   const paymentStatusLabel =
     rawPaymentStatus === "PARTIALLY_PAID"
       ? "Partially Paid"
@@ -831,9 +999,12 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     balancePaidAmount > 0 ||
     advanceRemainingAmount > 0 ||
     rawPaymentStatus === "PARTIALLY_PAID";
-  const receivedBookingAmount = hasAdvancePayment
-    ? advancePaidAmount + balancePaidAmount
-    : alreadyPaid;
+ const receivedBookingAmount =
+  normalizedPaymentStatus === "PAID"
+    ? paymentTotalAmount
+    : hasAdvancePayment
+      ? advancePaidAmount + balancePaidAmount
+      : alreadyPaid;
   const advancePaymentMode = (() => {
     const method = String(booking.payment_method || "").trim();
     if (/cash/i.test(method)) return "Cash";
@@ -843,84 +1014,122 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     if (/bank/i.test(method)) return "Bank Transfer";
     return method.replace(/\s*advance$/i, "") || paymentMode;
   })();
-  const bookingPaidLabel = hasAdvancePayment
+const bookingPaidLabel =
+  normalizedPaymentStatus === "PAID"
     ? `Amount Paid (${advancePaymentMode})`
-    : "Amount Already Paid";
+    : hasAdvancePayment
+      ? `Amount Paid (${advancePaymentMode})`
+      : "Amount Already Paid";
   const totalRemainingToPay = Math.round(
     ((hasAdvancePayment ? advanceRemainingAmount : 0) +
-      (addonPaid ? 0 : remainingAmount)) *
-      100
+      (allAddonsPaid ? 0 : remainingAmount)) *
+      100,
   ) / 100;
   const allPaymentsSettled = totalRemainingToPay <= 0;
   const formatMoney = (value) =>
     `Rs.${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
 
-  return (
-    <div className="fixed inset-0 z-[600] flex justify-center p-4 bg-[#0F1923]/70 backdrop-blur-[6px] overflow-y-auto items-start sm:items-center">
-      <div className="bg-white rounded-[20px] w-full max-w-[720px] md:max-w-[900px] lg:max-w-[1100px] mx-auto my-auto max-h-[90vh] overflow-hidden flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+  const paymentIcons = {
+    Cash: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />
+      </svg>
+    ),
+    UPI: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z" />
+      </svg>
+    ),
+    Card: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
+      </svg>
+    ),
+    Online: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.9-4.33-3.56zm2.95-8H5.08c.96-1.66 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z" />
+      </svg>
+    ),
+    "Bank Transfer": (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M11.5 2L2 7v2h19V7L11.5 2zM4 10v7H2v2h20v-2h-2v-7h-2v7h-4v-7h-2v7H8v-7H4z" />
+      </svg>
+    ),
+  };
 
-        {/* Modal Header */}
-        <div className="bg-[#0F1923] px-7 py-5 flex items-center justify-between shrink-0">
+  return (
+    <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-navy/70 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+        {/* ── Header ── */}
+        <div className="bg-navy px-7 py-5 flex items-center justify-between shrink-0">
           <div>
-            <div className="font-['Playfair_Display',serif] text-[1.05rem] font-semibold text-white">
+            <div className="font-body text-[1.05rem] font-semibold text-white">
               Booking #{booking.booking_id} — {booking.guest_name}
             </div>
-            <div className="text-[0.75rem] text-white/45 mt-[2px]">
-              {booking.room_type} · {booking.check_in_date?.slice(0, 10)} → {booking.check_out_date?.slice(0, 10)}
+            <div className="text-xs text-white/45 mt-0.5">
+              {booking.room_type} · {booking.check_in_date?.slice(0, 10)} →{" "}
+              {booking.check_out_date?.slice(0, 10)}
             </div>
           </div>
           <button
             onClick={onClose}
-            className="bg-white/10 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition hover:bg-white/20"
+            className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
           >
             <XIcon size={14} color="#fff" />
           </button>
         </div>
 
-        {/* Modal Content */}
-        <div className="overflow-y-auto flex-1 px-7 py-[22px]">
-
-          {/* Check-In / Check-Out Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-            <div className="bg-[#F8F9FA] rounded-xl px-[18px] py-4">
-              <div className="text-[0.62rem] font-bold text-[#868E96] tracking-[1px] uppercase mb-2">
+        {/* ── Scrollable body ── */}
+        <div className="overflow-y-auto flex-1 px-7 py-6 space-y-5">
+          {/* ── Check-in / Check-out cards ── */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Check-in */}
+            <div className="bg-gray-50 rounded-xl p-4">
+              <div className="text-[0.62rem] font-bold text-gray-400 tracking-widest uppercase mb-2">
                 Check-in
               </div>
               {booking.actual_checkin ? (
-                <div className="text-[0.82rem] font-semibold text-[#2D9A6E]">
+                <div className="text-[0.82rem] text-emerald-600 font-semibold">
                   ✅ {new Date(booking.actual_checkin).toLocaleString("en-IN")}
                 </div>
               ) : (
                 <button
                   onClick={handleCheckin}
                   disabled={booking.status === "cancelled"}
-                  className="bg-[#2D9A6E] text-white rounded-md px-[18px] py-2 text-[0.8rem] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="bg-emerald-600 text-white text-[0.8rem] font-semibold px-4 py-2 rounded-md hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   ▶ Record Check-in
                 </button>
               )}
             </div>
 
-            <div className="bg-[#F8F9FA] rounded-xl px-[18px] py-4">
-              <div className="text-[0.62rem] font-bold text-[#868E96] tracking-[1px] uppercase mb-2">
+            {/* Check-out */}
+            <div className="bg-gray-50 rounded-xl p-4">
+              <div className="text-[0.62rem] font-bold text-gray-400 tracking-widest uppercase mb-2">
                 Check-out
               </div>
               {booking.actual_checkout ? (
                 <div>
-                  <div className="text-[0.82rem] text-[#2471A3] font-semibold">
-                    ✅ {new Date(booking.actual_checkout).toLocaleString("en-IN")}
+                  <div className="text-[0.82rem] text-blue-600 font-semibold">
+                    ✅{" "}
+                    {new Date(booking.actual_checkout).toLocaleString("en-IN")}
                   </div>
-                  <div className="text-[0.75rem] text-[#868E96] mt-1">
+                  <div className="text-xs text-gray-400 mt-1">
                     Duration: {booking.hours_spent}h
                   </div>
                 </div>
               ) : (
                 <button
                   onClick={handleCheckout}
-                  disabled={!booking.actual_checkin || booking.status === "cancelled"}
-                  className={`text-white rounded-md px-[18px] py-2 text-[0.8rem] font-semibold transition-colors ${
-                    booking.actual_checkin ? "bg-[#2471A3] cursor-pointer" : "bg-[#CCC] cursor-not-allowed"
-                  }`}
+                  disabled={
+                    !booking.actual_checkin || booking.status === "cancelled"
+                  }
+                  className={`text-white text-[0.8rem] font-semibold px-4 py-2 rounded-md transition-colors
+                    ${
+                      booking.actual_checkin
+                        ? "bg-blue-600 hover:bg-blue-700 cursor-pointer"
+                        : "bg-gray-300 cursor-not-allowed"
+                    }`}
                 >
                   ⏹ Record Check-out
                 </button>
@@ -929,16 +1138,16 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
           </div>
 
           {hasAdvancePayment && (
-            <div className="mb-5 rounded-xl border border-[#C9A84C]/30 bg-white px-5 py-4 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
+            <div className="bg-white rounded-xl border border-gold/30 px-5 py-4 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
               <div className="mb-3 flex items-center justify-between">
-                <div className="font-['Playfair_Display',serif] text-[0.9rem] font-semibold text-[#0F1923]">
+                <div className="font-display text-[0.9rem] font-semibold text-navy">
                   Payment Details
                 </div>
                 <span
                   className={`rounded-full px-3 py-1 text-[0.65rem] font-bold uppercase tracking-[0.8px] ${
                     rawPaymentStatus === "PAID"
-                      ? "bg-[#2D9A6E]/10 text-[#2D9A6E]"
-                      : "bg-[#C9A84C]/15 text-[#9B6D12]"
+                      ? "bg-emerald-50 text-emerald-600"
+                      : "bg-amber-50 text-amber-700"
                   }`}
                 >
                   {paymentStatusLabel}
@@ -954,180 +1163,188 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
               ].map(([label, value]) => (
                 <div
                   key={label}
-                  className="flex items-center justify-between border-t border-[#E9ECEF] py-2 text-[0.86rem]"
+                  className="flex items-center justify-between border-t border-gray-100 py-2 text-[0.86rem]"
                 >
-                  <span className="text-[#868E96]">{label}</span>
-                  <span className="font-bold text-[#0F1923]">
+                  <span className="text-gray-500">{label}</span>
+                  <span className="font-bold text-navy">
                     {formatMoney(value)}
                   </span>
                 </div>
               ))}
               {advanceRemainingAmount > 0 && (
-                <button
-                  onClick={markBalancePaid}
-                  disabled={
-                    balanceLoading ||
-                    !booking.actual_checkin ||
-                    booking.status === "cancelled"
-                  }
-                  title={
-                    booking.actual_checkin
-                      ? ""
-                      : "Record check-in before collecting balance"
-                  }
-                  className="mt-3 w-full rounded-md bg-[#C9A84C] px-4 py-2.5 text-[0.84rem] font-bold text-[#0F1923] transition hover:bg-[#b8953e] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {balanceLoading
-                    ? "Updating..."
-                    : `Collect Balance ${formatMoney(advanceRemainingAmount)}`}
-                </button>
+  <button
+  onClick={markBalancePaid}
+  disabled={
+    balanceLoading ||
+    advanceRemainingAmount <= 0 ||
+    !booking.actual_checkin ||
+    booking.status === "cancelled"
+  }
+  title={
+    advanceRemainingAmount <= 0
+      ? "Room amount is already fully paid"
+      : !booking.actual_checkin
+        ? "Record check-in before collecting balance"
+        : ""
+  }
+  className={`mt-3 w-full rounded-md px-4 py-2.5 text-[0.84rem] font-bold transition ${
+    advanceRemainingAmount <= 0
+      ? "bg-emerald-100 text-emerald-600 cursor-not-allowed"
+      : "bg-gold text-navy hover:bg-gold/90"
+  } disabled:cursor-not-allowed disabled:opacity-70`}
+>
+  {balanceLoading
+    ? "Updating..."
+    : advanceRemainingAmount <= 0
+      ? "✓ Balance Paid"
+      : `Collect Balance ${formatMoney(advanceRemainingAmount)}`}
+</button>
               )}
             </div>
           )}
 
-          {/* Add-ons Section */}
-          <div className="bg-[#F8F9FA] rounded-xl px-5 py-4 mb-5">
-            <div className="font-['Playfair_Display',serif] text-[0.9rem] font-semibold text-[#0F1923] mb-3.5">
+          {/* ── Add-on Charges ── */}
+          <div className="bg-gray-50 rounded-xl p-5">
+            <div className="font-display text-[0.9rem] font-semibold text-navy mb-4">
               Add-on Charges
             </div>
 
-            {/* Presets */}
+            {/* Preset chips */}
             <div className="flex flex-wrap gap-1.5 mb-3">
               {PRESET_ADDONS.map((preset) => (
                 <button
                   key={preset}
                   onClick={() => setAddonLabel(preset)}
-                  className={`border-[1.5px] rounded-[20px] px-3 py-1 text-[0.72rem] font-semibold cursor-pointer transition ${
-                    addonLabel === preset ? "bg-[#0F1923] border-[#0F1923] text-[#E8D5A3]" : "bg-white border-[#E9ECEF] text-[#495057]"
-                  }`}
+                  className={`px-3 py-1 rounded-full text-[0.72rem] font-semibold border-[1.5px] transition-colors
+                    ${
+                      addonLabel === preset
+                        ? "bg-navy text-gold border-navy"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                    }`}
                 >
                   {preset}
                 </button>
               ))}
             </div>
 
-            {/* Inputs Form */}
-            <div className="flex flex-col sm:flex-row gap-2 mb-3">
+            {/* Input row */}
+            <div className="flex gap-2 flex-wrap mb-3">
               <input
                 value={addonLabel}
                 onChange={(e) => setAddonLabel(e.target.value)}
+                disabled={isCancelled}
                 placeholder="Label (e.g. Airport Transfer)"
-                className="flex-1 sm:flex-[2] px-3 py-2 rounded-md border-[1.5px] border-[#E9ECEF] text-[0.82rem] focus:outline-none focus:border-[#C9A84C]"
+                className="flex-[2_1_140px] px-3 py-2 rounded-md border-[1.5px] border-gray-200 text-[0.82rem] focus:outline-none focus:border-navy/40 focus:ring-2 focus:ring-navy/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
               />
               <input
                 value={addonAmount}
                 onChange={(e) => setAddonAmount(e.target.value)}
+                disabled={isCancelled}
                 placeholder="Amount ₹"
                 type="number"
-                className="flex-1 px-3 py-2 rounded-md border-[1.5px] border-[#E9ECEF] text-[0.82rem] focus:outline-none focus:border-[#C9A84C]"
+                className="flex-[1_1_80px] px-3 py-2 rounded-md border-[1.5px] border-gray-200 text-[0.82rem] focus:outline-none focus:border-navy/40 focus:ring-2 focus:ring-navy/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
               />
               <button
                 onClick={addAddon}
-                disabled={addonLoading}
-                className="bg-[#C9A84C] text-white rounded-md px-4 py-2 text-[0.82rem] font-semibold cursor-pointer transition hover:bg-[#b5943b] disabled:opacity-50"
+                disabled={addonLoading || isCancelled}
+                className="bg-gold text-white px-4 py-2 rounded-md text-[0.82rem] font-semibold whitespace-nowrap hover:bg-gold/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 + Add
               </button>
             </div>
 
-            {/* Existing Addons List */}
+            {/* Addon list */}
             {booking.addons && booking.addons.length > 0 ? (
-              booking.addons.map((addon) => (
-                <div
-                  key={addon.addon_id}
-                  className="flex items-center justify-between bg-white rounded-md px-3 py-2 mb-1.5 border border-[#E9ECEF]"
-                >
-                  <span className="text-[0.82rem] text-[#0F1923]">
-                    {addon.label}
-                  </span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[0.85rem] font-bold text-[#0F1923]">
-                      Rs.{Number(addon.amount).toLocaleString()}
+              <div className="space-y-1.5">
+                {booking.addons.map((addon) => (
+                  <div
+                    key={addon.addon_id}
+                    className="flex items-center justify-between bg-white rounded-md px-3 py-2 border border-gray-200"
+                  >
+                    <span className="text-[0.82rem] text-navy">
+                      {addon.label}
                     </span>
-                    <button
-                      onClick={() => removeAddon(addon.addon_id)}
-                      className="bg-transparent border-none cursor-pointer text-[#C0392B] text-[0.72rem] font-semibold transition hover:text-red-700"
-                    >
-                      ✕
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[0.85rem] font-bold text-navy">
+                        Rs.{Number(addon.amount).toLocaleString()}
+                      </span>
+                      {!isCancelled && addon.paid !== 1 && (
+                        <button
+                          onClick={() => removeAddon(addon.addon_id)}
+                          className="text-red-600 text-[0.72rem] font-bold hover:text-red-700 transition-colors"
+                        >
+                          ✕
+                        </button>
+                      )}
+                      {addon.paid === 1 && (
+                        <span className="text-[0.62rem] font-bold text-emerald-600 uppercase tracking-wide">
+                          Paid
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             ) : (
-              <div className="text-[0.78rem] text-[#868E96] text-center py-2.5">
+              <div className="text-[0.78rem] text-gray-400 text-center py-2.5">
                 No add-ons yet
               </div>
             )}
           </div>
 
-          {/* Payment Mode */}
-          <div className="bg-[#F8F9FA] rounded-xl px-5 py-4 mb-4">
-            <div className="text-[0.72rem] font-bold text-[#868E96] tracking-[1px] uppercase mb-3">
+          {/* ── Payment Mode ── */}
+          <div className="bg-gray-50 rounded-xl px-5 py-4">
+            <div className="text-[0.72rem] font-bold text-gray-400 tracking-widest uppercase mb-3">
               Payment Mode
             </div>
             <div className="flex gap-2 flex-wrap">
-              {PAYMENT_MODES.map((mode) => {
-                const icons = {
-                  Cash: (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />
-                    </svg>
-                  ),
-                  UPI: (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z" />
-                    </svg>
-                  ),
-                  Card: (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
-                    </svg>
-                  ),
-                  Online: (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.9-4.33-3.56zm2.95-8H5.08c.96-1.66 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z" />
-                    </svg>
-                  ),
-                  "Bank Transfer": (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M11.5 2L2 7v2h19V7L11.5 2zM4 10v7H2v2h20v-2h-2v-7h-2v7h-4v-7h-2v7H8v-7H4z" />
-                    </svg>
-                  ),
-                };
-                return (
-                  <button
-                    key={mode}
-                    onClick={() => setPaymentMode(mode)}
-                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-[20px] font-semibold text-[0.78rem] cursor-pointer transition-all duration-150 border-2 ${
+              {PAYMENT_MODES.map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setPaymentMode(mode)}
+                  className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[0.78rem] font-semibold border-2 transition-all
+                    ${
                       paymentMode === mode
-                        ? "border-[#0F1923] bg-[#0F1923] text-[#C9A84C]"
-                        : "border-[#E9ECEF] bg-white text-[#495057]"
+                        ? "bg-navy text-gold border-navy"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
                     }`}
-                  >
-                    {icons[mode]}
-                    {mode}
-                  </button>
-                );
-              })}
+                >
+                  {paymentIcons[mode]}
+                  {mode}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Bill Summary */}
-          <div className="bg-[#0F1923] rounded-xl px-5 py-[18px] mb-4">
-            <div className="font-['Playfair_Display',serif] text-[0.9rem] font-semibold text-[#C9A84C] mb-3.5">
+          {/* ── Bill Summary ── */}
+          <div className="bg-navy rounded-xl px-5 py-5">
+            <div className="font-display text-[0.9rem] font-semibold text-gold mb-4">
               Bill Summary
             </div>
+            {isCancelled && (
+              <div className="mb-4 rounded-md bg-red-500/15 border border-red-500/30 px-3 py-2">
+                <span className="text-[0.82rem] font-bold text-red-400">
+                  Booking Cancelled — Payment Refunded
+                </span>
+              </div>
+            )}
 
-            {/* Room Payments Block */}
-            <div className="mb-2.5">
-              <div className="text-[0.6rem] font-bold text-white/30 tracking-[1.5px] uppercase mb-1.5">
+            {/* Already paid section */}
+            <div className="mb-3">
+              <div className="text-[0.6rem] font-bold text-white/30 tracking-[1.5px] uppercase mb-2">
                 {hasAdvancePayment
                   ? "Booking Payment"
                   : "Booking Payment (Already Paid)"}
               </div>
               {[
-                { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
-                { label: "GST (18%)", val: `Rs.${Math.round(roomGst).toLocaleString()}` },
+                {
+                  label: "Room Charges",
+                  val: `Rs.${basePrice.toLocaleString()}`,
+                },
+                {
+                  label: "GST (18%)",
+                  val: `Rs.${Math.round(roomGst).toLocaleString()}`,
+                },
               ].map(({ label, val }) => (
                 <div
                   key={label}
@@ -1137,11 +1354,19 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                   <span className="text-white/70 font-semibold">{val}</span>
                 </div>
               ))}
-              <div className="flex justify-between items-center mt-2 bg-[#2D9A6E]/15 rounded-md px-2.5 py-[7px] border border-[#2D9A6E]/30">
-                <span className="text-[0.82rem] text-[#2D9A6E] font-bold">
-                  {bookingPaidLabel}
+              <div
+                className={`flex justify-between items-center mt-2 rounded-md px-2.5 py-1.5 border ${isCancelled ? "bg-red-500/15 border-red-500/30" : "bg-emerald-600/15 border-emerald-600/30"}`}
+              >
+                <span
+                  className={`text-[0.82rem] font-bold ${isCancelled ? "text-red-400" : "text-emerald-500"}`}
+                >
+                  {isCancelled
+                    ? "Refunded (Cancelled)"
+                    : bookingPaidLabel}
                 </span>
-                <span className="text-[0.95rem] text-[#2D9A6E] font-bold">
+                <span
+                  className={`text-[0.95rem] font-bold ${isCancelled ? "text-red-400 line-through" : "text-emerald-500"}`}
+                >
                   Rs.{Math.round(receivedBookingAmount).toLocaleString()}
                 </span>
               </div>
@@ -1149,14 +1374,20 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
 
             <div className="border-t border-dashed border-white/10 my-3" />
 
-            {/* Addons Payments Block */}
-            <div className="mb-2.5">
-              <div className="text-[0.6rem] font-bold text-white/30 tracking-[1.5px] uppercase mb-1.5">
-                Add-on Charges Summary
+            {/* Add-ons section */}
+            <div className="mb-3">
+              <div className="text-[0.6rem] font-bold text-white/30 tracking-[1.5px] uppercase mb-2">
+                Add-on Charges
               </div>
               {[
-                { label: "Add-on Charges", val: `Rs.${addonTotal.toLocaleString()}` },
-                { label: "GST on Add-ons (18%)", val: `Rs.${Math.round(addonGst).toLocaleString()}` },
+                {
+                  label: "Add-on Charges",
+                  val: `Rs.${addonTotal.toLocaleString()}`,
+                },
+                {
+                  label: "GST on Add-ons (18%)",
+                  val: `Rs.${Math.round(addonGst).toLocaleString()}`,
+                },
               ].map(({ label, val }) => (
                 <div
                   key={label}
@@ -1166,61 +1397,118 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                   <span className="text-white/70 font-semibold">{val}</span>
                 </div>
               ))}
-
-              {/* Remaining / Extra Due Row */}
-              <div className={`flex justify-between items-center mt-2 rounded-md px-2.5 py-[7px] border ${
-                allPaymentsSettled
-                  ? "bg-[#2D9A6E]/15 border-[#2D9A6E]/30 text-[#2D9A6E]"
-                  : "bg-[#FFf8dc]/15 border-[#FFf8dc]/30 text-[#b47814]"
-              }`}>
-                <span className="text-[0.82rem] font-bold">
-                  {allPaymentsSettled ? "All Paid" : "Remaining to Pay"}
-                </span>
-                <span className="text-[0.95rem] font-bold">
-                  Rs.{Math.round(totalRemainingToPay).toLocaleString()}
-                </span>
+              <div
+                className={`flex justify-between items-center mt-2 rounded-md px-2.5 py-1.5 border transition-all
+                  ${
+                    allPaymentsSettled
+                      ? "bg-emerald-600/15 border-emerald-600/30"
+                      : "bg-gold/10 border-gold/25"
+                  }`}
+              >
+                <div>
+                  <div
+                    className={`text-[0.82rem] font-display  font-bold ${allPaymentsSettled ? "text-emerald-500" : "text-gold"}`}
+                  >
+                    {allPaymentsSettled ? "All Paid" : "Remaining Amount to Pay"}
+                  </div>
+                  <div className="text-[0.68rem] font-display text-white/35 mt-0.5">
+                    {allPaymentsSettled
+                      ? `Received via ${paymentMode}`
+                      : `via ${paymentMode}`}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {allPaymentsSettled && (
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="#10b981"
+                    >
+                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                    </svg>
+                  )}
+                  <span
+                    className={`text-[1.1rem] font-bold font-body ${allPaymentsSettled ? "text-emerald-500" : "text-gold"}`}
+                  >
+                    Rs.{Math.round(totalRemainingToPay).toLocaleString()}
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="border-t border-dashed border-white/10 my-3" />
+            <div className="border-t border-gold/30 my-3" />
 
-            {/* Total Grand Row inside container */}
-            <div className="flex justify-between items-center mt-2 bg-white/5 rounded-md px-2.5 py-[7px]">
-              <span className="text-[0.85rem] text-[#C9A84C] font-bold">
-                Grand Total (Calculated)
+            {/* Grand total */}
+            <div className="flex justify-between items-center">
+              <span className="font-body font-bold text-gold text-[1rem]">
+                Grand Total
               </span>
-              <span className="text-[1.05rem] text-white font-bold">
-                Rs.{Math.round(finalTotal).toLocaleString()}
+              <span className="font-body font-bold text-white text-[1.4rem]">
+                {isCancelled
+                  ? "Rs.0"
+                  : `Rs.${Math.round(finalTotal).toLocaleString()}`}
               </span>
             </div>
           </div>
 
-          {/* Action Footer Toggles & Invoice Buttons */}
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between mt-5 pt-2">
-            <label className="flex items-center gap-2 cursor-pointer text-[0.85rem] text-[#495057] font-semibold select-none">
-              <input
-                type="checkbox"
-                checked={addonPaid}
-                onChange={(e) => setAddonPaid(e.target.checked)}
-                className="w-4 h-4 rounded text-[#2D9A6E] focus:ring-[#2D9A6E]"
-              />
-              Mark Add-ons as Paid
-            </label>
-
+          {/* ── Action buttons ── */}
+          <div className="flex gap-2.5">
             <button
               onClick={downloadInvoice}
-              className="w-full sm:w-auto bg-[#0F1923] text-[#C9A84C] border border-[#C9A84C] px-5 py-2 rounded-md font-semibold text-[0.85rem] hover:bg-[#0F1923]/90 transition cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-1 py-3 bg-navy text-gold text-[0.82rem] font-semibold rounded-lg hover:bg-navy/90 transition-colors"
             >
-              📥 Download PDF Invoice
+              <DownloadIcon size={14} color="#C9A84C" />
+              Download Invoice
+            </button>
+
+            <button
+              onClick={markAddonsPaid}
+              disabled={addonTotal === 0 || isCancelled || !hasUnpaidAddons}
+              title={
+                addonTotal === 0 ? "No add-on charges to mark as paid" : ""
+              }
+              className={`flex-1 flex items-center justify-center gap-1 py-3 rounded-lg text-[0.88rem] font-bold transition-all
+                                ${
+                                  allAddonsPaid
+                                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                    : addonTotal > 0 && !isCancelled
+                                      ? "bg-gold text-navy hover:bg-gold/90"
+                                      : "bg-gray-200 text-gray-400 cursor-not-allowed opacity-60"
+                                }`}
+            >
+              {allAddonsPaid ? (
+                <>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                  </svg>
+                  Add-ons Paid
+                </>
+              ) : (
+                <>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />
+                  </svg>
+                  Mark as Paid
+                </>
+              )}
             </button>
           </div>
-
         </div>
       </div>
     </div>
   );
 }
-
 /* ── MANAGER BOOKING FORM ── */
 function ManagerBookingForm({
   room,
@@ -1471,205 +1759,888 @@ function ReportsTab({ showToast }) {
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // =====================================================
+  // PAGINATION
+  // =====================================================
+  const ITEMS_PER_PAGE = 10;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const totalRecords = reportData?.bookings?.length || 0;
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(totalRecords / ITEMS_PER_PAGE)
+  );
+
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+
+  const paginatedBookings =
+    reportData?.bookings?.slice(startIndex, endIndex) || [];
+
+  // =====================================================
+  // FETCH REPORT
+  // =====================================================
   const fetchReport = useCallback(async () => {
     setLoading(true);
+
     try {
       let url = `/api/manager/reports?type=${reportType}`;
-      if (reportType === "custom" && customStart && customEnd)
+
+      if (reportType === "custom" && customStart && customEnd) {
         url = `/api/manager/reports?start_date=${customStart}&end_date=${customEnd}`;
+      }
+
       const res = await apiFetch(url);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+
+      if (!res.ok) {
+        throw new Error(data.error);
+      }
+
       setReportData(data);
+
+      // Always start from page 1 after generating a report
+      setCurrentPage(1);
     } catch (err) {
       showToast(err.message, "error");
     } finally {
       setLoading(false);
     }
-  }, [reportType, customStart, customEnd, showToast]);
+  }, [
+    reportType,
+    customStart,
+    customEnd,
+    showToast,
+  ]);
 
   useEffect(() => {
     fetchReport();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // =====================================================
+  // REPORT TYPE CHANGE
+  // =====================================================
+  const handleReportTypeChange = (type) => {
+    // Clear custom dates when leaving Custom
+    if (type !== "custom") {
+      setCustomStart("");
+      setCustomEnd("");
+    }
+
+    // Reset pagination
+    setCurrentPage(1);
+
+    setReportType(type);
+  };
+
+  // =====================================================
+  // PAGINATION HANDLERS
+  // =====================================================
+  const goToPage = (page) => {
+    const safePage = Math.min(
+      Math.max(page, 1),
+      totalPages
+    );
+
+    setCurrentPage(safePage);
+
+    // Scroll to table smoothly
+    window.requestAnimationFrame(() => {
+      const tableElement =
+        document.getElementById("reports-bookings-table");
+
+      if (tableElement) {
+        tableElement.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }
+    });
+  };
+
+  // =====================================================
+  // PDF DOWNLOAD
+  // =====================================================
   async function downloadReport() {
     if (!reportData) return;
+
     const { jsPDF } = await import("jspdf");
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const W = 210;
-    doc.setFillColor(15, 25, 35);
-    doc.rect(0, 0, W, 45, "F");
-    doc.setFont("times", "bold");
-    doc.setFontSize(22);
-    doc.setTextColor(201, 168, 76);
-    doc.text("VV GRAND PARK", 18, 18);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(180, 160, 100);
-    doc.text("RESIDENCY", 18, 25);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.setTextColor(255, 255, 255);
-    const reportTitle =
-      reportType === "weekly"
-        ? "WEEKLY REPORT"
-        : reportType === "monthly"
-          ? "MONTHLY REPORT"
-          : "CUSTOM REPORT";
-    doc.text(reportTitle, W - 18, 18, { align: "right" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(150, 140, 120);
-    doc.text(
-      `Period: ${reportData.startDate} to ${reportData.endDate}`,
-      W - 18,
-      26,
-      { align: "right" }
-    );
-    doc.text(
-      `Generated: ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}`,
-      W - 18,
-      33,
-      { align: "right" }
-    );
-    doc.setDrawColor(201, 168, 76);
-    doc.setLineWidth(0.5);
-    doc.line(18, 52, W - 18, 52);
+
+    // A4 LANDSCAPE
+    const doc = new jsPDF({
+      unit: "mm",
+      format: "a4",
+      orientation: "landscape",
+    });
+
+    const W = 297;
+    const H = 210;
+
+    const marginX = 12;
+    const tableWidth = W - marginX * 2;
+
+    // ===================================================
+    // PDF COLORS
+    // ===================================================
+    const navy = [15, 25, 35];
+    const gold = [201, 168, 76];
+    const lightGray = [248, 249, 250];
+    const textDark = [15, 25, 35];
+    const textGray = [134, 142, 150];
+
+    // ===================================================
+    // PDF HEADER
+    // ===================================================
+    const drawPdfHeader = () => {
+      doc.setFillColor(...navy);
+      doc.rect(0, 0, W, 38, "F");
+
+      // Hotel name
+      doc.setFont("times", "bold");
+      doc.setFontSize(20);
+      doc.setTextColor(...gold);
+      doc.text("VV GRAND PARK", marginX, 15);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(180, 160, 100);
+      doc.text("RESIDENCY", marginX, 22);
+
+      // Report title
+      const reportTitle =
+        reportType === "weekly"
+          ? "WEEKLY REPORT"
+          : reportType === "monthly"
+            ? "MONTHLY REPORT"
+            : "CUSTOM REPORT";
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.setTextColor(255, 255, 255);
+
+      doc.text(
+        reportTitle,
+        W - marginX,
+        15,
+        {
+          align: "right",
+        }
+      );
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(180, 170, 150);
+
+      doc.text(
+        `Period: ${reportData.startDate} to ${reportData.endDate}`,
+        W - marginX,
+        22,
+        {
+          align: "right",
+        }
+      );
+
+      doc.text(
+        `Generated: ${new Date().toLocaleDateString(
+          "en-IN",
+          {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          }
+        )}`,
+        W - marginX,
+        29,
+        {
+          align: "right",
+        }
+      );
+
+      // Gold line
+      doc.setDrawColor(...gold);
+      doc.setLineWidth(0.5);
+      doc.line(
+        marginX,
+        45,
+        W - marginX,
+        45
+      );
+    };
+
+    // ===================================================
+    // SUMMARY CARDS
+    // ===================================================
     const s = reportData.summary;
-    const summaryY = 58;
-    [
-      { label: "Total Bookings", val: String(s.total_bookings || 0) },
-      { label: "Confirmed", val: String(s.confirmed || 0) },
-      { label: "Completed", val: String(s.completed || 0) },
+
+    const summaryY = 51;
+
+    const summaryBoxes = [
+      {
+        label: "Total Bookings",
+        val: String(
+          s.total_bookings || 0
+        ),
+      },
+      {
+        label: "Confirmed",
+        val: String(
+          s.confirmed || 0
+        ),
+      },
+      {
+        label: "Completed",
+        val: String(
+          s.completed || 0
+        ),
+      },
       {
         label: "Total Revenue",
-        val: `Rs.${Number(s.total_revenue || 0).toLocaleString()}`,
+        val: `Rs.${Number(
+          s.total_revenue || 0
+        ).toLocaleString()}`,
       },
-    ].forEach((box, i) => {
-      const x = 18 + i * 46;
-      doc.setFillColor(248, 249, 250);
-      doc.roundedRect(x, summaryY, 42, 22, 3, 3, "F");
+    ];
+
+    summaryBoxes.forEach((box, i) => {
+      const boxWidth = 62;
+      const boxGap = 6;
+
+      const x =
+        marginX +
+        i * (boxWidth + boxGap);
+
+      doc.setFillColor(...lightGray);
+
+      doc.roundedRect(
+        x,
+        summaryY,
+        boxWidth,
+        22,
+        3,
+        3,
+        "F"
+      );
+
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7);
-      doc.setTextColor(134, 142, 150);
-      doc.text(box.label, x + 21, summaryY + 8, { align: "center" });
+      doc.setTextColor(...textGray);
+
+      doc.text(
+        box.label,
+        x + boxWidth / 2,
+        summaryY + 8,
+        {
+          align: "center",
+        }
+      );
+
       doc.setFont("helvetica", "bold");
       doc.setFontSize(11);
-      doc.setTextColor(15, 25, 35);
-      doc.text(box.val, x + 21, summaryY + 17, { align: "center" });
+      doc.setTextColor(...textDark);
+
+      doc.text(
+        box.val,
+        x + boxWidth / 2,
+        summaryY + 17,
+        {
+          align: "center",
+        }
+      );
     });
-    let infoY = summaryY + 30;
+
+    // ===================================================
+    // GST / ADDON INFO
+    // ===================================================
+    const infoY = summaryY + 30;
+
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(73, 80, 87);
+
     doc.text(
-      `Total GST Collected: Rs.${Number(s.total_gst || 0).toLocaleString()}`,
-      18,
+      `Total GST Collected: Rs.${Number(
+        s.total_gst || 0
+      ).toLocaleString()}`,
+      marginX,
       infoY
     );
+
     doc.text(
-      `Total Add-on Revenue: Rs.${Number(s.total_addons || 0).toLocaleString()}`,
-      18,
+      `Total Add-on Revenue: Rs.${Number(
+        s.total_addons || 0
+      ).toLocaleString()}`,
+      marginX,
       infoY + 7
     );
-    let tableY = infoY + 18;
-    doc.setFillColor(15, 25, 35);
-    doc.rect(18, tableY, W - 36, 10, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7);
-    doc.setTextColor(201, 168, 76);
-    doc.text("#", 22, tableY + 7);
-    doc.text("Guest", 30, tableY + 7);
-    doc.text("Room", 70, tableY + 7);
-    doc.text("Check-in", 95, tableY + 7);
-    doc.text("Check-out", 120, tableY + 7);
-    doc.text("Status", 148, tableY + 7);
-    doc.text("Total", W - 18, tableY + 7, { align: "right" });
-    tableY += 13;
-    reportData.bookings.forEach((b, i) => {
-      if (tableY > 265) {
-        doc.addPage();
-        tableY = 20;
-      }
-      if (i % 2 === 0) {
-        doc.setFillColor(248, 249, 250);
-        doc.rect(18, tableY - 6, W - 36, 10, "F");
-      }
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7.5);
-      doc.setTextColor(15, 25, 35);
-      doc.text(String(b.booking_id), 22, tableY);
-      doc.text((b.guest_name || "—").substring(0, 16), 30, tableY);
-      doc.text((b.room_type || "—").substring(0, 12), 70, tableY);
-      doc.text(b.check_in_date?.slice(0, 10) || "—", 95, tableY);
-      doc.text(b.check_out_date?.slice(0, 10) || "—", 120, tableY);
-      const sc = {
-        confirmed: [45, 154, 110],
-        completed: [36, 113, 163],
-        cancelled: [192, 57, 43],
-      }[b.status] || [134, 142, 150];
-      doc.setTextColor(...sc);
-      doc.text((b.status || "—").toUpperCase(), 148, tableY);
-      doc.setTextColor(15, 25, 35);
-      doc.text(
-        `Rs.${Number(b.final_total || b.total_price || 0).toLocaleString()}`,
-        W - 18,
-        tableY,
-        { align: "right" }
+
+    // ===================================================
+    // PDF TABLE COLUMN CONFIGURATION
+    // ===================================================
+    const columns = [
+      {
+        key: "no",
+        label: "#",
+        width: 10,
+        align: "center",
+      },
+      {
+        key: "guest",
+        label: "Guest",
+        width: 42,
+        align: "left",
+      },
+      {
+        key: "room",
+        label: "Room",
+        width: 28,
+        align: "left",
+      },
+      {
+        key: "checkIn",
+        label: "Check-in",
+        width: 27,
+        align: "center",
+      },
+      {
+        key: "checkOut",
+        label: "Check-out",
+        width: 27,
+        align: "center",
+      },
+      {
+        key: "base",
+        label: "Base",
+        width: 24,
+        align: "right",
+      },
+      {
+        key: "addons",
+        label: "Addons",
+        width: 24,
+        align: "right",
+      },
+      {
+        key: "gst",
+        label: "GST",
+        width: 22,
+        align: "right",
+      },
+      {
+        key: "total",
+        label: "Total",
+        width: 28,
+        align: "right",
+      },
+      {
+        key: "status",
+        label: "Status",
+        width: 25,
+        align: "center",
+      },
+    ];
+
+    // Make sure widths exactly fit table
+    const widthDifference =
+      tableWidth -
+      columns.reduce(
+        (sum, col) => sum + col.width,
+        0
       );
-      tableY += 10;
-    });
-    tableY += 4;
-    doc.setDrawColor(201, 168, 76);
-    doc.setLineWidth(0.4);
-    doc.line(18, tableY, W - 18, tableY);
-    tableY += 6;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(15, 25, 35);
-    doc.text("GRAND TOTAL REVENUE", 18, tableY);
-    doc.setTextColor(201, 168, 76);
-    doc.text(
-      `Rs.${Number(s.total_revenue || 0).toLocaleString()}`,
-      W - 18,
-      tableY,
-      { align: "right" }
+
+    if (widthDifference !== 0) {
+      columns[1].width += widthDifference;
+    }
+
+    // ===================================================
+    // DRAW TABLE HEADER
+    // ===================================================
+    const drawTableHeader = (y) => {
+      const headerHeight = 11;
+
+      doc.setFillColor(...navy);
+
+      doc.rect(
+        marginX,
+        y,
+        tableWidth,
+        headerHeight,
+        "F"
+      );
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(6.8);
+      doc.setTextColor(...gold);
+
+      let x = marginX;
+
+      columns.forEach((column) => {
+        let textX;
+
+        if (column.align === "left") {
+          textX = x + 2;
+        } else if (column.align === "right") {
+          textX = x + column.width - 2;
+        } else {
+          textX =
+            x + column.width / 2;
+        }
+
+        doc.text(
+          column.label,
+          textX,
+          y + 7,
+          {
+            align:
+              column.align === "right"
+                ? "right"
+                : column.align === "center"
+                  ? "center"
+                  : "left",
+          }
+        );
+
+        x += column.width;
+      });
+
+      return y + headerHeight + 5;
+    };
+
+    // ===================================================
+    // DRAW FOOTER
+    // ===================================================
+    const drawFooter = () => {
+      const footerY = H - 10;
+
+      doc.setDrawColor(...gold);
+      doc.setLineWidth(0.3);
+
+      doc.line(
+        marginX,
+        footerY - 5,
+        W - marginX,
+        footerY - 5
+      );
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(...textGray);
+
+      doc.text(
+        "VV Grand Park Residency — Confidential Report",
+        W / 2,
+        footerY,
+        {
+          align: "center",
+        }
+      );
+    };
+
+    // ===================================================
+    // INITIAL PAGE
+    // ===================================================
+    drawPdfHeader();
+
+    let tableY = drawTableHeader(
+      infoY + 18
     );
-    doc.setPage(doc.internal.getNumberOfPages());
-    const footerY = 282;
-    doc.setDrawColor(201, 168, 76);
-    doc.setLineWidth(0.3);
-    doc.line(18, footerY - 8, W - 18, footerY - 8);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.setTextColor(134, 142, 150);
-    doc.text("VV Grand Park Residency — Confidential Report", W / 2, footerY, {
-      align: "center",
-    });
+
+    // ===================================================
+    // PDF BOOKINGS
+    // ===================================================
+    reportData.bookings.forEach(
+      (b, index) => {
+        const rowHeight = 10;
+
+        // New page before row
+        if (
+          tableY + rowHeight >
+          H - 20
+        ) {
+          drawFooter();
+
+          doc.addPage();
+
+          drawPdfHeader();
+
+          tableY =
+            drawTableHeader(51);
+        }
+
+        // Alternating background
+        if (index % 2 === 0) {
+          doc.setFillColor(
+            ...lightGray
+          );
+
+          doc.rect(
+            marginX,
+            tableY - 7,
+            tableWidth,
+            rowHeight,
+            "F"
+          );
+        }
+
+        doc.setFont(
+          "helvetica",
+          "normal"
+        );
+
+        doc.setFontSize(7);
+
+        doc.setTextColor(
+          ...textDark
+        );
+
+        // -----------------------------------------------
+        // DATA
+        // -----------------------------------------------
+        let guestName =
+          b.guest_name || "—";
+
+        if (guestName.length > 25) {
+          guestName =
+            guestName.substring(0, 24) +
+            "…";
+        }
+
+        let roomType =
+          b.room_type || "—";
+
+        if (roomType.length > 16) {
+          roomType =
+            roomType.substring(0, 15) +
+            "…";
+        }
+
+        const checkIn =
+          b.check_in_date
+            ? b.check_in_date.slice(
+                0,
+                10
+              )
+            : "—";
+
+        const checkOut =
+          b.check_out_date
+            ? b.check_out_date.slice(
+                0,
+                10
+              )
+            : "—";
+
+        const baseAmount =
+          Number(
+            b.total_price || 0
+          );
+
+        const addonAmount =
+          Number(
+            b.addon_charges || 0
+          );
+
+        const gstAmount =
+          Number(
+            b.gst_amount || 0
+          );
+
+        const totalAmount =
+          Number(
+            b.final_total ||
+              b.total_price ||
+              0
+          );
+
+        const status = (
+          b.status || "—"
+        ).toUpperCase();
+
+        // -----------------------------------------------
+        // STATUS COLOR
+        // -----------------------------------------------
+        const statusColor = {
+          CONFIRMED: [
+            45,
+            154,
+            110,
+          ],
+          COMPLETED: [
+            36,
+            113,
+            163,
+          ],
+          CANCELLED: [
+            192,
+            57,
+            43,
+          ],
+        }[status] || [
+          134,
+          142,
+          150,
+        ];
+
+        // -----------------------------------------------
+        // DRAW CELLS
+        // -----------------------------------------------
+        let x = marginX;
+
+        columns.forEach(
+          (column) => {
+            let value = "";
+            let align =
+              column.align;
+
+            switch (column.key) {
+              case "no":
+                value = String(
+                  b.booking_id ?? "—"
+                );
+                break;
+
+              case "guest":
+                value = guestName;
+                break;
+
+              case "room":
+                value = roomType;
+                break;
+
+              case "checkIn":
+                value = checkIn;
+                break;
+
+              case "checkOut":
+                value = checkOut;
+                break;
+
+              case "base":
+                value = `Rs.${baseAmount.toLocaleString()}`;
+                break;
+
+              case "addons":
+                value = `Rs.${addonAmount.toLocaleString()}`;
+                break;
+
+              case "gst":
+                value = `Rs.${gstAmount.toLocaleString()}`;
+                break;
+
+              case "total":
+                value = `Rs.${totalAmount.toLocaleString()}`;
+                break;
+
+              case "status":
+                value = status;
+
+                if (value.length > 10) {
+                  value =
+                    value.substring(
+                      0,
+                      9
+                    ) + "…";
+                }
+                break;
+
+              default:
+                value = "—";
+            }
+
+            // Status color
+            if (
+              column.key ===
+              "status"
+            ) {
+              doc.setTextColor(
+                ...statusColor
+              );
+            } else if (
+              column.key ===
+              "total"
+            ) {
+              doc.setFont(
+                "helvetica",
+                "bold"
+              );
+              doc.setTextColor(
+                ...textDark
+              );
+            } else if (
+              column.key ===
+              "guest"
+            ) {
+              doc.setFont(
+                "helvetica",
+                "bold"
+              );
+              doc.setTextColor(
+                ...textDark
+              );
+            } else {
+              doc.setFont(
+                "helvetica",
+                "normal"
+              );
+              doc.setTextColor(
+                ...textDark
+              );
+            }
+
+            let textX;
+
+            if (align === "left") {
+              textX = x + 2;
+            } else if (
+              align === "right"
+            ) {
+              textX =
+                x +
+                column.width -
+                2;
+            } else {
+              textX =
+                x +
+                column.width / 2;
+            }
+
+            doc.text(
+              value,
+              textX,
+              tableY,
+              {
+                align:
+                  align === "right"
+                    ? "right"
+                    : align ===
+                        "center"
+                      ? "center"
+                      : "left",
+              }
+            );
+
+            x += column.width;
+          }
+        );
+
+        tableY += rowHeight;
+      }
+    );
+
+    // ===================================================
+    // GRAND TOTAL
+    // ===================================================
+    if (
+      tableY + 20 >
+      H - 20
+    ) {
+      drawFooter();
+
+      doc.addPage();
+
+      drawPdfHeader();
+
+      tableY =
+        drawTableHeader(51);
+    }
+
+    tableY += 4;
+
+    doc.setDrawColor(...gold);
+    doc.setLineWidth(0.4);
+
+    doc.line(
+      marginX,
+      tableY,
+      W - marginX,
+      tableY
+    );
+
+    tableY += 7;
+
+    doc.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    doc.setFontSize(9);
+
+    doc.setTextColor(
+      ...textDark
+    );
+
+    doc.text(
+      "GRAND TOTAL REVENUE",
+      marginX,
+      tableY
+    );
+
+    doc.setTextColor(...gold);
+
+    doc.text(
+      `Rs.${Number(
+        s.total_revenue || 0
+      ).toLocaleString()}`,
+      W - marginX,
+      tableY,
+      {
+        align: "right",
+      }
+    );
+
+    // Footer on final page
+    drawFooter();
+
+    // ===================================================
+    // SAVE PDF
+    // ===================================================
+    const reportTitle =
+      reportType === "weekly"
+        ? "WEEKLY_REPORT"
+        : reportType === "monthly"
+          ? "MONTHLY_REPORT"
+          : "CUSTOM_REPORT";
+
     doc.save(
-      `VVGrandPark_${reportTitle.replace(" ", "_")}_${reportData.startDate}_to_${reportData.endDate}.pdf`
+      `VVGrandPark_${reportTitle}_${reportData.startDate}_to_${reportData.endDate}.pdf`
     );
   }
 
+  // =====================================================
+  // UI CLASSES
+  // =====================================================
   const customLabelClass =
     "text-[0.62rem] font-bold text-[#868E96] mb-1 tracking-[0.8px] uppercase";
+
   const customInputClass =
     "p-2 rounded-md border-[1.5px] border-[#E9ECEF] text-[0.82rem] font-inherit focus:outline-none text-[#212529]";
+
   const thClass =
-    "px-3 py-2.5 text-left text-[0.6rem] font-bold text-[#868E96] uppercase tracking-[1px] border-b-[1.5px] border-[#E9ECEF] bg-[#F8F9FA] whitespace-nowrap";
+    "px-3 py-2.5 !text-center text-[0.6rem] font-bold text-[#868E96] uppercase tracking-[1px] border-b-[1.5px] border-[#E9ECEF] bg-[#F8F9FA] whitespace-nowrap";
 
   return (
     <div>
-      {/* Configuration Section */}
+      {/* =================================================
+          CONFIGURATION
+      ================================================= */}
       <div className="bg-white rounded-[14px] px-[22px] py-5 border border-[#E9ECEF] mb-5">
         <div className="font-body text-[1rem] font-semibold text-[#0F1923] mb-4">
           Generate Report
         </div>
+
         <div className="flex flex-wrap items-end gap-2.5">
-          {["weekly", "monthly", "custom"].map((type) => (
+          {[
+            "weekly",
+            "monthly",
+            "custom",
+          ].map((type) => (
             <button
               key={type}
-              onClick={() => setReportType(type)}
+              onClick={() =>
+                handleReportTypeChange(
+                  type
+                )
+              }
               className={`px-5 py-2 rounded-md border-[1.5px] text-[0.82rem] font-semibold cursor-pointer font-inherit capitalize transition-colors duration-150 ${
                 reportType === type
                   ? "border-[#0F1923] bg-[#0F1923] text-white"
@@ -1683,21 +2654,48 @@ function ReportsTab({ showToast }) {
           {reportType === "custom" && (
             <>
               <div className="flex flex-col">
-                <div className={customLabelClass}>Start Date</div>
+                <div
+                  className={
+                    customLabelClass
+                  }
+                >
+                  Start Date
+                </div>
+
                 <input
                   type="date"
                   value={customStart}
-                  onChange={(e) => setCustomStart(e.target.value)}
-                  className={customInputClass}
+                  onChange={(e) =>
+                    setCustomStart(
+                      e.target.value
+                    )
+                  }
+                  className={
+                    customInputClass
+                  }
                 />
               </div>
+
               <div className="flex flex-col">
-                <div className={customLabelClass}>End Date</div>
+                <div
+                  className={
+                    customLabelClass
+                  }
+                >
+                  End Date
+                </div>
+
                 <input
                   type="date"
                   value={customEnd}
-                  onChange={(e) => setCustomEnd(e.target.value)}
-                  className={customInputClass}
+                  onChange={(e) =>
+                    setCustomEnd(
+                      e.target.value
+                    )
+                  }
+                  className={
+                    customInputClass
+                  }
                 />
               </div>
             </>
@@ -1708,85 +2706,141 @@ function ReportsTab({ showToast }) {
             disabled={loading}
             className="px-5 py-[9px] rounded-md bg-[#C9A84C] text-white border-none text-[0.82rem] font-semibold cursor-pointer font-inherit disabled:opacity-70"
           >
-            {loading ? "Loading..." : "Generate"}
+            {loading
+              ? "Loading..."
+              : "Generate"}
           </button>
         </div>
       </div>
 
-      {/* Metrics & Report Display */}
+      {/* =================================================
+          REPORT DISPLAY
+      ================================================= */}
       {reportData && (
         <>
-          {/* Key Metrics Cards */}
+          {/* KEY METRICS */}
           <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3.5 mb-5">
             {[
               {
-                label: "Total Bookings",
-                val: reportData.summary.total_bookings || 0,
-                color: "border-l-[#2471A3]",
+                label:
+                  "Total Bookings",
+                val:
+                  reportData.summary
+                    .total_bookings ||
+                  0,
+                color:
+                  "border-l-[#2471A3]",
               },
               {
-                label: "Total Revenue",
-                val: `Rs.${Number(reportData.summary.total_revenue || 0).toLocaleString()}`,
-                color: "border-l-[#C9A84C]",
+                label:
+                  "Total Revenue",
+                val: `Rs.${Number(
+                  reportData.summary
+                    .total_revenue ||
+                    0
+                ).toLocaleString()}`,
+                color:
+                  "border-l-[#C9A84C]",
               },
               {
-                label: "GST Collected",
-                val: `Rs.${Number(reportData.summary.total_gst || 0).toLocaleString()}`,
-                color: "border-l-[#2D9A6E]",
+                label:
+                  "GST Collected",
+                val: `Rs.${Number(
+                  reportData.summary
+                    .total_gst || 0
+                ).toLocaleString()}`,
+                color:
+                  "border-l-[#2D9A6E]",
               },
               {
-                label: "Add-on Revenue",
-                val: `Rs.${Number(reportData.summary.total_addons || 0).toLocaleString()}`,
-                color: "border-l-[#9B59B6]",
+                label:
+                  "Add-on Revenue",
+                val: `Rs.${Number(
+                  reportData.summary
+                    .total_addons ||
+                    0
+                ).toLocaleString()}`,
+                color:
+                  "border-l-[#9B59B6]",
               },
               {
                 label: "Confirmed",
-                val: reportData.summary.confirmed || 0,
-                color: "border-l-[#2D9A6E]",
+                val:
+                  reportData.summary
+                    .confirmed || 0,
+                color:
+                  "border-l-[#2D9A6E]",
               },
               {
                 label: "Completed",
-                val: reportData.summary.completed || 0,
-                color: "border-l-[#2471A3]",
+                val:
+                  reportData.summary
+                    .completed || 0,
+                color:
+                  "border-l-[#2471A3]",
               },
-            ].map(({ label, val, color }) => (
-              <div
-                key={label}
-                className={`bg-white border border-[#E9ECEF] border-l-4 ${color} px-[18px] py-4 rounded-xl`}
-              >
-                <div className="text-[0.62rem]  font-bold text-[#868E96] tracking-[1px] uppercase mb-1.5">
-                  {label}
+            ].map(
+              ({
+                label,
+                val,
+                color,
+              }) => (
+                <div
+                  key={label}
+                  className={`bg-white border border-[#E9ECEF] border-l-4 ${color} px-[18px] py-4 rounded-xl`}
+                >
+                  <div className="text-[0.62rem] font-bold text-[#868E96] tracking-[1px] uppercase mb-1.5">
+                    {label}
+                  </div>
+
+                  <div className="font-body text-[1.4rem] font-semibold text-[#0F1923]">
+                    {val}
+                  </div>
                 </div>
-                <div className="font-body text-[1.4rem] font-semibold text-[#0F1923]">
-                  {val}
-                </div>
-              </div>
-            ))}
+              )
+            )}
           </div>
 
-          {/* PDF Download Wrapper */}
+          {/* PDF DOWNLOAD */}
           <div className="mb-5">
             <button
               onClick={downloadReport}
               className="px-7 py-3 bg-[#0F1923] text-[#C9A84C] border-none rounded-md font-inherit font-bold text-[0.9rem] cursor-pointer flex items-center gap-2"
             >
-              <DownloadIcon size={16} color="#C9A84C" />
+              <DownloadIcon
+                size={16}
+                color="#C9A84C"
+              />
+
               Download{" "}
-              {reportType.charAt(0).toUpperCase() + reportType.slice(1)} Report
-              PDF
+              {reportType
+                .charAt(0)
+                .toUpperCase() +
+                reportType.slice(1)}{" "}
+              Report PDF
             </button>
           </div>
 
-          {/* Detailed Data Table container */}
-          <div className="bg-white rounded-[14px] px-[22px] py-5 border border-[#E9ECEF]">
+          {/* =================================================
+              TABLE
+          ================================================= */}
+          <div
+            id="reports-bookings-table"
+            className="bg-white rounded-[14px] px-[22px] py-5 border border-[#E9ECEF]"
+          >
             <div className="font-body text-[1rem] font-semibold text-[#0F1923] mb-4">
-              Bookings ({reportData.startDate} → {reportData.endDate})
+              Bookings (
+              {reportData.startDate} →{" "}
+              {reportData.endDate}
+              )
+
               <span className="text-[0.78rem] font-normal text-[#868E96] ml-2">
-                ({reportData.bookings.length} records)
+                ({totalRecords} records)
               </span>
             </div>
+
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse min-w-[600px]">
+              <table className="w-full border-collapse min-w-[1000px]">
                 <thead>
                   <tr>
                     {[
@@ -1801,76 +2855,119 @@ function ReportsTab({ showToast }) {
                       "Total",
                       "Status",
                     ].map((h) => (
-                      <th key={h} className={thClass}>
+                      <th
+                        key={h}
+                        className={
+                          thClass
+                        }
+                      >
                         {h}
                       </th>
                     ))}
                   </tr>
                 </thead>
+
                 <tbody>
-                  {reportData.bookings.length === 0 ? (
+                  {totalRecords === 0 ? (
                     <tr>
                       <td
                         colSpan={10}
                         className="p-[30px] text-center text-[#868E96] text-[0.85rem]"
                       >
-                        No bookings in this period
+                        No bookings in
+                        this period
                       </td>
                     </tr>
                   ) : (
-                    reportData.bookings.map((b) => (
-                      <tr
-                        key={b.booking_id}
-                        className="border-t border-[#F1F3F5]"
-                      >
-                        <td className="px-3 py-2.5 text-[0.75rem] text-[#868E96]">
-                          #{b.booking_id}
-                        </td>
-                        <td className="px-3 py-2.5 text-[0.82rem] font-semibold text-[#0F1923] whitespace-nowrap">
-                          {b.guest_name}
-                        </td>
-                        <td className="px-3 py-2.5 text-[0.78rem] text-[#495057]">
-                          {b.room_type}
-                        </td>
-                        <td className="px-3 py-2.5 text-[0.78rem] text-[#495057] whitespace-nowrap">
-                          {b.check_in_date?.slice(0, 10)}
-                        </td>
-                        <td className="px-3 py-2.5 text-[0.78rem] text-[#495057] whitespace-nowrap">
-                          {b.check_out_date?.slice(0, 10)}
-                        </td>
-                        <td className="px-3 py-2.5 text-[0.78rem] text-[#495057]">
-                          Rs.{Number(b.total_price || 0).toLocaleString()}
-                        </td>
-                        <td className="px-3 py-2.5 text-[0.78rem] text-[#C9A84C] font-semibold">
-                          Rs.{Number(b.addon_charges || 0).toLocaleString()}
-                        </td>
-                        <td className="px-3 py-2.5 text-[0.78rem] text-[#868E96]">
-                          Rs.{Number(b.gst_amount || 0).toLocaleString()}
-                        </td>
-                        <td className="px-3 py-2.5 text-[0.85rem] font-bold text-[#0F1923] whitespace-nowrap">
-                          Rs.
-                          {Number(
-                            b.final_total || b.total_price || 0
-                          ).toLocaleString()}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded-[3px] text-[0.6rem] font-bold uppercase tracking-wide ${
-                              b.status === "confirmed"
-                                ? "bg-[#E8F8F0] text-[#2D9A6E]"
-                                : b.status === "cancelled"
-                                  ? "bg-[#FDECEA] text-[#C0392B]"
-                                  : "bg-[#EAF2FB] text-[#2471A3]"
-                            }`}
-                          >
-                            {b.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
+                    paginatedBookings.map(
+                      (b) => (
+                        <tr
+                          key={
+                            b.booking_id
+                          }
+                          className="border-t border-[#F1F3F5]"
+                        >
+                          <td className="px-3 py-2.5 text-center text-[0.75rem] text-[#868E96]">
+                            #{b.booking_id}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center text-[0.82rem] font-semibold text-[#0F1923] whitespace-nowrap">
+                            {b.guest_name}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center text-[0.78rem] text-[#495057]">
+                            {b.room_type}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center text-[0.78rem] text-[#495057] whitespace-nowrap">
+                            {b.check_in_date?.slice(
+                              0,
+                              10
+                            )}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center text-[0.78rem] text-[#495057] whitespace-nowrap">
+                            {b.check_out_date?.slice(
+                              0,
+                              10
+                            )}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center text-[0.78rem] text-[#495057] whitespace-nowrap">
+                            Rs.
+                            {Number(
+                              b.total_price ||
+                                0
+                            ).toLocaleString()}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center text-[0.78rem] text-[#C9A84C] font-semibold whitespace-nowrap">
+                            Rs.
+                            {Number(
+                              b.addon_charges ||
+                                0
+                            ).toLocaleString()}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center text-[0.78rem] text-[#868E96] whitespace-nowrap">
+                            Rs.
+                            {Number(
+                              b.gst_amount ||
+                                0
+                            ).toLocaleString()}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center text-[0.85rem] font-bold text-[#0F1923] whitespace-nowrap">
+                            Rs.
+                            {Number(
+                              b.final_total ||
+                                b.total_price ||
+                                0
+                            ).toLocaleString()}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded-[3px] text-[0.6rem] font-bold uppercase tracking-wide ${
+                                b.status ===
+                                "confirmed"
+                                  ? "bg-[#E8F8F0] text-[#2D9A6E]"
+                                  : b.status ===
+                                      "cancelled"
+                                    ? "bg-[#FDECEA] text-[#C0392B]"
+                                    : "bg-[#EAF2FB] text-[#2471A3]"
+                              }`}
+                            >
+                              {b.status}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    )
                   )}
                 </tbody>
-                {reportData.bookings.length > 0 && (
+
+                {totalRecords > 0 && (
                   <tfoot>
                     <tr className="border-t-2 border-[#0F1923]">
                       <td
@@ -1879,13 +2976,16 @@ function ReportsTab({ showToast }) {
                       >
                         TOTAL REVENUE
                       </td>
+
                       <td
                         colSpan={2}
-                        className="px-3 py-2.5 font-body  font-bold text-[#C9A84C] text-[1rem]"
+                        className="px-3 py-2.5 font-body font-bold text-[#C9A84C] text-[1rem] text-center"
                       >
                         Rs.
                         {Number(
-                          reportData.summary.total_revenue || 0
+                          reportData.summary
+                            .total_revenue ||
+                            0
                         ).toLocaleString()}
                       </td>
                     </tr>
@@ -1893,6 +2993,101 @@ function ReportsTab({ showToast }) {
                 )}
               </table>
             </div>
+
+            {/* =================================================
+                PAGINATION
+            ================================================= */}
+            {totalRecords > ITEMS_PER_PAGE && (
+              <div className="flex flex-wrap items-center justify-between gap-3 mt-5 pt-4 border-t border-[#E9ECEF]">
+                {/* Showing text */}
+                <div className="text-[0.75rem] text-[#868E96]">
+                  Showing{" "}
+                  <span className="font-semibold text-[#495057]">
+                    {startIndex + 1}
+                  </span>{" "}
+                  -{" "}
+                  <span className="font-semibold text-[#495057]">
+                    {Math.min(
+                      endIndex,
+                      totalRecords
+                    )}
+                  </span>{" "}
+                  of{" "}
+                  <span className="font-semibold text-[#495057]">
+                    {totalRecords}
+                  </span>{" "}
+                  records
+                </div>
+
+                {/* Pagination controls */}
+                <div className="flex items-center gap-1">
+                  {/* Previous */}
+                  <button
+                    type="button"
+                    disabled={
+                      currentPage === 1
+                    }
+                    onClick={() =>
+                      goToPage(
+                        currentPage - 1
+                      )
+                    }
+                    className={`min-w-[34px] h-[34px] px-2 rounded-md border text-[0.75rem] font-semibold transition ${
+                      currentPage === 1
+                        ? "border-[#E9ECEF] bg-[#F8F9FA] text-[#CED4DA] cursor-not-allowed"
+                        : "border-[#E9ECEF] bg-white text-[#495057] hover:bg-[#F8F9FA] cursor-pointer"
+                    }`}
+                  >
+                    ‹
+                  </button>
+
+                  {/* Page numbers */}
+                  {Array.from(
+                    {
+                      length: totalPages,
+                    },
+                    (_, i) => i + 1
+                  ).map((page) => (
+                    <button
+                      key={page}
+                      type="button"
+                      onClick={() =>
+                        goToPage(page)
+                      }
+                      className={`min-w-[34px] h-[34px] px-2 rounded-md border text-[0.75rem] font-semibold transition ${
+                        currentPage === page
+                          ? "border-[#0F1923] bg-[#0F1923] text-white"
+                          : "border-[#E9ECEF] bg-white text-[#495057] hover:bg-[#F8F9FA] cursor-pointer"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+
+                  {/* Next */}
+                  <button
+                    type="button"
+                    disabled={
+                      currentPage ===
+                      totalPages
+                    }
+                    onClick={() =>
+                      goToPage(
+                        currentPage + 1
+                      )
+                    }
+                    className={`min-w-[34px] h-[34px] px-2 rounded-md border text-[0.75rem] font-semibold transition ${
+                      currentPage ===
+                      totalPages
+                        ? "border-[#E9ECEF] bg-[#F8F9FA] text-[#CED4DA] cursor-not-allowed"
+                        : "border-[#E9ECEF] bg-white text-[#495057] hover:bg-[#F8F9FA] cursor-pointer"
+                    }`}
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -2615,53 +3810,69 @@ const paginatedBookings = filteredBookings.slice(
             />
           )}
 
-          {tab === "book" && (
+      {tab === "book" && (
             <div>
-              <div className="mb-4">
-                <div className="font-serif text-[1.05rem] font-semibold text-[#0F1923]">New Booking — Select a Room</div>
+              <div className="font-display text-[1rem] font-semibold text-navy mb-5">
+                New Booking — Select a Room
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
                 {rooms
                   .filter((r) => Number(r.is_available) !== 0)
-                  .map((r) => {
-                  const roomImage = r.image_url || r.image || r.photo || r.thumbnail || "/room-placeholder.jpg";
-                  return (
-                    <div key={r.room_id} className="bg-white rounded-[10px] overflow-hidden shadow-sm">
-                      <div className="relative h-40 bg-gray-100">
+                  .map((r) => (
+                    <div
+                      key={r.room_id}
+                      className="bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-[0_1px_4px_rgba(15,25,35,0.05)]"
+                    >
+                      <div className="h-[140px] overflow-hidden">
                         <img
-                          src={roomImage}
+                          src={
+                            r.image_url ||
+                            "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=500"
+                          }
                           alt={r.room_type}
-                          onError={(e) => { e.currentTarget.src = "/room-placeholder.jpg"; }}
                           className="w-full h-full object-cover"
                         />
-                        <div className="absolute left-3 top-3 bg-[#0F1923] text-[#C9A84C] text-[0.62rem] px-2 py-1 rounded-md font-semibold">{(r.room_type || "").toUpperCase()}</div>
-                        <div className="absolute right-3 top-3 bg-white/60 text-[#495057] text-[0.75rem] px-2 py-1 rounded-md">👥 {r.capacity || 2}</div>
                       </div>
-                      <div className="px-4 py-3">
-                        <div className="text-[0.9rem] font-body font-semibold text-[#0F1923]">Room {r.room_number || r.room_id}</div>
-                        <div className="text-[0.82rem] text-[#868E96] mb-3">{r.description || "Cozy room with city view"}</div>
+                      <div className="px-4 py-3.5">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="bg-navy text-[#E8D5A3] px-2 py-0.5 rounded text-[0.62rem] font-bold tracking-[1px] uppercase">
+                            {r.room_type}
+                          </span>
+                          <span className="text-[0.72rem] text-gray-400">
+                            👥 {r.capacity || 2}
+                          </span>
+                        </div>
+                        <div className="font-body text-[0.95rem] font-semibold text-navy mb-0.5">
+                          Room {r.room_number || r.room_id}
+                        </div>
+                        <div className="text-[0.78rem] text-gray-400 mb-3">
+                          {r.description || "Premium hotel room"}
+                        </div>
                         <div className="flex items-center justify-between">
                           <div>
-                            <div className="text-[0.9rem] font-body font-semibold">Rs.{Number(r.price_per_night || 0).toLocaleString()}</div>
-                            <div className="text-[0.68rem] text-red-600">+18% GST</div>
+                            <div className="font-body text-[1rem] font-semibold text-navy">
+                              Rs.{Number(r.price_per_night).toLocaleString()}{" "}
+                              <span className="text-[0.65rem] font-body font-normal text-gray-400">
+                                /night
+                              </span>
+                            </div>
+                            <div className="text-[0.62rem] font-body text-red-500">
+                              +18% GST
+                            </div>
                           </div>
-                          <div>
-                              <button
-  onClick={() => {
-    setBookingRoom(r);
-    setTab("admin_booking_for_users");
-  }}
-  className="px-3 py-1.5 bg-[#0F1923] text-white rounded-md transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
->
-  Book
-</button>
-                          </div>
+                          <button
+                            onClick={() => {
+                              setBookingRoom(r);
+                              setTab("admin_booking_for_users");
+                            }}
+                            className="bg-[#0f1923] text-white border-none rounded-md px-3.5 py-1.5 text-[0.75rem] font-semibold cursor-pointer transition-all hover:bg-[#c9a84c] hover:text-black hover:-translate-y-[1px]"
+                          >
+                            Book
+                          </button>
                         </div>
                       </div>
                     </div>
-                  );
-                })}
+                  ))}
               </div>
             </div>
           )}
