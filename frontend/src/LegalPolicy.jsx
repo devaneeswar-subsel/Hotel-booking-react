@@ -1,5 +1,7 @@
 import React from "react";
+
 import Footer from "./Footer";
+
 import {
   ArrowLeftIcon,
   MailIcon,
@@ -104,6 +106,7 @@ const policies = {
       },
     ],
   },
+
   privacy: {
     title: "Privacy Policy",
     eyebrow: "Privacy",
@@ -181,6 +184,7 @@ const policies = {
       },
     ],
   },
+
   cancellation: {
     title: "Cancellation & Refund Policy",
     eyebrow: "Bookings",
@@ -248,59 +252,157 @@ const policyAliases = {
 export function getLegalPolicyByPath(pathname) {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   const key = policyAliases[normalized];
+
   return key ? policies[key] : null;
 }
 
-function PolicySection({ section }) {
+function PolicySection({ section, index }) {
   return (
-    <section className="border-t border-[#D9D0BE] pt-8 first:border-t-0 first:pt-0">
-      <h2 className="mb-4 font-[var(--font-display)] text-[1.45rem] font-semibold leading-tight text-[#0F1923]">
-        {section.title}
-      </h2>
+    <section
+      className="
+        group
+        relative
+        overflow-hidden
+        rounded-2xl
+        border
+        border-[#E8E0D1]
+        bg-white
+        p-6
+        shadow-[0_8px_30px_rgba(15,25,35,0.04)]
+        transition-all
+        duration-300
+        hover:-translate-y-0.5
+        hover:shadow-[0_14px_40px_rgba(15,25,35,0.08)]
+        sm:p-8
+      "
+    >
+      {/* Decorative accent */}
+      <div
+        className="
+          absolute
+          left-0
+          top-0
+          h-full
+          w-[3px]
+          bg-[#C9A84C]
+          opacity-0
+          transition-opacity
+          duration-300
+          group-hover:opacity-100
+        "
+      />
+
+      <div className="mb-5 flex items-start gap-4">
+        <span
+          className="
+            flex
+            h-9
+            w-9
+            shrink-0
+            items-center
+            justify-center
+            rounded-full
+            bg-[#F7F1E3]
+            text-[0.72rem]
+            font-bold
+            text-[#9A7A2E]
+          "
+        >
+          {String(index + 1).padStart(2, "0")}
+        </span>
+
+        <h2
+          className="
+            m-0
+            pt-1
+            font-[var(--font-display)]
+            text-[1.35rem]
+            font-semibold
+            leading-tight
+            text-[#0F1923]
+            sm:text-[1.5rem]
+          "
+        >
+          {section.title}
+        </h2>
+      </div>
 
       {section.body && (
-        <p className="mb-4 text-[0.96rem] leading-8 text-[#495057]">
+        <p className="mb-0 text-[0.96rem] leading-8 text-[#59616A]">
           {section.body}
         </p>
       )}
 
       {section.bullets && (
-        <ul className="space-y-3 pl-5 text-[0.96rem] leading-8 text-[#495057]">
-          {section.bullets.map((item) => (
-            <li key={item} className="list-disc pl-1">
-              {item}
+        <ul className="m-0 space-y-3 pl-0 text-[0.96rem] leading-7 text-[#59616A]">
+          {section.bullets.map((item, itemIndex) => (
+            <li
+              key={`${item}-${itemIndex}`}
+              className="flex items-start gap-3"
+            >
+              <span className="mt-[11px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#C9A84C]" />
+              <span>{item}</span>
             </li>
           ))}
         </ul>
       )}
 
       {section.table && (
-        <div className="overflow-x-auto rounded-[6px] border border-[#D9D0BE] bg-white">
-          <table className="w-full min-w-[560px] border-collapse text-left text-[0.95rem]">
-            <thead className="bg-[#0F1923] text-[#E8D5A3]">
-              <tr>
-                {section.table.headers.map((header) => (
-                  <th
-                    key={header}
-                    className="px-5 py-3 text-[0.74rem] font-bold uppercase tracking-[1.4px]"
-                  >
-                    {header}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {section.table.rows.map((row) => (
-                <tr key={row.join("|")} className="border-t border-[#EEE5D4]">
-                  {row.map((cell) => (
-                    <td key={cell} className="px-5 py-4 text-[#495057]">
-                      {cell}
-                    </td>
+        <div className="mt-2 overflow-hidden rounded-xl border border-[#E7DFD0]">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] border-collapse text-left">
+              <thead>
+                <tr className="bg-[#0F1923]">
+                  {section.table.headers.map((header) => (
+                    <th
+                      key={header}
+                      className="
+                        px-5
+                        py-4
+                        text-[0.7rem]
+                        font-bold
+                        uppercase
+                        tracking-[1.5px]
+                        text-[#E8D5A3]
+                      "
+                    >
+                      {header}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+
+              <tbody>
+                {section.table.rows.map((row, rowIndex) => (
+                  <tr
+                    key={row.join("|")}
+                    className={
+                      rowIndex % 2 === 0
+                        ? "bg-white"
+                        : "bg-[#FBFAF7]"
+                    }
+                  >
+                    {row.map((cell, cellIndex) => (
+                      <td
+                        key={`${cell}-${cellIndex}`}
+                        className="
+                          border-t
+                          border-[#EEE7DA]
+                          px-5
+                          py-4
+                          text-[0.9rem]
+                          leading-6
+                          text-[#4F5860]
+                        "
+                      >
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </section>
@@ -309,26 +411,37 @@ function PolicySection({ section }) {
 
 export default function LegalPolicy({ policy }) {
   return (
-    <div className="min-h-screen bg-[#FAF8F4] text-[#212529]">
-      <header className="bg-[#0F1923] px-[5%] pb-14 pt-7">
-        <div className="mx-auto max-w-[1040px]">
-          <div className="mb-12 flex flex-wrap items-center justify-between gap-4">
+    <div className="min-h-screen bg-[#F8F7F3] text-[#212529]">
+
+      {/* HERO */}
+      <header className="relative overflow-hidden bg-[#0F1923]">
+        {/* Background decoration */}
+        <div className="pointer-events-none absolute -right-32 -top-32 h-80 w-80 rounded-full border border-[#C9A84C]/10" />
+        <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full border border-[#C9A84C]/10" />
+
+        <div className="relative mx-auto max-w-[1180px] px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pb-20">
+          
+          {/* NAV */}
+          <div className="mb-16 flex items-center justify-between gap-4">
             <a
               href="/"
-              className="flex items-center gap-3 text-white no-underline"
+              className="group flex items-center gap-3 text-white no-underline"
               aria-label="VV Grand Park Residency home"
             >
-              <img
-                src="/logo.png"
-                alt="VV Grand Park Residency"
-                className="h-12 w-12 object-contain brightness-110 mix-blend-screen"
-                style={{ filter: "brightness(1.1) sepia(0.3)" }}
-              />
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+                <img
+                  src="/logo.png"
+                  alt="VV Grand Park Residency"
+                  className="h-9 w-9 object-contain"
+                />
+              </div>
+
               <span className="flex flex-col leading-[1.1]">
-                <span className="font-serif text-[1rem] font-bold tracking-[2px]">
+                <span className="font-serif text-[0.95rem] font-bold tracking-[2px]">
                   VV GRAND PARK
                 </span>
-                <span className="font-serif text-[0.55rem] tracking-[3px] text-[#C9A84C]">
+
+                <span className="mt-1 font-serif text-[0.55rem] tracking-[3px] text-[#C9A84C]">
                   RESIDENCY
                 </span>
               </span>
@@ -336,88 +449,240 @@ export default function LegalPolicy({ policy }) {
 
             <a
               href="/"
-              className="inline-flex items-center gap-2 rounded-[6px] border border-white/15 px-4 py-2 text-[0.78rem] font-semibold text-white/70 no-underline transition-colors duration-200 hover:border-[#C9A84C] hover:text-[#E8D5A3]"
+              className="
+                inline-flex
+                items-center
+                gap-2
+                rounded-full
+                border
+                border-white/15
+                bg-white/5
+                px-4
+                py-2.5
+                text-[0.78rem]
+                font-semibold
+                text-white/75
+                no-underline
+                backdrop-blur-sm
+                transition-all
+                duration-200
+                hover:border-[#C9A84C]/60
+                hover:bg-[#C9A84C]/10
+                hover:text-white
+              "
             >
               <ArrowLeftIcon size={15} color="currentColor" />
               Back to Home
             </a>
           </div>
 
-          <div className="flex max-w-[760px] flex-col gap-4">
-            <div className="flex items-center gap-2 text-[0.72rem] font-bold uppercase tracking-[2.8px] text-[#C9A84C]">
-              <ShieldIcon size={15} color="currentColor" />
-              {policy.eyebrow}
+          {/* HERO CONTENT */}
+          <div className="max-w-[800px]">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#C9A84C]/20 bg-[#C9A84C]/10 px-3.5 py-2">
+              <ShieldIcon size={14} color="#C9A84C" />
+
+              <span className="text-[0.68rem] font-bold uppercase tracking-[2px] text-[#D9BD6A]">
+                {policy.eyebrow}
+              </span>
             </div>
-            <h1 className="m-0 font-[var(--font-display)] text-[2.4rem] font-semibold leading-tight text-white sm:text-[3.2rem]">
+
+            <h1
+              className="
+                m-0
+                font-[var(--font-display)]
+                text-[2.5rem]
+                font-semibold
+                leading-[1.08]
+                tracking-[-0.02em]
+                text-white
+                sm:text-[3.5rem]
+                lg:text-[4rem]
+              "
+            >
               {policy.title}
             </h1>
-            <p className="max-w-[720px] text-[1rem] leading-8 text-white/58">
+
+            <div className="mt-6 h-px w-16 bg-[#C9A84C]" />
+
+            <p className="mt-6 max-w-[760px] text-[0.98rem] leading-8 text-white/60 sm:text-[1.02rem]">
               {policy.intro}
             </p>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-[1040px] gap-10 px-[5%] py-12 lg:grid-cols-[220px_1fr] lg:py-16">
-        <aside className="lg:sticky lg:top-8 lg:self-start">
-          <div className="rounded-[6px] border border-[#E6DDCB] bg-white p-5 shadow-[0_10px_30px_rgba(15,25,35,0.05)]">
-            <p className="mb-2 text-[0.68rem] font-bold uppercase tracking-[2px] text-[#9A7A2E]">
-              Effective Date
-            </p>
-            <p className="mb-5 text-sm font-semibold text-[#0F1923]">
-              {hotel.effectiveDate}
-            </p>
+      {/* MAIN */}
+      <main className="mx-auto max-w-[1180px] px-5 py-10 sm:px-8 sm:py-14 lg:px-10 lg:py-16">
+        <div className="grid gap-10 lg:grid-cols-[250px_1fr] lg:items-start">
 
-            <p className="mb-3 text-[0.68rem] font-bold uppercase tracking-[2px] text-[#9A7A2E]">
-              Contact
-            </p>
-            <div className="flex flex-col gap-3 text-sm">
-              <a
-                href={hotel.phoneHref}
-                className="flex items-center gap-2 text-[#495057] no-underline transition-colors hover:text-[#0F1923]"
-              >
-                <PhoneIcon size={14} color="currentColor" />
-                {hotel.phone}
-              </a>
-              <a
-                href={hotel.emailHref}
-                className="flex items-center gap-2 break-all text-[#495057] no-underline transition-colors hover:text-[#0F1923]"
-              >
-                <MailIcon size={14} color="currentColor" />
-                {hotel.email}
-              </a>
+          {/* SIDEBAR */}
+          <aside className="lg:sticky lg:top-8">
+            <div
+              className="
+                overflow-hidden
+                rounded-2xl
+                border
+                border-[#E8E0D1]
+                bg-white
+                shadow-[0_8px_30px_rgba(15,25,35,0.05)]
+              "
+            >
+
+              {/* Contact */}
+              <div className="p-5">
+                <p className="mb-4 text-[0.65rem] font-bold uppercase tracking-[2px] text-[#9A7A2E]">
+                  Contact
+                </p>
+
+                <div className="flex flex-col gap-4">
+                  <a
+                    href={hotel.phoneHref}
+                    className="
+                      group
+                      flex
+                      items-center
+                      gap-3
+                      text-[0.84rem]
+                      text-[#59616A]
+                      no-underline
+                      transition-colors
+                      hover:text-[#0F1923]
+                    "
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F7F1E3]">
+                      <PhoneIcon size={14} color="#9A7A2E" />
+                    </span>
+
+                    <span>{hotel.phone}</span>
+                  </a>
+
+                  <a
+                    href={hotel.emailHref}
+                    className="
+                      group
+                      flex
+                      items-center
+                      gap-3
+                      text-[0.84rem]
+                      text-[#59616A]
+                      no-underline
+                      transition-colors
+                      hover:text-[#0F1923]
+                    "
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F7F1E3]">
+                      <MailIcon size={14} color="#9A7A2E" />
+                    </span>
+
+                    <span className="break-all">{hotel.email}</span>
+                  </a>
+                </div>
+              </div>
             </div>
-          </div>
-        </aside>
 
-        <article className="space-y-8">
-          {policy.sections.map((section) => (
-            <PolicySection key={section.title} section={section} />
-          ))}
+            {/* Small trust note */}
+            <div className="mt-5 rounded-2xl border border-[#E8E0D1] bg-[#F3EFE6] p-5">
+              <div className="mb-2 flex items-center gap-2">
+                <ShieldIcon size={14} color="#9A7A2E" />
 
-          <section className="border-t border-[#D9D0BE] pt-8">
-            <h2 className="mb-4 font-[var(--font-display)] text-[1.45rem] font-semibold leading-tight text-[#0F1923]">
-              Contact
-            </h2>
-            <p className="text-[0.96rem] leading-8 text-[#495057]">
-              For questions about this policy, contact {hotel.name} at{" "}
-              <a
-                href={hotel.phoneHref}
-                className="font-semibold text-[#0F1923] underline decoration-[#C9A84C] underline-offset-4"
-              >
-                {hotel.phone}
-              </a>{" "}
-              or{" "}
-              <a
-                href={hotel.emailHref}
-                className="font-semibold text-[#0F1923] underline decoration-[#C9A84C] underline-offset-4"
-              >
-                {hotel.email}
-              </a>
-              .
-            </p>
-          </section>
-        </article>
+                <span className="text-[0.68rem] font-bold uppercase tracking-[1.5px] text-[#9A7A2E]">
+                  Guest Information
+                </span>
+              </div>
+
+              <p className="m-0 text-[0.78rem] leading-6 text-[#6B7175]">
+                Please read these terms carefully before completing your
+                reservation or staying with us.
+              </p>
+            </div>
+          </aside>
+
+          {/* CONTENT */}
+          <article className="space-y-5">
+            {policy.sections.map((section, index) => (
+              <PolicySection
+                key={section.title}
+                section={section}
+                index={index}
+              />
+            ))}
+
+            {/* CONTACT CARD */}
+            <section className="relative overflow-hidden rounded-2xl bg-[#0F1923] p-7 sm:p-9">
+              <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full border border-[#C9A84C]/10" />
+
+              <div className="relative">
+                <div className="mb-3 flex items-center gap-2">
+                  <MailIcon size={15} color="#C9A84C" />
+
+                  <span className="text-[0.68rem] font-bold uppercase tracking-[2px] text-[#C9A84C]">
+                    Need Help?
+                  </span>
+                </div>
+
+                <h2 className="mb-3 font-[var(--font-display)] text-[1.5rem] font-semibold text-white">
+                  Contact Us
+                </h2>
+
+                <p className="mb-5 max-w-[650px] text-[0.92rem] leading-7 text-white/60">
+                  For questions about this policy, contact {hotel.name}.
+                </p>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                  <a
+                    href={hotel.phoneHref}
+                    className="
+                      inline-flex
+                      items-center
+                      gap-2
+                      rounded-full
+                      border
+                      border-white/10
+                      bg-white/5
+                      px-5
+                      py-3
+                      text-[0.82rem]
+                      font-semibold
+                      text-white
+                      no-underline
+                      transition-all
+                      hover:border-[#C9A84C]/50
+                      hover:bg-[#C9A84C]/10
+                    "
+                  >
+                    <PhoneIcon size={14} color="#C9A84C" />
+                    {hotel.phone}
+                  </a>
+
+                  <a
+                    href={hotel.emailHref}
+                    className="
+                      inline-flex
+                      items-center
+                      gap-2
+                      rounded-full
+                      border
+                      border-white/10
+                      bg-white/5
+                      px-5
+                      py-3
+                      text-[0.82rem]
+                      font-semibold
+                      text-white
+                      no-underline
+                      transition-all
+                      hover:border-[#C9A84C]/50
+                      hover:bg-[#C9A84C]/10
+                    "
+                  >
+                    <MailIcon size={14} color="#C9A84C" />
+                    {hotel.email}
+                  </a>
+                </div>
+              </div>
+            </section>
+          </article>
+        </div>
       </main>
 
       <Footer />

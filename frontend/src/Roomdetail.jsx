@@ -580,7 +580,7 @@ export default function RoomDetail({
                 {isAdmin ? "Admin Booking Disabled" : "Book Now"}
               </button>
               <p className="mt-2 text-center text-xs text-[var(--c-muted)]">
-                Free cancellation · No hidden charges
+                Less than 24 hours before check-in: 100% of the first night's room charge; for booking cancellation and refund requests, please contact the hotel administration.
               </p>
             </div>
 
