@@ -102,7 +102,9 @@ const attractions = [
   {
     title: "Vaduvoor Bird Sanctuary",
     distance: "30 km from hotel",
+    featured: true,
     category: "nature",
+    desc:"Vaduvoor Bird Sanctuary — A peaceful wetland sanctuary known for its rich birdlife, especially migratory birds, making it a great spot for nature and birdwatching.",
     images: [
       `${imageBase}/vadovur.webp`,
       `${imageBase}/vadoovur.webp`,
@@ -113,6 +115,8 @@ const attractions = [
     title: "Velankanni Basilica",
     distance: "30-35 km from hotel",
     category: "religious",
+    featured: true,
+    desc:"Velankanni Basilica — A historic pilgrimage site, renowned for the miraculous stories of the Madonna and Child, healing, and the rescue of Portuguese sailors from a storm.",
     images: [
       `${imageBase}/velankanni.webp`,
       `${imageBase}/velankanni1.webp`,
@@ -169,7 +173,7 @@ function labelFor(category) {
 }
 
 function normalizeSlides(images = []) {
-  const slides = images.length ? images : ["/hotel-hero.webp"];
+  const slides = images.length ? images : ["/Thyagaraja Swamy Temple.png"];
 
   return slides.length > 1 ? slides : [slides[0], slides[0]];
 }
@@ -183,7 +187,7 @@ function AttractionCarousel({
   const slides = useMemo(
     () =>
       fixed
-        ? [images?.[0] || "/hotel-hero.webp"]
+        ? [images?.[0] || "/Thyagaraja Swamy Temple.png"]
         : normalizeSlides(images),
     [fixed, images],
   );
@@ -375,7 +379,7 @@ export default function NearbyAttractions() {
         : "mt-8 space-y-6"
     }
   >
-    {featuredAttractions.map((item, index) => (
+    {featuredAttractions.slice(0, 2).map((item, index) => (
       <motion.article
         key={item.title}
         {...fadeUp(0.12 + index * 0.04)}
