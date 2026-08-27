@@ -46,6 +46,7 @@ export default function VehicleCustomers({ bookings, apiFetch, onRefresh, showTo
   }
 
   function startEditing(booking) {
+    if (booking.status === "cancelled") return;
     setEditingId(booking.booking_id);
     setDraft({
       vehicle_type: booking.vehicle_type,
@@ -109,15 +110,30 @@ export default function VehicleCustomers({ bookings, apiFetch, onRefresh, showTo
               <tr><td colSpan={7} className="p-8 text-center text-sm text-[#868E96]">No vehicle customers match these filters.</td></tr>
             ) : visibleBookings.map((booking) => {
               const editing = editingId === booking.booking_id;
+              const isCancelled = booking.status === "cancelled";
               return (
-                <tr key={booking.booking_id} className="border-t border-[#F1F3F5] align-top">
+                <tr key={booking.booking_id} className={`border-t border-[#F1F3F5] align-top ${isCancelled ? "opacity-60" : ""}`}>
                   <td className="w-[20%] px-2 py-2"><div className="truncate text-xs font-semibold text-[#0F1923]">{booking.guest_name}</div><div className="truncate text-[0.65rem] text-[#868E96]">{booking.phone || booking.email}</div></td>
                   <td className="w-[12%] px-2 py-2 text-xs text-[#495057]">{editing ? <select value={draft.vehicle_type} onChange={(event) => setDraft({ ...draft, vehicle_type: event.target.value })} className="w-full rounded border border-gray-200 px-1 py-1 text-[0.68rem]">{VEHICLE_OPTIONS.map((option) => <option key={option}>{option}</option>)}</select> : booking.vehicle_type}</td>
                   <td className="w-[16%] px-2 py-2 text-xs text-[#495057]">{editing ? <input value={draft.pickup_location} onChange={(event) => setDraft({ ...draft, pickup_location: event.target.value })} placeholder="Pickup" className="w-full rounded border border-gray-200 px-1 py-1 text-[0.68rem]" /> : <span className="block truncate">{booking.pickup_location || "Not set"}</span>}</td>
                   <td className="w-[16%] px-2 py-2 text-xs text-[#495057]">{editing ? <input value={draft.dropoff_location} onChange={(event) => setDraft({ ...draft, dropoff_location: event.target.value })} placeholder="Drop-off" className="w-full rounded border border-gray-200 px-1 py-1 text-[0.68rem]" /> : <span className="block truncate">{booking.dropoff_location || "Not set"}</span>}</td>
-                  <td className="w-[15%] px-2 py-2">{editing ? <select value={draft.vehicle_status} onChange={(event) => setDraft({ ...draft, vehicle_status: event.target.value })} className="w-full rounded border border-gray-200 px-1 py-1 text-[0.68rem]">{STATUS_OPTIONS.map((option) => <option key={option} value={option}>{statusLabel(option)}</option>)}</select> : <span className="inline-block max-w-full truncate rounded bg-[#EAF2FB] px-1.5 py-1 text-[0.62rem] font-semibold capitalize text-[#2471A3]">{statusLabel(booking.vehicle_status)}</span>}</td>
-                  <td className="w-[11%] px-2 py-2 text-[0.65rem] text-[#868E96]">#{booking.booking_id}<br />{booking.check_in_date?.slice(0, 10)}</td>
-                  <td className="w-[10%] px-2 py-2"><div className="flex flex-col items-start gap-1">{editing && <input type="number" min="0" value={draft.vehicle_price} onChange={(event) => setDraft({ ...draft, vehicle_price: event.target.value })} placeholder="Price" className="w-full rounded border border-gray-200 px-1 py-1 text-[0.68rem]" />}{editing ? <div className="flex gap-1"><button onClick={() => saveVehicle(booking.booking_id)} disabled={saving} className="rounded bg-[#0F1923] px-2 py-1 text-[0.65rem] font-semibold text-white disabled:opacity-50">{saving ? "..." : "Save"}</button><button onClick={() => setEditingId(null)} className="rounded border border-gray-200 px-2 py-1 text-[0.65rem]">Cancel</button></div> : <button onClick={() => startEditing(booking)} className="rounded border border-[#0F1923] px-2 py-1 text-[0.65rem] font-semibold text-[#0F1923]">Edit</button>}</div></td>
+                  <td className="w-[15%] px-2 py-2">{editing ? <select value={draft.vehicle_status} onChange={(event) => setDraft({ ...draft, vehicle_status: event.target.value })} className="w-full rounded border border-gray-200 px-1 py-1 text-[0.68rem]">{STATUS_OPTIONS.map((option) => <option key={option} value={option}>{statusLabel(option)}</option>)}</select> : <span className={`inline-block max-w-full truncate rounded px-1.5 py-1 text-[0.62rem] font-semibold capitalize ${isCancelled ? "bg-[#FBE9E7] text-[#C0392B]" : "bg-[#EAF2FB] text-[#2471A3]"}`}>{statusLabel(booking.vehicle_status)}</span>}</td>
+                  <td className="w-[11%] px-2 py-2 text-[0.65rem] text-[#868E96]">#{booking.booking_id} · <span className={isCancelled ? "font-semibold text-[#C0392B]" : ""}>{booking.status}</span><br />{booking.check_in_date?.slice(0, 10)}</td>
+                  <td className="w-[10%] px-2 py-2">
+                    <div className="flex flex-col items-start gap-1">
+                      {editing && <input type="number" min="0" value={draft.vehicle_price} onChange={(event) => setDraft({ ...draft, vehicle_price: event.target.value })} placeholder="Price" className="w-full rounded border border-gray-200 px-1 py-1 text-[0.68rem]" />}
+                      {editing ? (
+                        <div className="flex gap-1">
+                          <button onClick={() => saveVehicle(booking.booking_id)} disabled={saving} className="rounded bg-[#0F1923] px-2 py-1 text-[0.65rem] font-semibold text-white disabled:opacity-50">{saving ? "..." : "Save"}</button>
+                          <button onClick={() => setEditingId(null)} className="rounded border border-gray-200 px-2 py-1 text-[0.65rem]">Cancel</button>
+                        </div>
+                      ) : isCancelled ? (
+                        <span className="rounded border border-[#F1D4D0] px-2 py-1 text-[0.65rem] font-semibold text-[#C0392B]">Cancelled</span>
+                      ) : (
+                        <button onClick={() => startEditing(booking)} className="rounded border border-[#0F1923] px-2 py-1 text-[0.65rem] font-semibold text-[#0F1923]">Edit</button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               );
             })}

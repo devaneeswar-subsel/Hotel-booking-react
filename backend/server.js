@@ -602,46 +602,73 @@ async function generateAdvanceInvoicePdf(booking) {
         align: "right",
       });
 
-    const termsTop = y + 52;
+      y += 22;
+    doc.setFont("helvetica", "bold").setFontSize(7).setTextColor(80, 80, 80);
+    doc.text("TERMS & CONDITIONS", L, y);
+    doc.setDrawColor(201, 168, 76);
+    doc.setLineWidth(0.2);
+    doc.line(L, y + 2.5, R, y + 2.5);
+    y += 7;
+    const terms = [
+    " A valid government-issued photo ID must be presented at check-in.",
+  "Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
+  "Early check-in and late check-out are subject to availability and may incur additional charges.",
+  "Pets, outside food and beverages, alcohol, and smoking are not permitted on the hotel premises.",
+  "Cancellations must be made at least 48 hours before the scheduled check-in time to be eligible for a refund, subject to the applicable booking rate and cancellation policy.",
+  "For no-shows or cancellations made within 48 hours of check-in, a cancellation charge equivalent to the first night's room tariff may apply, subject to the booking terms.",
+  "Eligible refunds will be processed to the original payment method within 5-7 working days. The actual credit time may vary depending on the bank or payment provider.",
+  "Personal and identification data is processed for booking management, guest services, payment processing, security, and legal or regulatory compliance.",
+  "Payments are securely processed through approved payment methods. The hotel does not store full card details. Personal data is not sold to third parties.",
+  "Full Terms & Conditions, Privacy Policy, and Cancellation Policy are available at: https://vvgrandpark.com/policies",
+  "Please verify the booking dates, room type, guest count, tariff, and contact details shown on this invoice and report any discrepancy promptly.",
+  "Vehicle pickup and drop-off requests are subject to availability, applicable charges, and separate confirmation by the hotel.",
+  "Guests are responsible for room keys/cards and hotel property provided during their stay. Reasonable charges may apply for loss or damage caused during the stay.",
+  "Hotel policies may be updated from time to time for legal, safety, or operational reasons.",
+  "For booking assistance or invoice corrections, please contact the hotel as soon as possible and preferably before check-in.",
+  "The room tariff does not include additional services or charges unless expressly included in the booking.",
+  "Visitors are permitted only with hotel approval and may be required to provide valid identification.",
+  "All guests must comply with hotel quiet hours, safety instructions, and reasonable house rules during their stay.",
+  "Lost-property claims will be handled in accordance with hotel records, hotel policy, and applicable law.",
+  "This is an electronically generated invoice and does not require a physical signature where permitted under applicable law.",
+    ];
     doc
-      .fillColor("#0F1923")
-      .font("Helvetica-Bold")
-      .fontSize(7)
-      .text("TERMS & CONDITIONS", 50, termsTop);
-    doc
-      .fillColor("#666666")
-      .font("Helvetica")
-      .fontSize(4.6)
-      .text(
-        INVOICE_TERMS.map((term, index) => `${index + 1}. ${term}`).join(" "),
-        50,
-        termsTop + 10,
-        { width: 495, lineGap: 0, height: 126 },
-      );
+      .setFont("helvetica", "normal")
+      .setFontSize(6.5)
+      .setTextColor(120, 120, 120);
+    terms.forEach((t) => {
+      doc.text(t, L, y);
+      y += 5;
+    });
 
-    const footerY = 760;
+       // Footer
+    const footerY = 282;
     doc
-      .moveTo(50, footerY)
-      .lineTo(545, footerY)
-      .strokeColor("#C9A84C")
-      .lineWidth(0.5)
-      .stroke();
+      .setDrawColor(201, 168, 76)
+      .setLineWidth(0.3)
+      .line(L, footerY, R, footerY);
     doc
-      .fillColor("#868E96")
-      .font("Helvetica-Oblique")
-      .fontSize(9)
-      .text("Thank you for choosing VV Grand Park Residency!", 50, footerY + 8, {
-        width: 495,
-        align: "center",
-      });
-    doc
-      .fillColor("#868E96")
-      .font("Helvetica")
-      .fontSize(8)
-      .text("vvgrandpark.com | vvgrandpark@gmail.com", 50, footerY + 22, {
-        width: 495,
-        align: "center",
-      });
+      .setFont("helvetica", "italic")
+      .setFontSize(8)
+      .setTextColor(134, 142, 150);
+    doc.text(
+      "Thank you for choosing VV Grand Park Residency!",
+      W / 2,
+      footerY + 5,
+      { align: "center" },
+    );
+    doc.setFont("helvetica", "normal").setFontSize(7.5);
+    doc.text(
+      "3/4/D, Thanjai Saalai, Thiruvarur - 610004",
+      W / 2,
+      footerY + 11,
+      { align: "center" },
+    );
+    doc.text(
+      "+91 93849 82510  |  vvgrandpark@gmail.com  |  vvgrandpark.com",
+      W / 2,
+      footerY + 17,
+      { align: "center" },
+    );
 
     doc.end();
   });
@@ -1969,7 +1996,7 @@ app.patch(
 app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
   try {
     const [bookings] = await db.query(
-      "SELECT booking_id, user_id, status, actual_checkin FROM bookings WHERE booking_id=?",
+      "SELECT booking_id, user_id, status, actual_checkin, vehicle_type, vehicle_status FROM bookings WHERE booking_id=?",
       [req.params.id],
     );
     if (!bookings.length)
@@ -1990,13 +2017,26 @@ app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Booking is already cancelled" });
     }
 
+    // If a vehicle is attached and hasn't already been picked up/completed/cancelled,
+    // cancel the vehicle request along with the booking.
+    const hasActiveVehicle =
+      booking.vehicle_type &&
+      booking.vehicle_type !== "none" &&
+      !["completed", "cancelled"].includes(booking.vehicle_status);
+
     const [result] = await db.query(
-      "UPDATE bookings SET status='cancelled' WHERE booking_id=?",
+      hasActiveVehicle
+        ? "UPDATE bookings SET status='cancelled', vehicle_status='cancelled' WHERE booking_id=?"
+        : "UPDATE bookings SET status='cancelled' WHERE booking_id=?",
       [req.params.id],
     );
     if (!result.affectedRows)
       return res.status(404).json({ error: "Booking not found" });
-    res.json({ message: "Booking cancelled successfully" });
+
+    res.json({
+      message: "Booking cancelled successfully",
+      vehicle_status: hasActiveVehicle ? "cancelled" : booking.vehicle_status,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
