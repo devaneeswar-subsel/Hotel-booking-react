@@ -1162,11 +1162,24 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Payment verification failed." });
     }
     const [ownedBooking] = await db.query(
-      "SELECT booking_id FROM bookings WHERE booking_id=? AND user_id=? AND status='pending'",
+      "SELECT booking_id, status FROM bookings WHERE booking_id=? AND user_id=? AND status IN ('pending','cancelled')",
       [booking_id, req.user.user_id],
     );
-    if (!ownedBooking.length)
-      return res.status(403).json({ error: "Booking not found or already processed" });
+    if (!ownedBooking.length) {
+      const [already] = await db.query(
+        "SELECT status FROM bookings WHERE booking_id=? AND user_id=?",
+        [booking_id, req.user.user_id],
+      );
+      if (
+        already.length &&
+        ["confirmed", "completed"].includes(already[0].status)
+      ) {
+        return res.json({ success: true, message: "Already confirmed" });
+      }
+      return res
+        .status(403)
+        .json({ error: "Booking not found or already processed" });
+    }
     await db.query(
       "UPDATE bookings SET status='confirmed', payment_id=? WHERE booking_id=?",
       [razorpay_payment_id, booking_id],
@@ -1274,98 +1287,98 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
             .text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", 350, 162)
             .text("+91 93849 82510 | vvgrandpark@gmail.com", 350, 175);
 
-const tableTop = 210;
-doc.rect(50, tableTop, 495, 25).fill("#0F1923");
-doc
-  .fillColor("#C9A84C")
-  .font("Helvetica-Bold")
-  .fontSize(9)
-  .text("DESCRIPTION", 60, tableTop + 8)
-  .text("DETAILS", 280, tableTop + 8)
-  .text("AMOUNT", 400, tableTop + 8, { width: 145, align: "center" });
+          const tableTop = 210;
+          doc.rect(50, tableTop, 495, 25).fill("#0F1923");
+          doc
+            .fillColor("#C9A84C")
+            .font("Helvetica-Bold")
+            .fontSize(9)
+            .text("DESCRIPTION", 60, tableTop + 8)
+            .text("DETAILS", 280, tableTop + 8)
+            .text("AMOUNT", 400, tableTop + 8, { width: 145, align: "center" });
 
-const tableRows = [
-  [
-    `${booking.room_type} — Room ${booking.room_number || booking.room_id}`,
-    `${nights} night${nights > 1 ? "s" : ""}`,
-    `Rs.${basePrice.toLocaleString()}`,
-  ],
-  [
-    "Check-in",
-    new Date(booking.check_in_date).toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    }),
-    "—",
-  ],
-  [
-    "Check-out",
-    new Date(booking.check_out_date).toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    }),
-    "—",
-  ],
-  ["Guests", `${booking.guest_count || 1}`, "—"],
-  ["Payment ID", booking.payment_id || "—", "—"],
-];
+          const tableRows = [
+            [
+              `${booking.room_type} — Room ${booking.room_number || booking.room_id}`,
+              `${nights} night${nights > 1 ? "s" : ""}`,
+              `Rs.${basePrice.toLocaleString()}`,
+            ],
+            [
+              "Check-in",
+              new Date(booking.check_in_date).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              }),
+              "—",
+            ],
+            [
+              "Check-out",
+              new Date(booking.check_out_date).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              }),
+              "—",
+            ],
+            ["Guests", `${booking.guest_count || 1}`, "—"],
+            ["Payment ID", booking.payment_id || "—", "—"],
+          ];
 
-let y = tableTop + 30;
-tableRows.forEach((row, i) => {
-  if (i % 2 === 0) doc.rect(50, y - 5, 495, 22).fill("#F8F9FA");
-  doc
-    .fillColor("#0F1923")
-    .font("Helvetica")
-    .fontSize(9)
-    .text(row[0], 60, y)
-    .text(row[1], 280, y)
-    .text(row[2], 400, y, { width: 145, align: "center" });
-  y += 22;
-});
+          let y = tableTop + 30;
+          tableRows.forEach((row, i) => {
+            if (i % 2 === 0) doc.rect(50, y - 5, 495, 22).fill("#F8F9FA");
+            doc
+              .fillColor("#0F1923")
+              .font("Helvetica")
+              .fontSize(9)
+              .text(row[0], 60, y)
+              .text(row[1], 280, y)
+              .text(row[2], 400, y, { width: 145, align: "center" });
+            y += 22;
+          });
 
-y += 15;
-doc
-  .moveTo(50, y)
-  .lineTo(545, y)
-  .strokeColor("#E9ECEF")
-  .lineWidth(0.5)
-  .stroke();
-y += 15;
-[
-  ["Room Charges", `Rs.${basePrice.toLocaleString()}`],
-  ["GST (18%)", `Rs.${Math.round(gst).toLocaleString()}`],
-].forEach(([label, val]) => {
-  doc
-    .fillColor("#868E96")
-    .font("Helvetica")
-    .fontSize(10)
-    .text(label, 350, y);
-  doc
-    .fillColor("#0F1923")
-    .font("Helvetica-Bold")
-    .fontSize(10)
-    .text(val, 400, y, { width: 145, align: "center" });
-  y += 20;
-});
+          y += 15;
+          doc
+            .moveTo(50, y)
+            .lineTo(545, y)
+            .strokeColor("#E9ECEF")
+            .lineWidth(0.5)
+            .stroke();
+          y += 15;
+          [
+            ["Room Charges", `Rs.${basePrice.toLocaleString()}`],
+            ["GST (18%)", `Rs.${Math.round(gst).toLocaleString()}`],
+          ].forEach(([label, val]) => {
+            doc
+              .fillColor("#868E96")
+              .font("Helvetica")
+              .fontSize(10)
+              .text(label, 350, y);
+            doc
+              .fillColor("#0F1923")
+              .font("Helvetica-Bold")
+              .fontSize(10)
+              .text(val, 400, y, { width: 145, align: "center" });
+            y += 20;
+          });
 
-y += 5;
-doc.rect(350, y, 195, 36).fill("#0F1923");
-doc
-  .fillColor("#C9A84C")
-  .font("Helvetica-Bold")
-  .fontSize(11)
-  .text("TOTAL PAID", 360, y + 12);
+          y += 5;
+          doc.rect(350, y, 195, 36).fill("#0F1923");
+          doc
+            .fillColor("#C9A84C")
+            .font("Helvetica-Bold")
+            .fontSize(11)
+            .text("TOTAL PAID", 360, y + 12);
 
-doc
-  .fillColor("#ffffff")
-  .font("Helvetica-Bold")
-  .fontSize(14)
-  .text(`Rs.${Math.round(total).toLocaleString()}`, 400, y + 10, {
-    width: 145,
-    align: "center",
-  });
+          doc
+            .fillColor("#ffffff")
+            .font("Helvetica-Bold")
+            .fontSize(14)
+            .text(`Rs.${Math.round(total).toLocaleString()}`, 400, y + 10, {
+              width: 145,
+              align: "center",
+            });
 
           y += 50;
           y += 10;
@@ -1383,7 +1396,9 @@ doc
           y += 18;
           doc.fillColor("#666").font("Helvetica").fontSize(4.6);
           doc.text(
-            INVOICE_TERMS.map((term, index) => `${index + 1}. ${term}`).join(" "),
+            INVOICE_TERMS.map((term, index) => `${index + 1}. ${term}`).join(
+              " ",
+            ),
             50,
             y,
             { width: 495, lineGap: 0, height: 136 },
@@ -1400,18 +1415,28 @@ doc
             .fillColor("#868E96")
             .font("Helvetica-Oblique")
             .fontSize(9)
-            .text("Thank you for choosing VV Grand Park Residency!", 50, footerY + 10, {
-              width: 495,
-              align: "center",
-            });
+            .text(
+              "Thank you for choosing VV Grand Park Residency!",
+              50,
+              footerY + 10,
+              {
+                width: 495,
+                align: "center",
+              },
+            );
           doc
             .fillColor("#868E96")
             .font("Helvetica")
             .fontSize(8)
-            .text("vvgrandpark.com  |  bookings@vvgrandpark.com", 50, footerY + 24, {
-              width: 495,
-              align: "center",
-            });
+            .text(
+              "vvgrandpark.com  |  bookings@vvgrandpark.com",
+              50,
+              footerY + 24,
+              {
+                width: 495,
+                align: "center",
+              },
+            );
           doc
             .fillColor("#868E96")
             .font("Helvetica")
@@ -1430,7 +1455,7 @@ doc
           from: "VV Grand Park Residency <bookings@vvgrandpark.com>",
           to: booking.email,
           subject: `Booking Confirmed! ${invNo} — VV Grand Park Residency`,
-   html: `
+          html: `
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#F1F3F5;margin:0;padding:0;border-collapse:collapse;">
   <tr>
     <td align="center" style="padding:24px 12px;">
@@ -1699,11 +1724,14 @@ doc
                     padding:8px 0;
                   "
                 >
-                  ${new Date(booking.check_in_date).toLocaleDateString("en-IN", {
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric"
-                  })}
+                  ${new Date(booking.check_in_date).toLocaleDateString(
+                    "en-IN",
+                    {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    },
+                  )}
                 </td>
               </tr>
 
@@ -1729,11 +1757,14 @@ doc
                     padding:8px 0;
                   "
                 >
-                  ${new Date(booking.check_out_date).toLocaleDateString("en-IN", {
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric"
-                  })}
+                  ${new Date(booking.check_out_date).toLocaleDateString(
+                    "en-IN",
+                    {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    },
+                  )}
                 </td>
               </tr>
 
