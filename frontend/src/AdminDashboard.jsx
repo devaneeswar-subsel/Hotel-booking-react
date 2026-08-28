@@ -832,15 +832,6 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     const L = 18;
     const R = W - 18;
 
-    if (isCancelled) {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(50);
-      doc.setTextColor(230, 180, 180);
-      doc.text("CANCELLED", W / 2, 160, {
-        align: "center",
-        angle: 30,
-      });
-    }
 
     doc.setFillColor(15, 25, 35);
     doc.rect(0, 0, W, 32, "F");
@@ -1124,6 +1115,20 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       footerY + 17,
       { align: "center" },
     );
+
+
+    if (isCancelled) {
+      doc.saveGraphicsState();
+      doc.setGState(new doc.GState({ opacity: 0.18 }));
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(60);
+      doc.setTextColor(192, 57, 43);
+      doc.text("CANCELLED", W / 2, 160, {
+        align: "center",
+        angle: 30,
+      });
+      doc.restoreGraphicsState();
+    }
 
     doc.save(`${invNo}-${(b.guest_name || "guest").replace(/\s+/g, "_")}.pdf`);
   }
