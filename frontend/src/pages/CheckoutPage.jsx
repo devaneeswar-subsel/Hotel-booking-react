@@ -311,14 +311,9 @@ export default function CheckoutPage({ user, showToast }) {
       };
 
       const razorpay = new window.Razorpay(options);
-      razorpay.on("payment.failed", async (response) => {
-        if (bookingId) {
-          await apiFetch("/api/payment/failed", {
-            method: "POST",
-            body: JSON.stringify({ booking_id: bookingId }),
-          });
-        }
-        setLoading(false);
+      razorpay.on("payment.failed", (response) => {
+        // Don't cancel the booking here — Razorpay lets the user retry
+        // on the same order. Only show an error message.
         showToast?.(
           `Payment failed: ${response.error?.description || "Please try again."}`,
           "error",
