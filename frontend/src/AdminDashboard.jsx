@@ -1095,7 +1095,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     terms.forEach((term) => {
       doc.text(term, L, y);
       y += 5;
-    });
+      });
 
     const footerY = 282;
     doc.setDrawColor(201, 168, 76);
@@ -1154,22 +1154,30 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   const paymentTotalAmount = Number(
     booking.total_amount || booking.final_total || alreadyPaid || 0,
   );
-  const advancePaidAmount = Number(booking.advance_paid || 0);
-  const balancePaidAmount = Number(booking.balance_paid || 0);
-  const storedPaymentRemaining = Number(booking.remaining_amount || 0);
-  const calculatedPaymentRemaining = Math.max(
-    0,
-    Math.round(
-      (paymentTotalAmount - advancePaidAmount - balancePaidAmount) * 100,
-    ) / 100,
-  );
-  const advanceRemainingAmount =
-    storedPaymentRemaining > 0
+const advancePaidAmount = Number(booking.advance_paid || 0);
+const balancePaidAmount = Number(booking.balance_paid || 0);
+const storedPaymentRemaining = Number(booking.remaining_amount || 0);
+
+const normalizedPaymentStatus = String(
+  booking.payment_status || "",
+).toUpperCase();
+
+const calculatedPaymentRemaining = Math.max(
+  0,
+  Math.round(
+    (paymentTotalAmount - advancePaidAmount - balancePaidAmount) * 100,
+  ) / 100,
+);
+
+const advanceRemainingAmount =
+  normalizedPaymentStatus === "PAID"
+    ? 0
+    : storedPaymentRemaining > 0
       ? storedPaymentRemaining
       : calculatedPaymentRemaining;
-  const rawPaymentStatus =
-    booking.payment_status ||
-    (advanceRemainingAmount > 0 ? "PARTIALLY_PAID" : "PAID");
+const rawPaymentStatus =
+  normalizedPaymentStatus ||
+  (advanceRemainingAmount > 0 ? "PARTIALLY_PAID" : "PAID");
   const paymentStatusLabel =
     rawPaymentStatus === "PARTIALLY_PAID"
       ? "Partially Paid"
@@ -1180,9 +1188,12 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     balancePaidAmount > 0 ||
     advanceRemainingAmount > 0 ||
     rawPaymentStatus === "PARTIALLY_PAID";
-  const receivedBookingAmount = hasAdvancePayment
-    ? advancePaidAmount + balancePaidAmount
-    : alreadyPaid;
+ const receivedBookingAmount =
+  normalizedPaymentStatus === "PAID"
+    ? paymentTotalAmount
+    : hasAdvancePayment
+      ? advancePaidAmount + balancePaidAmount
+      : alreadyPaid;
   const advancePaymentMode = (() => {
     const method = String(booking.payment_method || "").trim();
     if (/cash/i.test(method)) return "Cash";
@@ -1192,9 +1203,12 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     if (/bank/i.test(method)) return "Bank Transfer";
     return method.replace(/\s*advance$/i, "") || paymentMode;
   })();
-  const bookingPaidLabel = hasAdvancePayment
+const bookingPaidLabel =
+  normalizedPaymentStatus === "PAID"
     ? `Amount Paid (${advancePaymentMode})`
-    : "Amount Already Paid";
+    : hasAdvancePayment
+      ? `Amount Paid (${advancePaymentMode})`
+      : "Amount Already Paid";
   const totalRemainingToPay = Math.round(
     ((hasAdvancePayment ? advanceRemainingAmount : 0) +
       (allAddonsPaid ? 0 : remainingAmount)) *
@@ -1347,24 +1361,33 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
                 </div>
               ))}
               {advanceRemainingAmount > 0 && (
-                <button
-                  onClick={markBalancePaid}
-                  disabled={
-                    balanceLoading ||
-                    !booking.actual_checkin ||
-                    booking.status === "cancelled"
-                  }
-                  title={
-                    booking.actual_checkin
-                      ? ""
-                      : "Record check-in before collecting balance"
-                  }
-                  className="mt-3 w-full rounded-md bg-gold px-4 py-2.5 text-[0.84rem] font-bold text-navy transition hover:bg-gold/90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {balanceLoading
-                    ? "Updating..."
-                    : `Collect Balance ${formatMoney(advanceRemainingAmount)}`}
-                </button>
+  <button
+  onClick={markBalancePaid}
+  disabled={
+    balanceLoading ||
+    advanceRemainingAmount <= 0 ||
+    !booking.actual_checkin ||
+    booking.status === "cancelled"
+  }
+  title={
+    advanceRemainingAmount <= 0
+      ? "Room amount is already fully paid"
+      : !booking.actual_checkin
+        ? "Record check-in before collecting balance"
+        : ""
+  }
+  className={`mt-3 w-full rounded-md px-4 py-2.5 text-[0.84rem] font-bold transition ${
+    advanceRemainingAmount <= 0
+      ? "bg-emerald-100 text-emerald-600 cursor-not-allowed"
+      : "bg-gold text-navy hover:bg-gold/90"
+  } disabled:cursor-not-allowed disabled:opacity-70`}
+>
+  {balanceLoading
+    ? "Updating..."
+    : advanceRemainingAmount <= 0
+      ? "✓ Balance Paid"
+      : `Collect Balance ${formatMoney(advanceRemainingAmount)}`}
+</button>
               )}
             </div>
           )}
