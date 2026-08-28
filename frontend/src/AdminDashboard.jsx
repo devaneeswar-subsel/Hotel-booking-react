@@ -812,14 +812,60 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
             (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
           )
         : 1;
-    const basePrice = Number(b.total_price);
-    const roomGstPdf = Math.round(basePrice * GST_RATE * 100) / 100;
-    const alreadyPaidPdf = Math.round((basePrice + roomGstPdf) * 100) / 100;
-    const addonTotalPdf = Number(b.addon_charges || 0);
-    const addonGstPdf = Math.round(addonTotalPdf * GST_RATE * 100) / 100;
-    const remainingPdf = Math.round((addonTotalPdf + addonGstPdf) * 100) / 100;
-    const grandTotalPdf =
-      Math.round((alreadyPaidPdf + remainingPdf) * 100) / 100;
+  const basePrice = Number(b.total_price || 0);
+
+const roomGstPdf =
+  Math.round(basePrice * GST_RATE * 100) / 100;
+
+const roomTotalPdf =
+  Math.round((basePrice + roomGstPdf) * 100) / 100;
+
+const advancePaidPdf = Number(b.advance_paid || 0);
+const balancePaidPdf = Number(b.balance_paid || 0);
+
+const paymentTotalPdf = Number(
+  b.total_amount || b.final_total || roomTotalPdf
+);
+
+// Room booking remaining balance
+const roomRemainingPdf = Math.max(
+  0,
+  Math.round(
+    (paymentTotalPdf - advancePaidPdf - balancePaidPdf) * 100
+  ) / 100
+);
+
+// Add-ons
+const addonTotalPdf = Number(b.addon_charges || 0);
+
+const addonGstPdf =
+  Math.round(addonTotalPdf * GST_RATE * 100) / 100;
+
+// Only unpaid add-ons
+const unpaidAddonTotalPdf =
+  (b.addons || [])
+    .filter((addon) => addon.paid !== 1)
+    .reduce(
+      (sum, addon) => sum + Number(addon.amount || 0),
+      0
+    );
+
+const unpaidAddonGstPdf =
+  Math.round(unpaidAddonTotalPdf * GST_RATE * 100) / 100;
+
+// Final remaining amount
+const remainingPdf = Math.round(
+  (roomRemainingPdf +
+    unpaidAddonTotalPdf +
+    unpaidAddonGstPdf) *
+    100
+) / 100;
+
+// Grand total
+const grandTotalPdf = Math.round(
+  (paymentTotalPdf + addonTotalPdf + addonGstPdf) *
+    100
+) / 100;
     const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
     const today = new Date().toLocaleDateString("en-IN", {
       day: "numeric",
@@ -995,10 +1041,16 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       SX,
       y + 1,
     );
-    doc.text(`Rs.${Math.round(alreadyPaidPdf).toLocaleString()}`, R, y + 1, {
-      align: "right",
-    });
-    y += 9;
+ doc.text(
+  `Rs.${Math.round(
+    advancePaidPdf + balancePaidPdf
+  ).toLocaleString()}`,
+  R,
+  y + 1,
+  {
+    align: "right",
+  }
+);
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(6.5);
@@ -1626,11 +1678,11 @@ const bookingPaidLabel =
               >
                 <div>
                   <div
-                    className={`text-[0.82rem] font-bold ${allPaymentsSettled ? "text-emerald-500" : "text-gold"}`}
+                    className={`text-[0.82rem] font-display  font-bold ${allPaymentsSettled ? "text-emerald-500" : "text-gold"}`}
                   >
                     {allPaymentsSettled ? "All Paid" : "Remaining Amount to Pay"}
                   </div>
-                  <div className="text-[0.68rem] text-white/35 mt-0.5">
+                  <div className="text-[0.68rem] font-display text-white/35 mt-0.5">
                     {allPaymentsSettled
                       ? `Received via ${paymentMode}`
                       : `via ${paymentMode}`}
@@ -1648,7 +1700,7 @@ const bookingPaidLabel =
                     </svg>
                   )}
                   <span
-                    className={`text-[1.1rem] font-bold font-display ${allPaymentsSettled ? "text-emerald-500" : "text-gold"}`}
+                    className={`text-[1.1rem] font-bold font-body ${allPaymentsSettled ? "text-emerald-500" : "text-gold"}`}
                   >
                     Rs.{Math.round(totalRemainingToPay).toLocaleString()}
                   </span>
