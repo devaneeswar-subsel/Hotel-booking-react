@@ -1675,8 +1675,26 @@ tbody tr:hover td {
 /* Today */
 .react-datepicker__day--today {
   border: 2px solid #d4af37 !important;
-  background: transparent !important;
-  font-weight: 600;
+  background: #fff !important;
+  color: #0f0f0f !important;
+  font-weight: 600 !important;
+}
+
+/* Today + Selected */
+.react-datepicker__day--today.react-datepicker__day--selected,
+.react-datepicker__day--today.react-datepicker__day--keyboard-selected {
+  border: 2px solid #d4af37 !important;
+  background: #0f1923 !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+}
+
+/* Today + Selected Hover */
+.react-datepicker__day--today.react-datepicker__day--selected:hover,
+.react-datepicker__day--today.react-datepicker__day--keyboard-selected:hover {
+  border: 2px solid #d4af37 !important;
+  background: #0f1923 !important;
+  color: #fff !important;
 }
 
 /* Disabled Booked Dates */

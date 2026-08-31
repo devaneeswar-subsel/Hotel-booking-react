@@ -792,7 +792,7 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     onRefresh();
   }
 
-  async function downloadInvoice() {
+  async function printInvoice() {
     if (!booking) return;
     const b = booking;
     const selectedPaymentMode = paymentMode;
@@ -1207,7 +1207,23 @@ const grandTotalPdf = Math.round(
       doc.restoreGraphicsState();
     }
 
-    doc.save(`${invNo}-${(b.guest_name || "guest").replace(/\s+/g, "_")}.pdf`);
+   // Print invoice instead of downloading
+doc.autoPrint();
+
+const pdfBlob = doc.output("blob");
+const pdfUrl = URL.createObjectURL(pdfBlob);
+
+const printWindow = window.open(pdfUrl, "_blank");
+
+if (!printWindow) {
+  showToast("Please allow pop-ups to print the invoice.", "error");
+  URL.revokeObjectURL(pdfUrl);
+  return;
+}
+
+setTimeout(() => {
+  URL.revokeObjectURL(pdfUrl);
+}, 60000);
   }
 
   // ── Loading state ──────────────────────────────────────────────────────────
@@ -1725,13 +1741,26 @@ const bookingPaidLabel =
 
           {/* ── Action buttons ── */}
           <div className="flex gap-2.5">
-            <button
-              onClick={downloadInvoice}
-              className="flex-1 flex items-center justify-center gap-1 py-3 bg-navy text-gold text-[0.82rem] font-semibold rounded-lg hover:bg-navy/90 transition-colors"
-            >
-              <DownloadIcon size={14} color="#C9A84C" />
-              Download Invoice
-            </button>
+          <button
+  onClick={printInvoice}
+  className="flex-1 flex items-center justify-center gap-1 py-3 bg-navy text-gold text-[0.82rem] font-semibold rounded-lg hover:bg-navy/90 transition-colors"
+>
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polyline points="6 9 6 2 18 2 18 9" />
+    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+    <rect x="6" y="14" width="12" height="8" />
+  </svg>
+  Print Invoice
+</button>
 
             <button
               onClick={markAddonsPaid}
@@ -3694,17 +3723,6 @@ export default function AdminDashboard({
                             >
                               {r.is_available ? "🚫 Block" : "✅ Unblock"}
                             </button>
-                            {r.is_available && (
-                              <button
-                                onClick={() => {
-                                  setBookingRoom(r);
-                                  setTab("book");
-                                }}
-                                className="px-2.5 py-1 rounded bg-[#0F1923] text-white border-none text-[0.72rem] font-semibold cursor-pointer transition-all duration-300 hover:bg-[#C9A84C] hover:text-black hover:-translate-y-[1px]"
-                              >
-                                Book
-                              </button>
-                            )}
                             <button
                               onClick={() => deleteRoom(r.room_id)}
                               className="px-2.5 py-1 rounded border-[1.5px] border-gray-400 text-gray-400 bg-none text-[0.72rem] font-semibold cursor-pointer hover:bg-gray-50 transition-colors"
