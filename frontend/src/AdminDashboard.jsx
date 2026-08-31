@@ -2688,6 +2688,9 @@ export default function AdminDashboard({
   const [bookingPage, setBookingPage] = useState(1);
   const [userPage, setUserPage] = useState(1);
   const itemsPerPage = 10;
+    const [bookingFilter, setBookingFilter] = useState("week"); // week | month | custom | checkedin
+    const [customStart, setCustomStart] = useState("");
+    const [customEnd, setCustomEnd] = useState("");
   const fetchAll = () => {
     Promise.all([
       apiFetch("/api/admin/stats").then((r) => r.json()),
@@ -2791,7 +2794,41 @@ export default function AdminDashboard({
       showToast(err.message, "error");
     }
   }
-
+    function getFilterRange(filter) {
+      const now = new Date();
+      if (filter === "week") {
+        const day = now.getDay();
+        const diffToMon = day === 0 ? -6 : 1 - day;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() + diffToMon);
+        monday.setHours(0, 0, 0, 0);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        sunday.setHours(23, 59, 59, 999);
+        return { start: monday, end: sunday };
+      }
+      if (filter === "month") {
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        const end = new Date(
+          now.getFullYear(),
+          now.getMonth() + 1,
+          0,
+          23,
+          59,
+          59,
+          999,
+        );
+        return { start, end };
+      }
+      if (filter === "custom" && customStart && customEnd) {
+        const start = new Date(customStart);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(customEnd);
+        end.setHours(23, 59, 59, 999);
+        return { start, end };
+      }
+      return null;
+    }
   const dateKey = (value = new Date()) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
@@ -2867,13 +2904,22 @@ export default function AdminDashboard({
   const confirmed = bookings.filter((b) => b.status === "confirmed").length;
   const cancelled = bookings.filter((b) => b.status === "cancelled").length;
   const completed = bookings.filter((b) => b.status === "completed").length;
-  const filteredBookings = bookings.filter(
-    (b) =>
-      !searchTerm ||
-      b.guest_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      b.room_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      b.email?.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
+    const filterRange = getFilterRange(bookingFilter);
+    const dateAndStatusFiltered = bookings.filter((b) => {
+      if (bookingFilter === "checkedin") {
+        return Boolean(b.actual_checkin) && !b.actual_checkout;
+      }
+      if (!filterRange) return true;
+      const checkIn = new Date(b.check_in_date);
+      return checkIn >= filterRange.start && checkIn <= filterRange.end;
+    });
+    const filteredBookings = dateAndStatusFiltered.filter(
+      (b) =>
+        !searchTerm ||
+        b.guest_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        b.room_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        b.email?.toLowerCase().includes(searchTerm.toLowerCase()),
+    );
 
   const totalPages = Math.ceil(filteredBookings.length / itemsPerPage);
 
@@ -2891,10 +2937,9 @@ export default function AdminDashboard({
     { id: "users", label: "Users", icon: UsersIcon },
     { id: "book", label: "New Booking", icon: CalendarIcon },
   ];
-  useEffect(() => {
-    setBookingPage(1);
-    setUserPage(1);
-  }, [tab]);
+    useEffect(() => {
+      setBookingPage(1);
+    }, [bookingFilter, customStart, customEnd]);
 
   useEffect(() => {
     setBookingPage((page) =>
@@ -3307,11 +3352,11 @@ export default function AdminDashboard({
           {/* ── BOOKINGS ── */}
           {tab === "bookings" && (
             <div className="bg-white rounded-2xl p-5 border border-gray-200">
-              <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
                 <div className="font-display text-[1rem] font-semibold text-navy">
                   All Bookings{" "}
                   <span className="text-[0.78rem] font-body font-normal text-gray-400 ml-2">
-                    ({bookings.length} total)
+                    ({filteredBookings.length} shown · {bookings.length} total)
                   </span>
                 </div>
                 <div className="flex items-center gap-2 bg-gray-50 border-[1.5px] border-gray-200 rounded-lg px-3 py-2 min-w-[200px] flex-[0_1_240px]">
@@ -3326,6 +3371,48 @@ export default function AdminDashboard({
                     className="border-none bg-transparent text-[0.82rem] text-gray-900 outline-none w-full"
                   />
                 </div>
+              </div>
+
+              {/* Filter tabs */}
+              <div className="flex flex-wrap items-center gap-2 mb-5">
+                {[
+                  { id: "week", label: "This Week" },
+                  { id: "month", label: "This Month" },
+                  { id: "custom", label: "Custom Date" },
+                  { id: "checkedin", label: "Checked-in Users" },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setBookingFilter(f.id)}
+                    className={`px-3.5 py-1.5 rounded-full text-[0.78rem] font-semibold border-2 transition-colors
+                      ${
+                        bookingFilter === f.id
+                          ? "bg-navy text-gold border-navy"
+                          : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                      }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+
+                {bookingFilter === "custom" && (
+                  <div className="flex items-center gap-2 ml-1">
+                    <input
+                      type="date"
+                      value={customStart}
+                      onChange={(e) => setCustomStart(e.target.value)}
+                      className="rounded-lg border-[1.5px] border-gray-200 px-2.5 py-1.5 text-[0.78rem] text-gray-700 outline-none focus:border-navy/40"
+                    />
+                    <span className="text-gray-400 text-[0.78rem]">to</span>
+                    <input
+                      type="date"
+                      value={customEnd}
+                      min={customStart || undefined}
+                      onChange={(e) => setCustomEnd(e.target.value)}
+                      className="rounded-lg border-[1.5px] border-gray-200 px-2.5 py-1.5 text-[0.78rem] text-gray-700 outline-none focus:border-navy/40"
+                    />
+                  </div>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse min-w-[700px]">
@@ -3398,7 +3485,8 @@ export default function AdminDashboard({
                             {b.status === "confirmed" && (
                               <button
                                 onClick={() => {
-                                  if (!b.actual_checkin) setCancelBookingData(b);
+                                  if (!b.actual_checkin)
+                                    setCancelBookingData(b);
                                 }}
                                 disabled={Boolean(b.actual_checkin)}
                                 title={
@@ -3414,7 +3502,9 @@ export default function AdminDashboard({
                               >
                                 <XIcon
                                   size={11}
-                                  color={b.actual_checkin ? "#9CA3AF" : "#C0392B"}
+                                  color={
+                                    b.actual_checkin ? "#9CA3AF" : "#C0392B"
+                                  }
                                 />{" "}
                                 Cancel
                               </button>
