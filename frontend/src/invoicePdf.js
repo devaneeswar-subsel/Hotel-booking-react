@@ -1,1022 +1,347 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  invoicePdf.js — shared invoice generator (extracted from AdminDashboard)
+//  invoicePdf.js — shared invoice generator
 //  Usage: await printInvoicePdf(booking, { paymentMode, showToast });
+//
+//  Print-safe design: no dark fills, black/grey text only, hairline borders.
+//  Renders correctly on a black-and-white printer and flows onto extra pages
+//  when there are many add-on charges.
 // ─────────────────────────────────────────────────────────────────────────────
 const GST_RATE = 0.18;
 
+// page geometry (A4, mm)
+const W = 210;
+const H = 297;
+const L = 18; // left margin
+const R = W - 18; // right margin
+const TOP = 20; // first baseline on a continuation page
+const BOTTOM = 272; // last usable y before the footer zone
+
+// column positions
+const C_DESC = L + 3;
+const C_DETAIL = 108;
+const C_DESC_W = C_DETAIL - C_DESC - 4;
+const C_DETAIL_W = 45;
+
+const money = (v) => `Rs.${Math.round(Number(v) || 0).toLocaleString("en-IN")}`;
+
 export async function printInvoicePdf(
   booking,
-  paymentMode = "Online",
-  showToast = () => {},
+  { paymentMode = "Online", showToast = () => {} } = {},
 ) {
   if (!booking) return;
 
+  // callers pass either a plain string or an option object — normalise both,
+  // otherwise the invoice prints "[object Object]" as the payment mode
+  const payLabel =
+    typeof paymentMode === "string"
+      ? paymentMode
+      : paymentMode?.label || paymentMode?.name || paymentMode?.value || "Online";
+
   const b = booking;
-  const selectedPaymentMode = paymentMode;
-  const addonsForPdf = b.addons || [];
-
-  const isAddonPaid =
-    addonsForPdf.length > 0 &&
-    addonsForPdf.every((a) => a.paid === 1);
-
+  const addons = b.addons || [];
+  const isAddonPaid = addons.length > 0 && addons.every((a) => a.paid === 1);
   const isCancelled = b.status === "cancelled";
 
   const ci = b.actual_checkin
     ? new Date(b.actual_checkin).toLocaleString("en-IN")
     : b.check_in_date?.slice(0, 10);
-
   const co = b.actual_checkout
     ? new Date(b.actual_checkout).toLocaleString("en-IN")
     : b.check_out_date?.slice(0, 10);
 
   const nights =
     b.check_in_date && b.check_out_date
-      ? Math.ceil(
-          (new Date(b.check_out_date) -
-            new Date(b.check_in_date)) /
-            86400000,
+      ? Math.max(
+          1,
+          Math.ceil(
+            (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
+          ),
         )
       : 1;
 
+  /* ── amounts ─────────────────────────────────────────────────────────── */
   const basePrice = Number(b.total_price || 0);
+  const roomGst = Math.round(basePrice * GST_RATE * 100) / 100;
+  const roomTotal = Math.round((basePrice + roomGst) * 100) / 100;
 
-  const roomGstPdf =
-    Math.round(basePrice * GST_RATE * 100) / 100;
+  const advancePaid = Number(b.advance_paid || 0);
+  const balancePaid = Number(b.balance_paid || 0);
+  const paymentTotal = Number(b.total_amount || b.final_total || roomTotal);
 
-  const roomTotalPdf =
-    Math.round((basePrice + roomGstPdf) * 100) / 100;
-
-  const advancePaidPdf = Number(b.advance_paid || 0);
-  const balancePaidPdf = Number(b.balance_paid || 0);
-
-  const paymentTotalPdf = Number(
-    b.total_amount ||
-      b.final_total ||
-      roomTotalPdf,
-  );
-
-  // Room booking remaining balance
-  const roomRemainingPdf = Math.max(
+  const roomRemaining = Math.max(
     0,
-    Math.round(
-      (paymentTotalPdf -
-        advancePaidPdf -
-        balancePaidPdf) *
-        100,
-    ) / 100,
+    Math.round((paymentTotal - advancePaid - balancePaid) * 100) / 100,
   );
 
-  // Add-ons
-  const addonTotalPdf = Number(
-    b.addon_charges || 0,
-  );
+  const addonTotal = Number(b.addon_charges || 0);
+  const addonGst = Math.round(addonTotal * GST_RATE * 100) / 100;
 
-  const addonGstPdf =
-    Math.round(addonTotalPdf * GST_RATE * 100) /
-    100;
+  const unpaidAddonTotal = addons
+    .filter((a) => a.paid !== 1)
+    .reduce((s, a) => s + Number(a.amount || 0), 0);
+  const unpaidAddonGst = Math.round(unpaidAddonTotal * GST_RATE * 100) / 100;
 
-  // Only unpaid add-ons
-  const unpaidAddonTotalPdf =
-    (b.addons || [])
-      .filter((addon) => addon.paid !== 1)
-      .reduce(
-        (sum, addon) =>
-          sum + Number(addon.amount || 0),
-        0,
-      );
+  const remaining =
+    Math.round((roomRemaining + unpaidAddonTotal + unpaidAddonGst) * 100) / 100;
+  const grandTotal =
+    Math.round((paymentTotal + addonTotal + addonGst) * 100) / 100;
 
-  const unpaidAddonGstPdf =
-    Math.round(
-      unpaidAddonTotalPdf * GST_RATE * 100,
-    ) / 100;
-
-  // Final remaining amount
-  const remainingPdf =
-    Math.round(
-      (roomRemainingPdf +
-        unpaidAddonTotalPdf +
-        unpaidAddonGstPdf) *
-        100,
-    ) / 100;
-
-  // Grand total
-  const grandTotalPdf =
-    Math.round(
-      (paymentTotalPdf +
-        addonTotalPdf +
-        addonGstPdf) *
-        100,
-    ) / 100;
-
-  const invNo = `INV-${String(
-    b.booking_id,
-  ).padStart(5, "0")}`;
-
-  const today = new Date().toLocaleDateString(
-    "en-IN",
-    {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    },
-  );
+  const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
+  const today = new Date().toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
   const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
 
-  const doc = new jsPDF({
-    unit: "mm",
-    format: "a4",
-  });
+  let y = 0;
+  let page = 1;
 
-  const W = 210;
-  const L = 18;
-  const R = W - 18;
+  /* ── greyscale helpers ───────────────────────────────────────────────── */
+  const ink = (g) => doc.setTextColor(g, g, g); // 0 = black, 130 = grey
+  const stroke = (g, w = 0.2) => {
+    doc.setDrawColor(g, g, g);
+    doc.setLineWidth(w);
+  };
 
-  // =====================================================
-  // PAGE BORDER
-  // =====================================================
+  /* ── page management ─────────────────────────────────────────────────── */
+  function pageHeader(continuation) {
+    doc.setFont("times", "bold");
+    doc.setFontSize(continuation ? 12 : 17);
+    ink(0);
+    doc.text("VV GRAND PARK", L, continuation ? 14 : 16);
 
-  doc.setFillColor(255, 255, 255);
-  doc.rect(0, 0, W, 297, "F");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.5);
+    ink(110);
+    doc.text("RESIDENCY", L, continuation ? 18 : 21);
 
-  doc.setDrawColor(201, 168, 76);
-  doc.setLineWidth(0.45);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(continuation ? 11 : 17);
+    ink(0);
+    doc.text("INVOICE", R, continuation ? 14 : 16, { align: "right" });
 
-  doc.rect(
-    8,
-    8,
-    W - 16,
-    281,
-    "S",
-  );
-
-  // =====================================================
-  // HEADER - COMPACT
-  // =====================================================
-
-  doc.setFont("times", "bold");
-  doc.setFontSize(14);
-  doc.setTextColor(120, 90, 35);
-
-  doc.text(
-    "VV GRAND PARK",
-    L,
-    15,
-  );
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(5.8);
-  doc.setTextColor(120, 100, 70);
-
-  doc.text(
-    "RESIDENCY",
-    L + 17,
-    20,
-  );
-
-  // Small decorative line
-  doc.setDrawColor(201, 168, 76);
-  doc.setLineWidth(0.25);
-
-  doc.line(
-    L,
-    22,
-    L + 52,
-    22,
-  );
-
-  // Invoice heading
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.setTextColor(25, 25, 25);
-
-  doc.text(
-    "INVOICE",
-    R,
-    14,
-    {
-      align: "right",
-    },
-  );
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(6.5);
-  doc.setTextColor(90, 90, 90);
-
-  doc.text(
-    invNo,
-    R,
-    19,
-    {
-      align: "right",
-    },
-  );
-
-  doc.text(
-    `Date: ${today}`,
-    R,
-    23,
-    {
-      align: "right",
-    },
-  );
-
-  // Header separator
-  doc.setDrawColor(201, 168, 76);
-  doc.setLineWidth(0.3);
-
-  doc.line(
-    L,
-    28,
-    R,
-    28,
-  );
-
-  // =====================================================
-  // BILL TO / FROM - COMPACT
-  // =====================================================
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(6.2);
-  doc.setTextColor(130, 130, 130);
-
-  doc.text(
-    "BILL TO",
-    L,
-    35,
-  );
-
-  doc.text(
-    "FROM",
-    W / 2 + 8,
-    35,
-  );
-
-  // Guest name
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.setTextColor(20, 25, 30);
-
-  doc.text(
-    b.guest_name || "Guest",
-    L,
-    41,
-  );
-
-  // Guest details
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(6.5);
-  doc.setTextColor(75, 80, 85);
-
-  if (b.email) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    ink(90);
     doc.text(
-      b.email,
-      L,
-      46,
+      continuation ? `${invNo} — page ${page}` : invNo,
+      R,
+      continuation ? 18 : 21,
+      { align: "right" },
     );
+    if (!continuation) doc.text(`Date: ${today}`, R, 26, { align: "right" });
+
+    const rule = continuation ? 22 : 30;
+    stroke(0, 0.5);
+    doc.line(L, rule, R, rule);
+    return rule + (continuation ? 8 : 10);
   }
 
+  function newPage() {
+    doc.addPage();
+    page += 1;
+    y = pageHeader(true);
+  }
+
+  // reserve `need` mm; break to a new page if it will not fit
+  function ensure(need) {
+    if (y + need > BOTTOM) newPage();
+  }
+
+  /* ── header ──────────────────────────────────────────────────────────── */
+  y = pageHeader(false);
+
+  /* ── bill to / from ──────────────────────────────────────────────────── */
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  ink(110);
+  doc.text("BILL TO", L, y);
+  doc.text("FROM", W / 2 + 8, y);
+  y += 7;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  ink(0);
+  doc.text(b.guest_name || "Guest", L, y);
+  doc.text("VV Grand Park Residency", W / 2 + 8, y);
+  y += 6;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  ink(70);
+  // long emails wrap instead of colliding with the FROM column
+  const emailLines = doc.splitTextToSize(b.email || "", W / 2 - L - 12);
+  doc.text(emailLines, L, y);
+  doc.text("vvgrandpark.com", W / 2 + 8, y);
+
+  let leftY = y + emailLines.length * 4;
   if (b.phone) {
-    doc.text(
-      b.phone,
-      L,
-      51,
-    );
+    doc.text(String(b.phone), L, leftY);
+    leftY += 4;
+  }
+  doc.text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", W / 2 + 8, y + 6);
+  doc.text("+91 93849 82510 | vvgrandpark@gmail.com", W / 2 + 8, y + 12);
+
+  y = Math.max(leftY, y + 16) + 6;
+
+  /* ── line-item table ─────────────────────────────────────────────────── */
+  function tableHead() {
+    stroke(0, 0.3);
+    doc.rect(L, y, R - L, 8); // bordered header, no fill
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    ink(0);
+    doc.text("DESCRIPTION", C_DESC, y + 5.3);
+    doc.text("DETAILS", C_DETAIL, y + 5.3);
+    doc.text("AMOUNT", R - 3, y + 5.3, { align: "right" });
+    y += 8;
   }
 
-  // Hotel details
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.setTextColor(20, 25, 30);
+  // one row, wrapping both text columns and growing to fit
+  function tableRow(desc, detail, amount, bold) {
+    const dLines = doc.splitTextToSize(String(desc ?? ""), C_DESC_W);
+    const tLines = doc.splitTextToSize(String(detail ?? ""), C_DETAIL_W);
+    const rows = Math.max(dLines.length, tLines.length);
+    const h = Math.max(8, rows * 4 + 4);
 
-  doc.text(
-    "VV Grand Park Residency",
-    W / 2 + 8,
-    41,
-  );
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(6.5);
-  doc.setTextColor(75, 80, 85);
-
-  doc.text(
-    "vvgrandpark.com",
-    W / 2 + 8,
-    46,
-  );
-
-  doc.text(
-    "3/4/D, Thanjai Saalai, Thiruvarur - 610004",
-    W / 2 + 8,
-    51,
-  );
-
-  doc.text(
-    "+91 93849 82510 | vvgrandpark@gmail.com",
-    W / 2 + 8,
-    56,
-  );
-
-  // =====================================================
-  // MAIN TABLE
-  // =====================================================
-
-  const tableTop = 63;
-
-  doc.setDrawColor(201, 168, 76);
-  doc.setLineWidth(0.35);
-
-  doc.roundedRect(
-    L,
-    tableTop,
-    W - 36,
-    8,
-    1.2,
-    1.2,
-    "S",
-  );
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(6.7);
-  doc.setTextColor(80, 70, 50);
-
-  doc.text(
-    "DESCRIPTION",
-    L + 4,
-    tableTop + 5.2,
-  );
-
-  doc.text(
-    "DETAILS",
-    108,
-    tableTop + 5.2,
-  );
-
-  doc.text(
-    "AMOUNT",
-    R,
-    tableTop + 5.2,
-    {
-      align: "right",
-    },
-  );
-
-  const rows = [
-    {
-      desc: `${b.room_type} — Room ${
-        b.room_number || b.room_id
-      }`,
-      detail: `${nights} night${
-        nights > 1 ? "s" : ""
-      }`,
-      amount: `Rs.${basePrice.toLocaleString()}`,
-    },
-
-    {
-      desc: "Check-in",
-      detail: ci,
-      amount: "—",
-    },
-
-    {
-      desc: "Check-out",
-      detail: co,
-      amount: "—",
-    },
-
-    ...(b.hours_spent
-      ? [
-          {
-            desc: "Hours Stayed",
-            detail: `${b.hours_spent} hrs`,
-            amount: "—",
-          },
-        ]
-      : []),
-
-    {
-      desc: "Guests",
-      detail: `${b.guest_count || 1}`,
-      amount: "—",
-    },
-  ];
-
-  let y = tableTop + 13;
-
-  rows.forEach((row, i) => {
-    if (i % 2 === 0) {
-      doc.setFillColor(
-        248,
-        249,
-        250,
-      );
-
-      doc.rect(
-        L,
-        y - 4.2,
-        W - 36,
-        6.5,
-        "F",
-      );
+    if (y + h > BOTTOM) {
+      newPage();
+      tableHead();
     }
 
-    doc.setFont(
-      "helvetica",
-      "normal",
-    );
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(8);
+    ink(0);
+    doc.text(dLines, C_DESC, y + 5);
+    ink(70);
+    doc.text(tLines, C_DETAIL, y + 5);
+    ink(0);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(amount), R - 3, y + 5, { align: "right" });
 
-    doc.setFontSize(7);
-
-    doc.setTextColor(
-      25,
-      25,
-      25,
-    );
-
-    doc.text(
-      row.desc,
-      L + 4,
-      y,
-    );
-
-    doc.setTextColor(
-      80,
-      80,
-      80,
-    );
-
-    doc.text(
-      String(row.detail),
-      108,
-      y,
-    );
-
-    doc.text(
-      row.amount,
-      R,
-      y,
-      {
-        align: "right",
-      },
-    );
-
-    y += 6.5;
-  });
-
-  // =====================================================
-  // ADD-ON CHARGES
-  // =====================================================
-
-  if (
-    b.addons &&
-    b.addons.length > 0
-  ) {
-    y += 1.5;
-
-    doc.setFillColor(
-      248,
-      249,
-      250,
-    );
-
-    doc.setDrawColor(
-      210,
-      210,
-      210,
-    );
-
-    doc.roundedRect(
-      L,
-      y - 4,
-      W - 36,
-      7,
-      1,
-      1,
-      "FD",
-    );
-
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
-    doc.setFontSize(6.7);
-
-    doc.setTextColor(
-      85,
-      85,
-      85,
-    );
-
-    doc.text(
-      "ADD-ON CHARGES",
-      L + 4,
-      y + 0.5,
-    );
-
-    y += 6;
-
-    b.addons.forEach(
-      (addon, i) => {
-        if (i % 2 === 0) {
-          doc.setFillColor(
-            250,
-            250,
-            250,
-          );
-
-          doc.rect(
-            L,
-            y - 4,
-            W - 36,
-            6,
-            "F",
-          );
-        }
-
-        doc.setFont(
-          "helvetica",
-          "normal",
-        );
-
-        doc.setFontSize(6.8);
-
-        doc.setTextColor(
-          30,
-          30,
-          30,
-        );
-
-        doc.text(
-          addon.label,
-          L + 4,
-          y,
-        );
-
-        doc.setTextColor(
-          90,
-          90,
-          90,
-        );
-
-        doc.text(
-          new Date(
-            addon.created_at,
-          ).toLocaleDateString(
-            "en-IN",
-          ),
-          108,
-          y,
-        );
-
-        doc.text(
-          `Rs.${Number(
-            addon.amount,
-          ).toLocaleString()}`,
-          R,
-          y,
-          {
-            align: "right",
-          },
-        );
-
-        y += 6;
-      },
-    );
+    y += h;
+    stroke(200, 0.15); // hairline separator instead of a filled band
+    doc.line(L, y, R, y);
   }
 
-  // =====================================================
-  // PAYMENT SECTION
-  // =====================================================
+  function sectionRow(label) {
+    if (y + 9 > BOTTOM) {
+      newPage();
+      tableHead();
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    ink(60);
+    doc.text(label, C_DESC, y + 5.5);
+    y += 8;
+    stroke(160, 0.2);
+    doc.line(L, y, R, y);
+  }
 
-  y += 4;
+  tableHead();
+  tableRow(
+    `${b.room_type} — Room ${b.room_number || b.room_id}`,
+    `${nights} night${nights > 1 ? "s" : ""}`,
+    money(basePrice),
+  );
+  tableRow("Check-in", ci, "—");
+  tableRow("Check-out", co, "—");
+  if (b.hours_spent) tableRow("Hours Stayed", `${b.hours_spent} hrs`, "—");
+  tableRow("Guests", `${b.guest_count || 1}`, "—");
 
-  doc.setDrawColor(
-    220,
-    220,
-    220,
+  if (addons.length) {
+    sectionRow("ADD-ON CHARGES");
+    addons.forEach((a) => {
+      tableRow(
+        a.label,
+        a.created_at ? new Date(a.created_at).toLocaleDateString("en-IN") : "",
+        money(a.amount),
+      );
+    });
+  }
+
+  /* ── summary ─────────────────────────────────────────────────────────── */
+  const SX = W - 92; // left edge of the summary column
+  ensure(70); // keep the whole summary block together
+  y += 8;
+
+  function sumHead(label) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.5);
+    ink(110);
+    doc.text(label, SX, y);
+    y += 5.5;
+  }
+
+  function sumRow(label, val) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    ink(90);
+    doc.text(label, SX, y);
+    doc.setFont("helvetica", "bold");
+    ink(20);
+    doc.text(val, R, y, { align: "right" });
+    y += 5.5;
+  }
+
+  // bordered emphasis row — reads clearly in black and white
+  function sumBox(label, val, dashed) {
+    stroke(0, dashed ? 0.2 : 0.4);
+    doc.rect(SX - 2, y - 4.2, R - SX + 2, 7.5);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    ink(0);
+    doc.text(label, SX, y);
+    doc.text(val, R - 2, y, { align: "right" });
+    y += 9;
+  }
+
+  sumHead("BOOKING PAYMENT");
+  sumRow("Room Charges", money(basePrice));
+  sumRow("GST (18%)", money(roomGst));
+  sumBox(
+    isCancelled ? "Refunded (Cancelled)" : "Amount Already Paid",
+    money(advancePaid + balancePaid),
   );
 
-  doc.setLineWidth(0.25);
+  // NOTE: the old version drew this heading at the same y as the box above,
+  // which is why the two lines overlapped on the printed invoice.
+  sumHead("ADD-ON CHARGES");
+  sumRow("Add-on Charges", money(addonTotal));
+  sumRow("GST on Add-ons (18%)", money(addonGst));
+  sumBox(isAddonPaid ? "Add-ons Paid" : "Remaining to Pay", money(remaining));
 
-  doc.line(
-    L,
-    y,
-    R,
-    y,
-  );
-
-  y += 4;
-
-  const SX = W - 90;
-
-  // Left heading
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
-  doc.setFontSize(6);
-
-  doc.setTextColor(
-    150,
-    150,
-    150,
-  );
-
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  ink(110);
   doc.text(
-    "BOOKING PAYMENT — ALREADY PAID",
-    L,
-    y,
-  );
-
-  // Right heading
-  doc.text(
-    "ADD-ON CHARGES",
+    `Payment Mode: ${payLabel}   Status: ${isAddonPaid || remaining <= 0 ? "PAID" : "PENDING"}`,
     SX,
     y,
   );
+  y += 7;
 
-  y += 5;
-
-  // Room payment
-  [
-    {
-      label: "Room Charges",
-      val: `Rs.${basePrice.toLocaleString()}`,
-    },
-
-    {
-      label: "GST (18%)",
-      val: `Rs.${Math.round(
-        roomGstPdf,
-      ).toLocaleString()}`,
-    },
-  ].forEach(
-    ({ label, val }) => {
-      doc.setFont(
-        "helvetica",
-        "normal",
-      );
-
-      doc.setFontSize(7);
-
-      doc.setTextColor(
-        110,
-        110,
-        110,
-      );
-
-      doc.text(
-        label,
-        SX,
-        y,
-      );
-
-      doc.setFont(
-        "helvetica",
-        "bold",
-      );
-
-      doc.setTextColor(
-        30,
-        30,
-        30,
-      );
-
-      doc.text(
-        val,
-        R,
-        y,
-        {
-          align: "right",
-        },
-      );
-
-      y += 5;
-    },
-  );
-
-  // Add-on payment
-  const addonStartY = y - 10;
-
-  [
-    {
-      label: "Add-on Charges",
-      val: `Rs.${addonTotalPdf.toLocaleString()}`,
-    },
-
-    {
-      label: "GST on Add-ons (18%)",
-      val: `Rs.${Math.round(
-        addonGstPdf,
-      ).toLocaleString()}`,
-    },
-  ].forEach(
-    ({ label, val }, index) => {
-      doc.setFont(
-        "helvetica",
-        "normal",
-      );
-
-      doc.setFontSize(7);
-
-      doc.setTextColor(
-        110,
-        110,
-        110,
-      );
-
-      doc.text(
-        label,
-        SX,
-        addonStartY +
-          index * 5,
-      );
-
-      doc.setFont(
-        "helvetica",
-        "bold",
-      );
-
-      doc.setTextColor(
-        30,
-        30,
-        30,
-      );
-
-      doc.text(
-        val,
-        R,
-        addonStartY +
-          index * 5,
-        {
-          align: "right",
-        },
-      );
-    },
-  );
-
-  // =====================================================
-  // AMOUNT ALREADY PAID
-  // =====================================================
-
-  const paidY = y + 1;
-
-  doc.setDrawColor(
-    isCancelled
-      ? 192
-      : 45,
-    isCancelled
-      ? 57
-      : 154,
-    isCancelled
-      ? 43
-      : 110,
-  );
-
-  doc.setLineWidth(0.35);
-
-  doc.roundedRect(
-    L,
-    paidY - 4,
-    92,
-    7,
-    1.2,
-    1.2,
-    "S",
-  );
-
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
+  // grand total: heavy border, black text
+  stroke(0, 0.8);
+  doc.rect(SX - 2, y, R - SX + 2, 15);
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
-
-  doc.setTextColor(
-    isCancelled
-      ? 192
-      : 45,
-    isCancelled
-      ? 57
-      : 154,
-    isCancelled
-      ? 43
-      : 110,
-  );
-
+  ink(60);
+  doc.text("GRAND TOTAL", (SX - 2 + R) / 2, y + 6, { align: "center" });
+  doc.setFontSize(12);
+  ink(0);
   doc.text(
-    isCancelled
-      ? "Refunded (Cancelled)"
-      : "Amount Already Paid",
-    L + 3,
-    paidY + 1,
+    isCancelled ? "Rs.0" : money(grandTotal),
+    (SX - 2 + R) / 2,
+    y + 12.5,
+    { align: "center" },
   );
+  y += 22;
 
-  doc.text(
-    `Rs.${Math.round(
-      advancePaidPdf +
-        balancePaidPdf,
-    ).toLocaleString()}`,
-    L + 89,
-    paidY + 1,
-    {
-      align: "right",
-    },
-  );
-
-  // =====================================================
-  // REMAINING TO PAY
-  // =====================================================
-
-
-
-  const remTxt = isAddonPaid
-    ? [45, 154, 110]
-    : [180, 120, 20];
-
-  doc.setDrawColor(
-    ...remTxt,
-  );
-
-  doc.setLineWidth(0.35);
-
-  doc.roundedRect(
-    SX - 1,
-    paidY - 4,
-    R - SX + 1,
-    7,
-    1.2,
-    1.2,
-    "S",
-  );
-
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
-  doc.setFontSize(7.5);
-
-  doc.setTextColor(
-    ...remTxt,
-  );
-
-  doc.text(
-    isAddonPaid
-      ? "Add-ons Paid"
-      : "Remaining to Pay",
-    SX + 2,
-    paidY + 1,
-  );
-
-  doc.text(
-    `Rs.${Math.round(
-      remainingPdf,
-    ).toLocaleString()}`,
-    R - 2,
-    paidY + 1,
-    {
-      align: "right",
-    },
-  );
-
-  y = paidY + 12;
-
-  // =====================================================
-  // PAYMENT MODE / STATUS
-  // =====================================================
-
-  doc.setFont(
-    "helvetica",
-    "normal",
-  );
-
-  doc.setFontSize(6.8);
-
-  doc.setTextColor(
-    110,
-    110,
-    110,
-  );
-
-  doc.text(
-    `Payment Mode: ${selectedPaymentMode}   Status: ${
-      isAddonPaid
-        ? "PAID"
-        : "PENDING"
-    }`,
-    L,
-    y,
-  );
-
-  // =====================================================
-  // GRAND TOTAL
-  // =====================================================
-
-  y += 5;
-
-  doc.setDrawColor(
-    201,
-    168,
-    76,
-  );
-
-  doc.setLineWidth(0.45);
-
-  doc.roundedRect(
-    SX - 1,
-    y,
-    R - SX + 1,
-    12,
-    1.5,
-    1.5,
-    "S",
-  );
-
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
-  doc.setFontSize(6.5);
-
-  doc.setTextColor(
-    80,
-    70,
-    50,
-  );
-
-  doc.text(
-    "GRAND TOTAL",
-    SX + 4,
-    y + 7,
-  );
-
-  doc.setFontSize(9.5);
-
-  doc.setTextColor(
-    20,
-    25,
-    30,
-  );
-
-  doc.text(
-    isCancelled
-      ? "Rs.0"
-      : `Rs.${Math.round(
-          grandTotalPdf,
-        ).toLocaleString()}`,
-    R - 3,
-    y + 7,
-    {
-      align: "right",
-    },
-  );
-
-  y += 17;
-
-  // =====================================================
-  // TERMS & CONDITIONS
-  // =====================================================
-
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
-  doc.setFontSize(6.8);
-
-  doc.setTextColor(
-    80,
-    80,
-    80,
-  );
-
-  doc.text(
-    "TERMS & CONDITIONS",
-    L,
-    y,
-  );
-
-  doc.setDrawColor(
-    201,
-    168,
-    76,
-  );
-
-  doc.setLineWidth(0.2);
-
-  doc.line(
-    L,
-    y + 2.5,
-    R,
-    y + 2.5,
-  );
-
-  y += 6;
-
+  /* ── terms & conditions ──────────────────────────────────────────────── */
   const terms = [
     "1. A valid government-issued photo ID must be presented at check-in.",
     "2. Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
@@ -1028,7 +353,6 @@ export async function printInvoicePdf(
     "8. Personal and identification data is processed in accordance with applicable data protection and privacy laws for purposes including booking management, guest services, payment processing, security, and legal or regulatory compliance.",
     "9. Payments are securely processed through Razorpay and its payment partners. The hotel does not store full card details. Personal data is not sold to third parties.",
     "10. Full Terms & Conditions, Privacy Policy, and Cancellation Policy are available at: https://vvgrandpark.com/policies",
-
     "11. Please verify the booking dates, room type, guest count, tariff, and contact details shown on this invoice and report any discrepancy promptly.",
     "12. Vehicle pickup and drop-off requests are subject to availability, applicable charges, and separate confirmation by the hotel.",
     "13. Guests are responsible for room keys/cards and hotel property provided during their stay. Reasonable charges may apply for loss or damage caused during the stay.",
@@ -1041,218 +365,97 @@ export async function printInvoicePdf(
     "20. This is an electronically generated invoice and does not require a physical signature where permitted under applicable law.",
   ];
 
-  doc.setFont(
-    "helvetica",
-    "normal",
-  );
+  const colW = (R - L - 6) / 2;
 
-  doc.setFontSize(5.1);
-
-  doc.setTextColor(
-    105,
-    105,
-    105,
-  );
-
-  const colWidth =
-    (R - L - 6) / 2;
-
-  const drawColumn = (
-    items,
-    x,
-    startY,
-  ) => {
-    let colY = startY;
-
-    items.forEach(
-      (term) => {
-        const lines =
-          doc.splitTextToSize(
-            term,
-            colWidth,
-          );
-
-        doc.text(
-          lines,
-          x,
-          colY,
-        );
-
-        colY +=
-          lines.length * 2.65 +
-          0.5;
-      },
+  // measure first so the block is never split across pages awkwardly
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(5.6);
+  const measure = (items) =>
+    items.reduce(
+      (h, t) => h + doc.splitTextToSize(t, colW).length * 3.1 + 1,
+      0,
     );
+  const termsHeight =
+    Math.max(measure(terms.slice(0, 10)), measure(terms.slice(10))) + 10;
 
-    return colY;
+  // terms may run closer to the page edge than body content, since the footer
+  // sits on whichever page they finish on
+  const TERMS_BOTTOM = 284;
+  if (y + termsHeight > TERMS_BOTTOM) newPage();
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  ink(60);
+  doc.text("TERMS & CONDITIONS", L, y);
+  stroke(0, 0.3);
+  doc.line(L, y + 2.5, R, y + 2.5);
+  y += 7;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(5.6);
+  ink(110);
+
+  const drawCol = (items, x, startY) => {
+    let cy = startY;
+    items.forEach((t) => {
+      const lines = doc.splitTextToSize(t, colW);
+      doc.text(lines, x, cy);
+      cy += lines.length * 3.1 + 1;
+    });
+    return cy;
   };
 
-  const leftEndY =
-    drawColumn(
-      terms.slice(0, 10),
-      L,
-      y,
-    );
-
-  const rightEndY =
-    drawColumn(
-      terms.slice(10),
-      L + colWidth + 6,
-      y,
-    );
-
   y = Math.max(
-    leftEndY,
-    rightEndY,
+    drawCol(terms.slice(0, 10), L, y),
+    drawCol(terms.slice(10), L + colW + 6, y),
   );
 
-  // =====================================================
-  // FOOTER
-  // =====================================================
-
-  // Keep footer safely inside A4
-  const footerY = Math.min(
-    Math.max(y + 4, 270),
-    274,
-  );
-
-  doc.setDrawColor(
-    201,
-    168,
-    76,
-  );
-
-  doc.setLineWidth(0.3);
-
-  doc.line(
-    L,
-    footerY,
-    R,
-    footerY,
-  );
-
-  doc.setFont(
-    "helvetica",
-    "italic",
-  );
-
-  doc.setFontSize(6.5);
-
-  doc.setTextColor(
-    134,
-    142,
-    150,
-  );
-
+  /* ── footer (last page only) ─────────────────────────────────────────── */
+  const footerY = Math.min(Math.max(278, y + 6), H - 16);
+  stroke(0, 0.3);
+  doc.line(L, footerY, R, footerY);
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(7.5);
+  ink(90);
   doc.text(
     "Thank you for choosing VV Grand Park Residency. We look forward to welcoming you again.",
     W / 2,
     footerY + 5,
-    {
-      align: "center",
-    },
+    { align: "center" },
   );
-
-  doc.setFont(
-    "helvetica",
-    "normal",
-  );
-
-  doc.setFontSize(6.5);
-
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
   doc.text(
-    "3/4/D, Thanjai Saalai, Thiruvarur - 610004",
+    "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510  |  vvgrandpark.com",
     W / 2,
     footerY + 10,
-    {
-      align: "center",
-    },
+    { align: "center" },
   );
 
-  doc.text(
-    "+91 93849 82510  |  vvgrandpark@gmail.com  |  vvgrandpark.com",
-    W / 2,
-    footerY + 15,
-    {
-      align: "center",
-    },
-  );
-
-  // =====================================================
-  // CANCELLED WATERMARK
-  // =====================================================
-
+  /* ── cancelled watermark ─────────────────────────────────────────────── */
   if (isCancelled) {
-    doc.saveGraphicsState();
-
-    doc.setGState(
-      new doc.GState({
-        opacity: 0.18,
-      }),
-    );
-
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
-    doc.setFontSize(60);
-
-    doc.setTextColor(
-      192,
-      57,
-      43,
-    );
-
-    doc.text(
-      "CANCELLED",
-      W / 2,
-      160,
-      {
-        align: "center",
-        angle: 30,
-      },
-    );
-
-    doc.restoreGraphicsState();
+    const total = doc.getNumberOfPages();
+    for (let p = 1; p <= total; p += 1) {
+      doc.setPage(p);
+      doc.saveGraphicsState();
+      doc.setGState(new doc.GState({ opacity: 0.12 }));
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(60);
+      ink(0);
+      doc.text("CANCELLED", W / 2, 160, { align: "center", angle: 30 });
+      doc.restoreGraphicsState();
+    }
   }
 
-  // =====================================================
-  // PRINT INVOICE
-  // =====================================================
-
+  /* ── print ───────────────────────────────────────────────────────────── */
   doc.autoPrint();
-
-  const pdfBlob =
-    doc.output("blob");
-
-  const pdfUrl =
-    URL.createObjectURL(
-      pdfBlob,
-    );
-
-  const printWindow =
-    window.open(
-      pdfUrl,
-      "_blank",
-    );
+  const pdfUrl = URL.createObjectURL(doc.output("blob"));
+  const printWindow = window.open(pdfUrl, "_blank");
 
   if (!printWindow) {
-    showToast(
-      "Please allow pop-ups to print the invoice.",
-      "error",
-    );
-
-    URL.revokeObjectURL(
-      pdfUrl,
-    );
-
+    showToast("Please allow pop-ups to print the invoice.", "error");
+    URL.revokeObjectURL(pdfUrl);
     return;
   }
-
-  setTimeout(() => {
-    URL.revokeObjectURL(
-      pdfUrl,
-    );
-  }, 60000);
+  setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
 }

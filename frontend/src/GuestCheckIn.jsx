@@ -27,6 +27,9 @@ const PAYMENT_METHODS = [
   "Bank Transfer",
 ];
 
+const MAX_ADULTS = 4;
+const MAX_CHILDREN = 2;
+
 const PRESET_ADDONS = ["Food & Beverages", "Laundry", "Extra Bed", "Room Service"];
 
 const money = (v) => `₹ ${Math.round(Number(v) || 0).toLocaleString("en-IN")}`;
@@ -177,6 +180,13 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
   const [children, setChildren] = useState(0);
   const [childRows, setChildRows] = useState([]);
   const [payMethod, setPayMethod] = useState("Online Payment");
+  const [now, setNow] = useState(Date.now());
+
+  // refresh the elapsed-time readout while the guest is still in the room
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   /* add-on state (used after check-in) */
   const [addonLabel, setAddonLabel] = useState("");
@@ -209,8 +219,13 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
         const savedAdults = saved.filter((g) => g.guest_type === "adult");
         const savedKids = saved.filter((g) => g.guest_type === "child");
 
-        const adultCount =
-          savedAdults.length || Number(data.adults_count) || Number(data.guest_count) || 1;
+        const adultCount = Math.min(
+          MAX_ADULTS,
+          Math.max(
+            1,
+            savedAdults.length || Number(data.adults_count) || Number(data.guest_count) || 1,
+          ),
+        );
         setAdults(adultCount);
         setAdultRows(
           Array.from({ length: adultCount }, (_, i) => ({
@@ -220,7 +235,10 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
           })),
         );
 
-        const kidCount = savedKids.length || Number(data.children_count) || 0;
+        const kidCount = Math.min(
+          MAX_CHILDREN,
+          Math.max(0, savedKids.length || Number(data.children_count) || 0),
+        );
         setChildren(kidCount);
         setChildRows(
           Array.from({ length: kidCount }, (_, i) => ({
@@ -242,15 +260,17 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
 
   /* keep name rows in sync with the counters */
   const changeAdults = (n) => {
-    setAdults(n);
+    const c = Math.min(MAX_ADULTS, Math.max(1, n));
+    setAdults(c);
     setAdultRows((prev) =>
-      Array.from({ length: n }, (_, i) => prev[i] ?? { name: "", age: "", gender: "" }),
+      Array.from({ length: c }, (_, i) => prev[i] ?? { name: "", age: "", gender: "" }),
     );
   };
   const changeChildren = (n) => {
-    setChildren(n);
+    const c = Math.min(MAX_CHILDREN, Math.max(0, n));
+    setChildren(c);
     setChildRows((prev) =>
-      Array.from({ length: n }, (_, i) => prev[i] ?? { name: "", age: "", gender: "" }),
+      Array.from({ length: c }, (_, i) => prev[i] ?? { name: "", age: "", gender: "" }),
     );
   };
 
@@ -438,6 +458,17 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
 
   const isCheckedIn = !!b.actual_checkin;
   const isCheckedOut = !!b.actual_checkout;
+
+  // elapsed stay: check-in → check-out, or check-in → now while in-house
+  let stayDuration = null;
+  if (isCheckedIn) {
+    const start = new Date(b.actual_checkin).getTime();
+    const end = isCheckedOut ? new Date(b.actual_checkout).getTime() : now;
+    const mins = Math.max(0, Math.floor((end - start) / 60000));
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    stayDuration = h > 0 ? `${h} hr ${m} min` : `${m} min`;
+  }
   const isCancelled = b.status === "cancelled";
   // guest details are final once the guest is checked in — only add-ons stay editable
   const locked = isCheckedIn || isCancelled || isCheckedOut;
@@ -490,25 +521,50 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
                 : "Complete the remaining details to check in"}
             </p>
           </div>
-          <span
-            className={`rounded-full px-2.5 py-1 text-[0.62rem] font-bold uppercase tracking-wide ${
-              isCancelled
-                ? "bg-red-50 text-red-600"
+          <div className="flex items-center gap-2">
+            {stayDuration && (
+              <span
+                className="flex items-center gap-1.5 rounded-full border border-navy/15 bg-navy/[0.04] px-3.5 py-1.5 text-[0.85rem] font-bold text-navy"
+                title={isCheckedOut ? "Total stay duration" : "Time since check-in"}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+                <span className="font-normal text-gray-500">
+                  {isCheckedOut ? "Stayed" : "In room"}
+                </span>
+                {stayDuration}
+              </span>
+            )}
+            <span
+              className={`rounded-full px-2.5 py-1 text-[0.62rem] font-bold uppercase tracking-wide ${
+                isCancelled
+                  ? "bg-red-50 text-red-600"
+                  : isCheckedOut
+                    ? "bg-blue-50 text-blue-600"
+                    : isCheckedIn
+                      ? "bg-amber-50 text-amber-700"
+                      : "bg-emerald-50 text-emerald-600"
+              }`}
+            >
+              {isCancelled
+                ? "Cancelled"
                 : isCheckedOut
-                  ? "bg-blue-50 text-blue-600"
+                  ? "Checked Out"
                   : isCheckedIn
-                    ? "bg-amber-50 text-amber-700"
-                    : "bg-emerald-50 text-emerald-600"
-            }`}
-          >
-            {isCancelled
-              ? "Cancelled"
-              : isCheckedOut
-                ? "Checked Out"
-                : isCheckedIn
-                  ? "Checked In"
-                  : "Confirmed"}
-          </span>
+                    ? "Checked In"
+                    : "Confirmed"}
+            </span>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -557,7 +613,7 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
               <label className="mb-1 block text-[0.7rem] font-semibold text-gray-500">
                 Number of Adults
               </label>
-              <Counter value={adults} onChange={changeAdults} min={1} disabled={locked} />
+              <Counter value={adults} onChange={changeAdults} min={1} max={MAX_ADULTS} disabled={locked} />
 
               <div className="mt-4">
                 <label className="mb-1.5 block text-[0.7rem] font-semibold text-gray-500">
@@ -633,21 +689,26 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
                     </div>
                   ))}
                 </div>
-                {!locked && (
-                  <button
-                    onClick={() => changeAdults(adults + 1)}
-                    className="mt-2 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-[0.74rem] font-semibold text-navy transition hover:bg-gray-50"
-                  >
-                    + Add Another Adult
-                  </button>
-                )}
+                {!locked &&
+                  (adults < MAX_ADULTS ? (
+                    <button
+                      onClick={() => changeAdults(adults + 1)}
+                      className="mt-2 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-[0.74rem] font-semibold text-navy transition hover:bg-gray-50"
+                    >
+                      + Add Another Adult
+                    </button>
+                  ) : (
+                    <div className="mt-2 text-[0.7rem] text-gray-400">
+                      Maximum {MAX_ADULTS} adults per booking.
+                    </div>
+                  ))}
               </div>
 
               <div className="mt-5">
                 <label className="mb-1 block text-[0.7rem] font-semibold text-gray-500">
                   Number of Children
                 </label>
-                <Counter value={children} onChange={changeChildren} min={0} disabled={locked} />
+                <Counter value={children} onChange={changeChildren} min={0} max={MAX_CHILDREN} disabled={locked} />
               </div>
 
               {children > 0 && (
@@ -721,14 +782,19 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
                       </div>
                     ))}
                   </div>
-                  {!locked && (
-                    <button
-                      onClick={() => changeChildren(children + 1)}
-                      className="mt-2 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-[0.74rem] font-semibold text-navy transition hover:bg-gray-50"
-                    >
-                      + Add Another Child
-                    </button>
-                  )}
+                  {!locked &&
+                    (children < MAX_CHILDREN ? (
+                      <button
+                        onClick={() => changeChildren(children + 1)}
+                        className="mt-2 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-[0.74rem] font-semibold text-navy transition hover:bg-gray-50"
+                      >
+                        + Add Another Child
+                      </button>
+                    ) : (
+                      <div className="mt-2 text-[0.7rem] text-gray-400">
+                        Maximum {MAX_CHILDREN} children per booking.
+                      </div>
+                    ))}
                 </div>
               )}
             </Card>
