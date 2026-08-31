@@ -177,7 +177,6 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
   const [children, setChildren] = useState(0);
   const [childRows, setChildRows] = useState([]);
   const [payMethod, setPayMethod] = useState("Online Payment");
-  const [editing, setEditing] = useState(false);
 
   /* add-on state (used after check-in) */
   const [addonLabel, setAddonLabel] = useState("");
@@ -294,31 +293,6 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
       return false;
     }
     return true;
-  }
-
-  // save guest details without checking in (used to correct details later)
-  async function saveDetails() {
-    if (!validate()) return;
-    setSaving(true);
-    try {
-      const payload = buildPayload();
-      const res = await apiFetch(`/api/bookings/${bookingId}/checkin-details`, {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not save details");
-      if (payload.guests.length && !(data.guests || []).length)
-        throw new Error("Guest details did not save — check the server logs");
-      toast("Guest details saved", "success");
-      setEditing(false);
-      fetchBooking();
-      onRefresh && onRefresh();
-    } catch (e) {
-      toast(e.message, "error");
-    } finally {
-      setSaving(false);
-    }
   }
 
   async function saveAndCheckIn() {
@@ -465,7 +439,8 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
   const isCheckedIn = !!b.actual_checkin;
   const isCheckedOut = !!b.actual_checkout;
   const isCancelled = b.status === "cancelled";
-  const locked = (isCheckedIn && !editing) || isCancelled || isCheckedOut;
+  // guest details are final once the guest is checked in — only add-ons stay editable
+  const locked = isCheckedIn || isCancelled || isCheckedOut;
 
   const fmtDate = (d) =>
     d
@@ -572,40 +547,10 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
 
             {/* Add Guests */}
             <Card icon={I.users} title="Add Guests" subtitle="Add members staying with you">
-              {isCheckedIn && !isCheckedOut && (
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2">
-                  <span className="text-[0.72rem] text-gray-500">
-                    {editing
-                      ? "Editing guest details — remember to save."
-                      : "Guest details are locked after check-in."}
-                  </span>
-                  {editing ? (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          setEditing(false);
-                          fetchBooking();
-                        }}
-                        className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-[0.74rem] font-semibold text-gray-600"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={saveDetails}
-                        disabled={saving}
-                        className="rounded-md bg-navy px-3 py-1.5 text-[0.74rem] font-bold text-gold disabled:opacity-60"
-                      >
-                        {saving ? "Saving..." : "Save Details"}
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setEditing(true)}
-                      className="rounded-md border border-navy px-3 py-1.5 text-[0.74rem] font-semibold text-navy transition hover:bg-navy hover:text-white"
-                    >
-                      Edit Details
-                    </button>
-                  )}
+              {isCheckedIn && (
+                <div className="mb-3 flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-[0.72rem] text-gray-500">
+                  <span className="text-gray-400">{I.info}</span>
+                  Guest details are locked after check-in.
                 </div>
               )}
 
@@ -864,15 +809,22 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
             {/* Payment */}
             <Card icon={I.card} title="Payment">
               <Field label="Payment Method">
-                <select
-                  value={payMethod}
-                  onChange={(e) => setPayMethod(e.target.value)}
-                  className={inputCls}
-                >
-                  {PAYMENT_METHODS.map((m) => (
-                    <option key={m}>{m}</option>
-                  ))}
-                </select>
+                {locked ? (
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5">
+                    <span className="text-[0.8rem] font-semibold text-navy">{payMethod}</span>
+                    <span className="text-[0.66rem] text-gray-400">Locked</span>
+                  </div>
+                ) : (
+                  <select
+                    value={payMethod}
+                    onChange={(e) => setPayMethod(e.target.value)}
+                    className={inputCls}
+                  >
+                    {PAYMENT_METHODS.map((m) => (
+                      <option key={m}>{m}</option>
+                    ))}
+                  </select>
+                )}
               </Field>
 
               <div className="mt-3 rounded-lg bg-gray-50 px-3.5 py-2.5">
