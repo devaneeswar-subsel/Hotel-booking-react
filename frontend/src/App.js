@@ -16,7 +16,13 @@ import ManagerDashboard from "./ManagerDashboard";
 import { XIcon, CheckIcon, BookingIcon, DownloadIcon } from "./Icons";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-
+import {
+  UserIcon,
+  SettingsIcon,
+  LogOutIcon,
+  ArrowRightIcon,
+  MenuIcon,
+} from "lucide-react";
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
 
@@ -535,9 +541,9 @@ function BookingModal({ room, user, onClose, showToast }) {
   }, [room.room_id]);
 
   // downloadInvoice stays unchanged — no CSS involved
-  async function downloadInvoice() {
-    if (!confirmedBooking) return;
-    const b = confirmedBooking;
+ async function downloadInvoice(booking) {
+  if (!booking) return;
+  const b = booking;
     const nights =
       b.check_in_date && b.check_out_date
         ? Math.ceil(
@@ -1357,7 +1363,7 @@ function AuthModal({ onClose, onLogin }) {
     </div>
   );
 }
-function BookingReceiptModal({ booking, onClose }) {
+function BookingReceiptModal({ booking, onClose, onDownloadInvoice }) {
   const nights =
     booking.check_in_date && booking.check_out_date
       ? Math.max(
@@ -1445,6 +1451,15 @@ function BookingReceiptModal({ booking, onClose }) {
               </span>
             </div>
           </div>
+            <div className="mt-4 flex gap-2">
+  <button
+    type="button"
+    onClick={() => onDownloadInvoice?.(booking)}
+    className="flex-1 rounded-lg bg-[var(--navy)] px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90"
+  >
+    ↓ Download Invoice
+  </button>
+</div>
 
           {booking.status === "confirmed" && (
             <p className="mt-4 flex items-center gap-1.5 text-[0.78rem] text-[var(--gray-600)]">
@@ -1462,31 +1477,52 @@ function BookingReceiptModal({ booking, onClose }) {
             hotel administration at least 48 hours before the scheduled check-in
             time.
           </p>
+        
         </div>
       </div>
     </div>
   );
 }
-function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
+function MyBookings({
+  user,
+  onLogout,
+  onAuthClick,
+  onNavigateToRooms,
+  showToast,
+    onDownloadInvoice,
+}) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reviewedBookings, setReviewedBookings] = useState([]);
   const [reviewBooking, setReviewBooking] = useState(null);
   const [receiptBooking, setReceiptBooking] = useState(null);
+const [visibleBookings, setVisibleBookings] = useState(5);
+  const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const fetchData = useCallback(() => {
+    if (!user?.user_id) return;
+
     setLoading(true);
+
     Promise.all([
       apiFetch(`/api/bookings/user/${user.user_id}`)
         .then((r) => r.json())
         .catch(() => []),
+
       apiFetch(`/api/reviews/user/${user.user_id}`)
         .then((r) => r.json())
         .catch(() => []),
     ])
       .then(([b, r]) => {
         setBookings(Array.isArray(b) ? b : []);
-        setReviewedBookings(Array.isArray(r) ? r.map((x) => x.booking_id) : []);
+
+        setReviewedBookings(
+          Array.isArray(r)
+            ? r.map((x) => x.booking_id)
+            : [],  
+        );
+        setVisibleBookings(5);
       })
       .finally(() => setLoading(false));
   }, [user]);
@@ -1495,22 +1531,37 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 30);
+    };
+
+    window.addEventListener("scroll", handleScroll);
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
   const statusConfig = {
     confirmed: {
       pill: "bg-emerald-100 text-emerald-800",
       dot: "bg-emerald-500",
       label: "Confirmed",
     },
+
     completed: {
       pill: "bg-blue-100 text-blue-800",
       dot: "bg-blue-500",
       label: "Completed",
     },
+
     cancelled: {
       pill: "bg-red-100 text-red-700",
       dot: "bg-red-500",
       label: "Cancelled",
     },
+
     pending: {
       pill: "bg-yellow-100 text-yellow-800",
       dot: "bg-yellow-400",
@@ -1520,13 +1571,17 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
 
   const getNights = (checkIn, checkOut) => {
     if (!checkIn || !checkOut) return null;
+
     const diff =
-      (new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24);
+      (new Date(checkOut) - new Date(checkIn)) /
+      (1000 * 60 * 60 * 24);
+
     return diff > 0 ? diff : null;
   };
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "";
+
     return new Date(dateStr).toLocaleDateString("en-IN", {
       day: "2-digit",
       month: "short",
@@ -1534,256 +1589,770 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
     });
   };
 
+ const navLinks = [
+  { label: "Home", id: "home", href: "/#home" },
+  { label: "Rooms", id: "rooms", href: "/#rooms" },
+  { label: "Facilities", id: "facilities", href: "/#facilities" },
+  { label: "Gallery", id: "gallery", href: "/#gallery" },
+  {
+    label: "Nearby Attractions",
+    id: "nearby-attractions",
+    href: "/#nearby-attractions",
+  },
+  { label: "Contact", id: "contact", href: "/#contact" },
+];
+  const scrollTo = (id) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+    setMenuOpen(false);
+  };
+   const handleSectionLink = (event, id) => {
+  event.preventDefault();
+  setMenuOpen(false);
+
+  if (window.location.pathname === "/") {
+    scrollTo(id);
+    window.history.pushState(null, "", `/#${id}`);
+  } else {
+    window.location.assign(`/#${id}`);
+  }
+};
   return (
-    <>
-      {/* ── Overlay ── */}
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(10,16,24,0.65)] backdrop-blur-sm"
-        onClick={(e) => e.target === e.currentTarget && onClose()}
+    <div className="min-h-screen bg-[#F7F8FA]">
+
+      {/* ── NAVBAR ── */}
+      <nav
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 50,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 3%",
+          height: 68,
+          background: scrolled ? "rgba(15,25,35,0.95)" : "transparent",
+          backdropFilter: scrolled ? "blur(12px)" : "none",
+          boxShadow: scrolled ? "0 2px 20px rgba(0,0,0,0.3)" : "none",
+          transition: "all 0.3s ease",
+          boxSizing: "border-box",
+          minWidth: 0,
+        }}
       >
-        {/* ── Modal shell ── */}
-        <div className="relative w-full max-w-[640px] max-h-[88vh] flex flex-col overflow-hidden rounded-[20px] bg-white shadow-2xl ring-1 ring-white/10">
-          {/* ── Header ── */}
-          <div className="relative flex-shrink-0 bg-gradient-to-br from-[#0F1923] to-[#1C2B3A] px-5 sm:px-7 pt-5 sm:pt-6 pb-5">
-            {/* Decorative glow */}
-            <div className="pointer-events-none absolute inset-y-0 right-0 w-44 rounded-tr-[20px] bg-[radial-gradient(ellipse_at_top_right,rgba(232,213,163,0.12)_0%,transparent_70%)]" />
+        {/* Logo — flex-shrink: 0 so it never squishes */}
+        <div
+          onClick={() => {
+  if (window.location.pathname === "/") {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else {
+    window.location.assign("/");
+  }
+}}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          <img
+            src="/logo.png"
+            alt="VV Grand Park"
+            style={{ height: 38, width: 38, objectFit: "contain" }}
+          />
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              lineHeight: 1.1,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: "0.88rem",
+                fontWeight: 700,
+                letterSpacing: 2,
+                color: "#fff",
+                whiteSpace: "nowrap",
+              }}
+            >
+              VV GRAND PARK
+            </span>
+            <span
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: "0.52rem",
+                letterSpacing: 3,
+                color: "var(--gold-light)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              RESIDENCY
+            </span>
+          </div>
+        </div>
 
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="mb-1 text-[0.7rem] font-bold uppercase tracking-[0.12em] text-[#E8D5A3] opacity-80">
-                  VV Grand Park
-                </p>
-                <h2 className="m-0 text-xl sm:text-[1.45rem] font-bold tracking-tight text-white">
-                  My Bookings
-                </h2>
-                {!loading && (
-                  <p className="mt-1 text-[0.78rem] text-white/40">
-                    {bookings.length === 0
-                      ? "No bookings yet"
-                      : `${bookings.length} booking${bookings.length > 1 ? "s" : ""} total`}
-                  </p>
-                )}
-              </div>
+        {/* Desktop Links — centered, flex-shrink allowed */}
+        <div
+          className="hero-nav-links"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 18,
+            flex: "1 1 auto",
+            justifyContent: "center",
+            minWidth: 0,
+          }}
+        >
+          {navLinks.map((link) => (
+            <a
+              key={link.label}
+              href={link.href}
+              onClick={(event) => handleSectionLink(event, link.id)}
+              style={{
+                cursor: "pointer",
+                fontSize: "0.78rem",
+                fontWeight: 500,
+                color: "rgba(255,255,255,0.75)",
+                padding: "4px 0",
+                textDecoration: "none",
+                transition: "color 0.3s",
+                whiteSpace: "nowrap",
+              }}
+              onMouseEnter={(e) => (e.target.style.color = "var(--gold-light)")}
+              onMouseLeave={(e) =>
+                (e.target.style.color = "rgba(255,255,255,0.75)")
+              }
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
 
-              <button
-                onClick={onClose}
-                className="flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-[10px] border border-white/[0.12] bg-white/[0.08] text-[1.1rem] leading-none text-white/60 transition-colors hover:bg-white/[0.15]"
+        {/* Actions — flex-shrink: 0 */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexShrink: 0,
+          }}
+        >
+          {user ? (
+            <>
+              <div
+                className="hero-nav-actions"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(255,255,255,0.05)",
+                  padding: "5px 10px",
+                  fontSize: "0.78rem",
+                  color: "#fff",
+                  whiteSpace: "nowrap",
+                }}
               >
-                ✕
+                <UserIcon size={13} color="rgba(255,255,255,0.7)" />
+                {user.name.split(" ")[0]}
+              </div>
+           <button
+  className="hero-nav-actions"
+  onClick={() => {
+    if (user.role === "admin") {
+      window.location.assign("/admin");
+    } else {
+      window.location.assign("/my-bookings");
+    }
+  }}
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 6,
+    padding: "6px 13px",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+    background:
+      user.role === "admin"
+        ? "var(--gold)"
+        : "rgba(255,255,255,0.05)",
+    color: user.role === "admin" ? "var(--navy)" : "#fff",
+    border:
+      user.role === "admin"
+        ? "none"
+        : "1px solid rgba(255,255,255,0.15)",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  }}
+>
+  {user.role === "admin" ? (
+    <SettingsIcon size={13} />
+  ) : (
+    <BookingIcon size={13} />
+  )}
+
+  {user.role === "admin" ? "Admin Panel" : "My Bookings"}
+</button>
+              <button
+                className="hero-nav-actions"
+                onClick={onLogout}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                <LogOutIcon size={13} />
               </button>
-            </div>
+            </>
+          ) : (
+            <button
+              className="hero-nav-actions"
+              onClick={onAuthClick}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                borderRadius: 6,
+                padding: "7px 18px",
+                fontSize: "0.78rem",
+                fontWeight: 500,
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.15)",
+                color: "#fff",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Sign In <ArrowRightIcon size={13} />
+            </button>
+          )}
+
+          {/* Hamburger */}
+          <button
+            className="hero-hamburger"
+            onClick={() => setMenuOpen(!menuOpen)}
+            style={{
+              display: "none",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 38,
+              height: 38,
+              borderRadius: 6,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.15)",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            {menuOpen ? <XIcon size={20} /> : <MenuIcon size={20} />}
+          </button>
+        </div>
+      </nav>
+
+      {/* ── MOBILE MENU ── */}
+      <div
+        style={{
+          position: "fixed",
+          top: 68,
+          left: 0,
+          right: 0,
+          zIndex: 40,
+          background: "var(--navy)",
+          maxHeight: menuOpen ? 500 : 0,
+          overflow: "hidden",
+          opacity: menuOpen ? 1 : 0,
+          transition: "all 0.3s ease",
+          borderTop: menuOpen ? "1px solid rgba(255,255,255,0.1)" : "none",
+          padding: menuOpen ? "20px 6%" : "0 6%",
+        }}
+      >
+        <span
+          style={{
+            display: "block",
+            fontFamily: "var(--font-display)",
+            fontSize: "0.75rem",
+            letterSpacing: 1,
+            color: "var(--gold-light)",
+            marginBottom: 12,
+          }}
+        >
+          VV GRAND PARK RESIDENCY
+        </span>
+        {navLinks.map((link) => (
+          <a
+            key={link.label}
+            href={link.href}
+            onClick={(event) => handleSectionLink(event, link.id)}
+            style={{
+              display: "block",
+              padding: "12px 0",
+              fontSize: "0.9rem",
+              color: "rgba(255,255,255,0.8)",
+              cursor: "pointer",
+              textDecoration: "none",
+              borderBottom: "1px solid rgba(255,255,255,0.05)",
+            }}
+          >
+            {link.label}
+          </a>
+        ))}
+        {user ? (
+          <>
+            <span
+  onClick={() => {
+    setMenuOpen(false);
+
+    if (user.role === "admin") {
+      window.location.assign("/admin");
+    } else {
+      window.location.assign("/my-bookings");
+    }
+  }}
+  style={{
+    display: "block",
+    padding: "12px 0",
+    fontSize: "0.9rem",
+    color: "rgba(255,255,255,0.8)",
+    cursor: "pointer",
+    borderBottom: "1px solid rgba(255,255,255,0.05)",
+  }}
+>
+  {user.role === "admin" ? "Admin Panel" : "My Bookings"}
+</span>
+            <span
+              onClick={() => {
+                onLogout();
+                setMenuOpen(false);
+              }}
+              style={{
+                display: "block",
+                padding: "12px 0",
+                fontSize: "0.9rem",
+                color: "#fca5a5",
+                cursor: "pointer",
+              }}
+            >
+              Sign Out
+            </span>
+          </>
+        ) : (
+          <span
+            onClick={() => {
+              onAuthClick();
+              setMenuOpen(false);
+            }}
+            style={{
+              display: "block",
+              padding: "12px 0",
+              fontSize: "0.9rem",
+              color: "var(--gold-light)",
+              cursor: "pointer",
+            }}
+          >
+            Sign In
+          </span>
+        )}
+      </div>
+
+      {/* =========================================================
+          PAGE HERO
+      ========================================================= */}
+
+      <section
+        className="pt-[68px]"
+        style={{
+          background:
+            "linear-gradient(135deg,#0F1923 0%,#1C2B3A 100%)",
+        }}
+      >
+        <div className="mx-auto max-w-6xl px-5 sm:px-8 py-12 sm:py-16">
+          <p className="mb-2 text-[0.7rem] font-bold uppercase tracking-[0.18em] text-[#E8D5A3]">
+            VV Grand Park Residency
+          </p>
+
+          <h1 className="m-0 text-3xl sm:text-4xl font-bold tracking-tight text-white">
+            My Bookings
+          </h1>
+
+          <p className="mt-2 max-w-xl text-sm sm:text-base text-white/50">
+            View and manage your hotel reservations,
+            booking details and reviews.
+          </p>
+        </div>
+      </section>
+
+      {/* =========================================================
+          BOOKING CONTENT
+      ========================================================= */}
+
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
+
+        {/* Page heading */}
+
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+          <div>
+            <h2 className="m-0 text-xl sm:text-2xl font-bold text-[#0F1923]">
+              Your Reservations
+            </h2>
+
+            {!loading && bookings.length > 0 && (
+              <p className="mt-1 text-sm text-[#8A95A3]">
+                {bookings.length} booking
+                {bookings.length > 1 ? "s" : ""} total
+              </p>
+            )}
           </div>
 
-          {/* ── Body ── */}
-          <div className="flex-1 overflow-y-auto bg-[#F7F8FA] p-3 sm:p-4">
-            {loading ? (
-              /* Shimmer skeletons */
-              <div className="flex flex-col gap-3">
-                <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
-                {[1, 2].map((i) => (
-                  <div
-                    key={i}
-                    className="flex gap-3 sm:gap-3.5 rounded-[14px] border border-[#EAECEF] bg-white p-3 sm:p-4"
-                  >
-                    <div
-                      className="h-[80px] w-[80px] sm:h-[88px] sm:w-[88px] flex-shrink-0 rounded-[10px]"
-                      style={{
-                        background:
-                          "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
-                        backgroundSize: "200% 100%",
-                        animation: "shimmer 1.4s infinite",
-                      }}
-                    />
-                    <div className="flex flex-1 flex-col gap-2 justify-center">
-                      {[
-                        ["55%", "0s"],
-                        ["75%", "0.1s"],
-                        ["40%", "0.2s"],
-                      ].map(([w, delay], idx) => (
-                        <div
-                          key={idx}
-                          className="h-3 rounded"
-                          style={{
-                            width: w,
-                            background:
-                              "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
-                            backgroundSize: "200% 100%",
-                            animation: `shimmer 1.4s ${delay} infinite`,
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : bookings.length === 0 ? (
-              /* Empty state */
-              <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-                <div className="flex h-16 w-16 items-center justify-center rounded-[16px] bg-gradient-to-br from-[#EEF1F5] to-[#E4E8EF] text-[1.8rem]">
-                  🏨
-                </div>
-                <p className="m-0 text-base font-bold text-[#1C2B3A]">
-                  No bookings yet
-                </p>
-                <p className="m-0 max-w-[240px] text-[0.82rem] leading-relaxed text-[#8A95A3]">
-                  Ready for your next stay? Browse our rooms and make a
-                  reservation.
-                </p>
-                <button
-                  onClick={() => {
-                    onClose();
-                    onNavigateToRooms?.();
+          <button
+            onClick={() => onNavigateToRooms?.()}
+            className="self-start sm:self-auto rounded-xl bg-[#0F1923] px-4 py-2.5 text-sm font-bold text-[#E8D5A3] transition hover:opacity-90"
+          >
+            Browse Rooms →
+          </button>
+        </div>
+
+        {/* Loading */}
+
+        {loading ? (
+          <div className="grid gap-4">
+            <style>{`
+              @keyframes shimmer {
+                0% {
+                  background-position: 200% 0;
+                }
+                100% {
+                  background-position: -200% 0;
+                }
+              }
+            `}</style>
+
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="flex gap-4 rounded-2xl border border-[#EAECEF] bg-white p-4 shadow-sm"
+              >
+                <div
+                  className="h-[110px] w-[110px] flex-shrink-0 rounded-xl"
+                  style={{
+                    background:
+                      "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
+                    backgroundSize: "200% 100%",
+                    animation:
+                      "shimmer 1.4s infinite",
                   }}
-                  className="mt-2 cursor-pointer rounded-[10px] border-0 bg-[#0F1923] px-[22px] py-2.5 font-inherit text-[0.82rem] font-bold text-[#E8D5A3] transition-opacity hover:opacity-85"
-                >
-                  Browse Rooms →
-                </button>
+                />
+
+                <div className="flex flex-1 flex-col justify-center gap-3">
+                  <div
+                    className="h-3 w-1/2 rounded"
+                    style={{
+                      background:
+                        "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
+                      backgroundSize: "200% 100%",
+                      animation:
+                        "shimmer 1.4s infinite",
+                    }}
+                  />
+
+                  <div
+                    className="h-3 w-3/4 rounded"
+                    style={{
+                      background:
+                        "linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%)",
+                      backgroundSize: "200% 100%",
+                      animation:
+                        "shimmer 1.4s infinite",
+                    }}
+                  />
+                </div>
               </div>
-            ) : (
-              /* Booking cards */
-              <div className="flex flex-col gap-3">
-                {bookings.map((b) => {
-                  const cfg = statusConfig[b.status] || statusConfig.pending;
-                  const nights = getNights(b.check_in_date, b.check_out_date);
-                  const isReviewed = reviewedBookings.includes(b.booking_id);
-                  const canReview =
-                    (b.status === "confirmed" || b.status === "completed") &&
-                    !isReviewed;
+            ))}
+          </div>
+        ) : bookings.length === 0 ? (
 
-                  return (
-                    <div
-                      key={b.booking_id}
-                      className="group overflow-hidden rounded-[14px] border border-[#EAECEF] bg-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-lg"
-                    >
-                      {/* ── Clickable room section ── */}
-                      <div
-                        className="flex cursor-pointer"
-                        onClick={() => setReceiptBooking(b)}
-                        title="View booking details"
-                      >
-                        {/* Room image */}
-                        <div className="relative w-[100px] sm:w-[120px] flex-shrink-0">
-                          <img
-                            src={
-                              b.image_url ||
-                              "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=300"
-                            }
-                            alt={b.room_type}
-                            className="block h-full min-h-[100px] sm:min-h-[110px] w-full object-cover"
-                          />
-                          <div className="absolute inset-0 flex items-center justify-center bg-[rgba(15,25,35,0)] transition-colors duration-200 group-hover:bg-[rgba(15,25,35,0.35)]">
-                            <span className="rounded-lg bg-[rgba(15,25,35,0.7)] px-2.5 py-1 text-[0.72rem] font-bold text-white opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover:opacity-100">
-                              View Details →
-                            </span>
-                          </div>
-                        </div>
+          /* Empty state */
 
-                        {/* Info block */}
-                        <div className="flex-1 px-3 sm:px-4 py-3 sm:py-3.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <h4 className="m-0 text-[0.88rem] sm:text-[0.92rem] font-bold leading-snug text-[#0F1923]">
+          <div className="rounded-2xl border border-[#EAECEF] bg-white px-6 py-16 text-center shadow-sm">
+            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-[#EEF1F5] to-[#E4E8EF] text-4xl">
+              🏨
+            </div>
+
+            <h3 className="mt-5 text-lg font-bold text-[#1C2B3A]">
+              No bookings yet
+            </h3>
+
+            <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[#8A95A3]">
+              Ready for your next stay? Browse our rooms
+              and make a reservation.
+            </p>
+
+            <button
+              onClick={() => onNavigateToRooms?.()}
+              className="mt-5 rounded-xl bg-[#0F1923] px-6 py-3 text-sm font-bold text-[#E8D5A3] transition hover:opacity-90"
+            >
+              Browse Rooms →
+            </button>
+          </div>
+
+        ) : (
+
+          /* Booking cards */
+
+          <div className="grid gap-4">
+
+            {bookings.slice(0, visibleBookings).map((b) => {
+              const cfg =
+                statusConfig[b.status] ||
+                statusConfig.pending;
+
+              const nights = getNights(
+                b.check_in_date,
+                b.check_out_date,
+              );
+
+              const isReviewed =
+                reviewedBookings.includes(
+                  b.booking_id,
+                );
+
+              const canReview =
+                (b.status === "confirmed" ||
+                  b.status === "completed") &&
+                !isReviewed;
+
+              return (
+                <div
+                  key={b.booking_id}
+                  className="group overflow-hidden rounded-2xl border border-[#EAECEF] bg-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-lg"
+                >
+
+                  {/* Main booking */}
+
+                  <div
+                    className="flex cursor-pointer"
+                    onClick={() =>
+                      setReceiptBooking(b)
+                    }
+                  >
+
+                    {/* Image */}
+
+                    <div className="relative w-[110px] sm:w-[180px] md:w-[210px] flex-shrink-0">
+                      <img
+                        src={
+                          b.image_url ||
+                          "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=500"
+                        }
+                        alt={b.room_type}
+                        className="block h-full min-h-[150px] sm:min-h-[170px] w-full object-cover"
+                      />
+
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition group-hover:bg-black/30">
+                        <span className="rounded-lg bg-black/70 px-3 py-1.5 text-xs font-bold text-white opacity-0 transition group-hover:opacity-100">
+                          View Details →
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Info */}
+
+                    <div className="flex flex-1 flex-col justify-between p-4 sm:p-5">
+
+                      <div>
+                        <div className="flex items-start justify-between gap-3">
+
+                          <div>
+                            <p className="mb-1 text-[0.68rem] font-semibold uppercase tracking-wider text-[#8A95A3]">
+                              Room
+                            </p>
+
+                            <h3 className="m-0 text-base sm:text-lg font-bold text-[#0F1923]">
                               {b.room_type}
-                            </h4>
-                            <span
-                              className={`inline-flex flex-shrink-0 items-center gap-1 sm:gap-1.5 rounded-full px-2 sm:px-2.5 py-[3px] text-[0.65rem] sm:text-[0.68rem] font-bold tracking-wide ${cfg.pill}`}
-                            >
-                              <span
-                                className={`inline-block h-1.5 w-1.5 rounded-full ${cfg.dot}`}
-                              />
-                              {cfg.label}
-                            </span>
-                          </div>
+                            </h3>
 
-                          <div className="mt-2 flex flex-wrap items-center gap-1 sm:gap-1.5">
-                            <span className="rounded-[7px] bg-[#F0F3F7] px-2 sm:px-2.5 py-1 text-[0.68rem] sm:text-[0.72rem] font-semibold text-[#3A4A5C]">
-                              {formatDate(b.check_in_date)}
-                            </span>
-                            <span className="text-[0.75rem] text-[#B0B8C4]">
-                              →
-                            </span>
-                            <span className="rounded-[7px] bg-[#F0F3F7] px-2 sm:px-2.5 py-1 text-[0.68rem] sm:text-[0.72rem] font-semibold text-[#3A4A5C]">
-                              {formatDate(b.check_out_date)}
-                            </span>
-                            {nights && (
-                              <span className="text-[0.68rem] sm:text-[0.7rem] text-[#8A95A3]">
-                                · {nights}n
-                              </span>
+                            {b.room_number && (
+                              <p className="mt-1 text-xs text-[#8A95A3]">
+                                Room {b.room_number}
+                              </p>
                             )}
                           </div>
 
-                          <div className="mt-2 sm:mt-2.5 flex items-center justify-between">
-                            <div>
-                              <span className="text-[0.98rem] sm:text-[1.05rem] font-extrabold tracking-tight text-[#0F1923]">
-                                ₹
-                                {Number(
-                                  b.final_total || b.total_price,
-                                ).toLocaleString("en-IN")}
-                              </span>
-                              {nights && (
-                                <span className="ml-1 text-[0.68rem] sm:text-[0.7rem] text-[#8A95A3]">
-                                  total
-                                </span>
+                          <span
+                            className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.68rem] font-bold ${cfg.pill}`}
+                          >
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`}
+                            />
+
+                            {cfg.label}
+                          </span>
+                        </div>
+
+                        {/* Dates */}
+
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          <div className="rounded-lg bg-[#F0F3F7] px-3 py-2">
+                            <p className="m-0 text-[0.62rem] uppercase tracking-wide text-[#8A95A3]">
+                              Check-in
+                            </p>
+
+                            <p className="m-0 mt-0.5 text-xs font-bold text-[#3A4A5C]">
+                              {formatDate(
+                                b.check_in_date,
                               )}
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onClose();
-                                onNavigateToRooms?.(b.room_id);
-                              }}
-                              className="hidden sm:inline text-[0.7rem] font-semibold text-blue-700 hover:underline"
-                            >
-                              View room ↗
-                            </button>
+                            </p>
                           </div>
+
+                          <span className="text-[#B0B8C4]">
+                            →
+                          </span>
+
+                          <div className="rounded-lg bg-[#F0F3F7] px-3 py-2">
+                            <p className="m-0 text-[0.62rem] uppercase tracking-wide text-[#8A95A3]">
+                              Check-out
+                            </p>
+
+                            <p className="m-0 mt-0.5 text-xs font-bold text-[#3A4A5C]">
+                              {formatDate(
+                                b.check_out_date,
+                              )}
+                            </p>
+                          </div>
+
+                          {nights && (
+                            <span className="text-xs text-[#8A95A3]">
+                              {nights} night
+                              {nights > 1
+                                ? "s"
+                                : ""}
+                            </span>
+                          )}
                         </div>
                       </div>
 
-                      {/* ── Action footer ── */}
-                      {(b.status === "confirmed" ||
-                        canReview ||
-                        isReviewed) && (
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#F0F3F7] bg-[#FAFBFC] px-3 sm:px-3.5 py-2.5">
-                          {b.status === "confirmed" ? (
-                            <p className="m-0 flex items-center gap-1.5 text-[0.68rem] sm:text-[0.71rem] text-[#6B7785]">
-                              <span className="text-sm">📞</span>
-                              To cancel:{" "}
-                              <a
-                                href="tel:+919384982510"
-                                className="font-semibold text-blue-800 no-underline"
-                              >
-                                +91 93849 82510
-                              </a>
-                            </p>
-                          ) : (
-                            <div />
-                          )}
+                      {/* Price */}
 
-                          {canReview ? (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setReviewBooking(b);
-                              }}
-                              className="flex flex-shrink-0 cursor-pointer items-center gap-[5px] rounded-lg border-0 bg-[#0F1923] px-3 sm:px-4 py-[6px] sm:py-[7px] font-inherit text-[0.72rem] sm:text-[0.74rem] font-bold text-[#E8D5A3] transition-opacity hover:opacity-85"
-                            >
-                              ★ Write a Review
-                            </button>
-                          ) : isReviewed ? (
-                            <span className="flex flex-shrink-0 items-center gap-1 text-[0.72rem] font-bold text-emerald-600">
-                              ✅ Review submitted
-                            </span>
-                          ) : null}
+                      <div className="mt-4 flex items-center justify-between">
+
+                        <div>
+                          <span className="text-xl font-extrabold text-[#0F1923]">
+                            ₹
+                            {Number(
+                              b.final_total ||
+                                b.total_price,
+                            ).toLocaleString(
+                              "en-IN",
+                            )}
+                          </span>
+
+                          <span className="ml-1 text-xs text-[#8A95A3]">
+                            total
+                          </span>
                         </div>
-                      )}
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+
+                            onNavigateToRooms?.(
+                              b.room_id,
+                            );
+                          }}
+                          className="hidden sm:block text-xs font-semibold text-blue-700 hover:underline"
+                        >
+                          View room ↗
+                        </button>
+
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  </div>
+
+                  {/* Action footer */}
+
+                  {(b.status === "confirmed" ||
+                    canReview ||
+                    isReviewed) && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#F0F3F7] bg-[#FAFBFC] px-4 py-3">
+
+                      {b.status === "confirmed" ? (
+                        <p className="m-0 flex items-center gap-1.5 text-xs text-[#6B7785]">
+                          <span>📞</span>
+
+                          To cancel:
+
+                          <a
+                            href="tel:+919384982510"
+                            className="font-semibold text-blue-800 no-underline"
+                            onClick={(e) =>
+                              e.stopPropagation()
+                            }
+                          >
+                            +91 93849 82510
+                          </a>
+                        </p>
+                      ) : (
+                        <div />
+                      )}
+
+                      {canReview ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReviewBooking(b);
+                          }}
+                          className="flex cursor-pointer items-center gap-1.5 rounded-lg border-0 bg-[#0F1923] px-4 py-2 font-inherit text-xs font-bold text-[#E8D5A3] transition hover:opacity-85"
+                        >
+                          ★ Write a Review
+                        </button>
+                      ) : isReviewed ? (
+                        <span className="text-xs font-bold text-emerald-600">
+                          ✅ Review submitted
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        </div>
-      </div>
+        )}
+        {/* View More */}
+        {!loading && bookings.length > visibleBookings && (
+          <div className="mt-6 flex justify-center">
+            <button
+              onClick={() =>
+                setVisibleBookings((prev) =>
+                  Math.min(prev + 5, bookings.length)
+                )
+              }
+              className="rounded-xl border border-[#D9DEE5] bg-white px-6 py-3 text-sm font-bold text-[#0F1923] shadow-sm transition hover:border-[#0F1923] hover:bg-[#0F1923] hover:text-[#E8D5A3]"
+            >
+              View More
+            </button>
+          </div>
+        )}
+      </main>
+
+
+  <Footer/>
+
+
+      {/* =========================================================
+          REVIEW MODAL
+      ========================================================= */}
 
       {reviewBooking && (
         <WriteReviewModal
@@ -1794,13 +2363,21 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
           onReviewSubmitted={fetchData}
         />
       )}
+
+      {/* =========================================================
+          RECEIPT MODAL
+      ========================================================= */}
+
       {receiptBooking && (
-        <BookingReceiptModal
-          booking={receiptBooking}
-          onClose={() => setReceiptBooking(null)}
-        />
-      )}
-    </>
+  <BookingReceiptModal
+    booking={receiptBooking}
+    onClose={() => setReceiptBooking(null)}
+    onDownloadInvoice={(booking) => {
+      onDownloadInvoice?.(booking);
+    }}
+  />
+)}
+    </div>
   );
 }
 
@@ -1816,6 +2393,10 @@ export default function App() {
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [toast, setToast] = useState(null);
   const [availableRoomIds, setAvailableRoomIds] = useState(null);
+    const [currentPath, setCurrentPath] = useState(
+  window.location.pathname
+);
+
   // null = no filter active, [] = none available, [1,2,3] = filter active
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
@@ -1839,8 +2420,250 @@ export default function App() {
       })
       .catch(() => {})
       .finally(() => setAuthLoading(false));
-  }, [legalPolicy]);
 
+  }, [legalPolicy]);
+async function downloadInvoice(booking) {
+  if (!booking) return;
+
+    const nights = Math.max(
+      1,
+      Math.ceil(
+        (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
+          86400000,
+      ),
+    );
+    const roomCharges = Number(booking.total_price || 0);
+    const gst = Number(booking.gst_amount || Math.round(roomCharges * GST_RATE));
+    const total = Number(booking.final_total || roomCharges + gst);
+    const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
+    const guestName = booking.guest_name || user.name || "Guest";
+    const fileGuest = guestName.replace(/\s+/g, "_");
+    const displayDate = (value) =>
+      value
+        ? new Date(value).toLocaleDateString("en-IN", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          })
+        : "-";
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const textTop = (text, x, y, options = {}) => {
+      doc.text(text, x, y + doc.getFontSize() * 0.72, options);
+    };
+
+    doc.setFillColor("#0F1923");
+    doc.rect(0, 0, 595, 100, "F");
+
+    doc.setTextColor("#C9A84C");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    textTop("VV GRAND PARK", 50, 30);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    textTop("RESIDENCY", 50, 56);
+
+    doc.setTextColor("#ffffff");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    textTop("INVOICE", 545, 30, { align: "right" });
+    doc.setTextColor("#8B9298");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    textTop(invNo, 545, 56, { align: "right" });
+    doc.setFontSize(9);
+    textTop(
+      new Date().toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      }),
+      545,
+      72,
+      { align: "right" },
+    );
+
+    doc.setDrawColor("#C9A84C");
+    doc.setLineWidth(1);
+    doc.line(50, 115, 545, 115);
+
+    doc.setTextColor("#868E96");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    textTop("BILL TO", 50, 130);
+    doc.setTextColor("#0F1923");
+    doc.setFontSize(13);
+    textTop(guestName, 50, 145);
+    doc.setTextColor("#495057");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    textTop(booking.email || user.email || "", 50, 162);
+    if (booking.phone || user.phone) textTop(booking.phone || user.phone, 50, 175);
+
+    doc.setTextColor("#868E96");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    textTop("FROM", 350, 130);
+    doc.setTextColor("#0F1923");
+    doc.setFontSize(13);
+    textTop("VV Grand Park Residency", 350, 145);
+    doc.setTextColor("#495057");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    textTop("3/4/D, Thanjai Saalai, Thiruvarur - 610004", 350, 162);
+    textTop("+91 93849 82510 | vvgrandpark@gmail.com", 350, 175);
+
+    const tableTop = 210;
+    doc.setFillColor("#0F1923");
+    doc.rect(50, tableTop, 495, 25, "F");
+    doc.setTextColor("#C9A84C");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    textTop("DESCRIPTION", 60, tableTop + 8);
+    textTop("DETAILS", 280, tableTop + 8);
+    textTop("AMOUNT", 472.5, tableTop + 8, { align: "center" });
+
+    const tableRows = [
+      [
+        `${booking.room_type || "Room"} - Room ${
+          booking.room_number || booking.room_id
+        }`,
+        `${nights} night${nights > 1 ? "s" : ""}`,
+        `Rs.${roomCharges.toLocaleString()}`,
+      ],
+      ["Check-in", displayDate(booking.check_in_date), "-"],
+      ["Check-out", displayDate(booking.check_out_date), "-"],
+      ["Guests", String(booking.guest_count || 1), "-"],
+      ["Payment ID", booking.payment_id || "-", "-"],
+    ];
+
+    let y = tableTop + 30;
+    tableRows.forEach((row, index) => {
+      if (index % 2 === 0) {
+        doc.setFillColor("#F8F9FA");
+        doc.rect(50, y - 5, 495, 22, "F");
+      }
+      doc.setTextColor("#0F1923");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      textTop(row[0], 60, y);
+      textTop(row[1], 280, y);
+      textTop(row[2], 472.5, y, { align: "center" });
+      y += 22;
+    });
+
+    y += 15;
+    doc.setDrawColor("#E9ECEF");
+    doc.setLineWidth(0.5);
+    doc.line(50, y, 545, y);
+    y += 15;
+
+    [
+      ["Room Charges", `Rs.${roomCharges.toLocaleString()}`],
+      ["GST (18%)", `Rs.${Math.round(gst).toLocaleString()}`],
+    ].forEach(([label, value]) => {
+      doc.setTextColor("#868E96");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      textTop(label, 350, y);
+      doc.setTextColor("#0F1923");
+      doc.setFont("helvetica", "bold");
+      textTop(value, 472.5, y, { align: "center" });
+      y += 20;
+    });
+
+    y += 5;
+    doc.setFillColor("#0F1923");
+    doc.rect(350, y, 195, 36, "F");
+    doc.setTextColor("#C9A84C");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    textTop("TOTAL PAID", 360, y + 12);
+    doc.setTextColor("#ffffff");
+    doc.setFontSize(14);
+    textTop(`Rs.${Math.round(total).toLocaleString()}`, 472.5, y + 10, {
+      align: "center",
+    });
+
+    y += 60;
+    doc.setTextColor("#333333");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    textTop("TERMS & CONDITIONS", 50, y);
+    doc.setDrawColor("#C9A84C");
+    doc.setLineWidth(0.5);
+    doc.line(50, y + 11, 545, y + 11);
+    y += 18;
+
+    const terms = [
+      "1. A valid government-issued photo ID must be presented at check-in.",
+      "2. Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
+      "3. Early check-in and late check-out are subject to availability and may incur additional charges.",
+      "4. Pets, outside food and beverages, alcohol, and smoking are not permitted on the hotel premises.",
+      "5. Cancellations must be made at least 48 hours before the scheduled check-in time to be eligible for a refund, subject to the applicable booking rate and cancellation policy.",
+      "6. For no-shows or cancellations made within 48 hours of check-in, a cancellation charge equivalent to the first night's room tariff may apply, subject to the booking terms.",
+      "7. Eligible refunds will be processed to the original payment method within 5-7 working days. The actual credit time may vary depending on the bank or payment provider.",
+      "8. Personal and identification data is processed in accordance with applicable data protection and privacy laws for purposes including booking management, guest services, payment processing, security, and legal or regulatory compliance.",
+      "9. Payments are securely processed through Razorpay and its payment partners. The hotel does not store full card details. Personal data is not sold to third parties.",
+      "10. Full Terms & Conditions, Privacy Policy, and Cancellation Policy are available at: https://vvgrandpark.com/policies",
+      "11. Please verify the booking dates, room type, guest count, tariff, and contact details shown on this invoice and report any discrepancy promptly.",
+      "12. Vehicle pickup and drop-off requests are subject to availability, applicable charges, and separate confirmation by the hotel.",
+      "13. Guests are responsible for room keys/cards and hotel property provided during their stay. Reasonable charges may apply for loss or damage caused during the stay.",
+      "14. Hotel policies may be updated from time to time for legal, safety, or operational reasons. The terms applicable at the time of booking will generally apply to the reservation unless a change is required by applicable law or safety requirements.",
+      "15. For booking assistance or invoice corrections, please contact the hotel as soon as possible and preferably before check-in.",
+      "16. The room tariff does not include additional services or charges unless expressly included in the booking, including transport, minibar, laundry, unapproved extras, or charges for loss or damage to hotel property.",
+      "17. Visitors are permitted only with hotel approval and may be required to provide valid identification in accordance with hotel policy and applicable law.",
+      "18. All guests must comply with hotel quiet hours, safety instructions, and reasonable house rules during their stay.",
+      "19. Lost-property claims will be handled in accordance with hotel records, hotel policy, and applicable law.",
+      "20. This is an electronically generated invoice and does not require a physical signature where permitted under applicable law.",
+    ];
+    doc.setTextColor("#666666");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.2);
+    const termColumnWidth = 245;
+    const drawTermsColumn = (items, x, startY) => {
+      let termY = startY;
+      items.forEach((term) => {
+        const lines = doc.splitTextToSize(term, termColumnWidth);
+        lines.forEach((line, index) => {
+          textTop(line, x, termY + index * 7, { maxWidth: termColumnWidth });
+        });
+        termY += Math.max(7, lines.length * 7) + 1.5;
+      });
+      return termY;
+    };
+    const termsEndY = Math.max(
+      drawTermsColumn(terms.slice(0, 10), 50, y),
+      drawTermsColumn(terms.slice(10), 300, y),
+    );
+    const footerY = Math.max(775, termsEndY + 22);
+
+    doc.setDrawColor("#C9A84C");
+    doc.setLineWidth(0.5);
+    doc.line(50, footerY, 545, footerY);
+    const footerCenter = 297.5;
+    doc.setTextColor("#868E96");
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    textTop("Thank you for choosing VV Grand Park Residency!", footerCenter, footerY + 10, {
+      maxWidth: 495,
+      align: "center",
+    });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    textTop("vvgrandpark.com  |  bookings@vvgrandpark.com", footerCenter, footerY + 24, {
+      maxWidth: 495,
+      align: "center",
+    });
+    textTop(
+      "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510  |  vvgrandpark@gmail.com",
+      footerCenter,
+      footerY + 38,
+      { maxWidth: 495, align: "center" },
+    );
+
+    doc.save(`${invNo}-${fileGuest}.pdf`);
+  }
   useEffect(() => {
     if (legalPolicy || authLoading || !window.location.hash) return;
 
@@ -1865,6 +2688,18 @@ export default function App() {
       setShowAdmin(false);
     }
   }
+
+useEffect(() => {
+  const handlePopState = () => {
+    setCurrentPath(window.location.pathname);
+  };
+
+  window.addEventListener("popstate", handlePopState);
+
+  return () => {
+    window.removeEventListener("popstate", handlePopState);
+  };
+}, []);
 
   async function handleLogout() {
     await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
@@ -1978,6 +2813,49 @@ export default function App() {
       </>
     );
   }
+if (currentPath === "/my-bookings") {
+  return (
+    <>
+      <MyBookings
+        user={user}
+        onClose={() => setShowBookings(false)}
+        showToast={showToast}
+        onAuthClick={() => setShowAuth(true)}
+        onLogout={handleLogout}
+        onDownloadInvoice={downloadInvoice}
+        onNavigateToRooms={(roomId) => {
+          if (roomId) {
+            apiFetch(`/api/rooms/${roomId}`)
+              .then((r) => r.json())
+              .then((room) => {
+                if (room?.room_id) {
+                  setSelectedRoom(room);
+                }
+              })
+              .catch(() => {});
+          } else {
+            window.location.assign("/#rooms");
+          }
+        }}
+      />
+
+      {showAuth && (
+        <AuthModal
+          onClose={() => setShowAuth(false)}
+          onLogin={handleLogin}
+        />
+      )}
+
+      {toast && (
+        <Toast
+          msg={toast.msg}
+          type={toast.type}
+          onHide={() => setToast(null)}
+        />
+      )}
+    </>
+  );
+}
 
   return (
     <div style={{ overflowX: "hidden", width: "100%" }}>
@@ -2022,20 +2900,13 @@ export default function App() {
         <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
       )}
 
-      {bookingRoom && user && (
-        <BookingModal
-          room={bookingRoom}
-          user={user}
-          onClose={() => setBookingRoom(null)}
-          showToast={showToast}
-        />
-      )}
+   
 
       {showBookings &&
         user &&
         user.role !== "admin" &&
         user.role !== "manager" && (
-          <MyBookingsModal
+          <MyBookings
             user={user}
             onClose={() => setShowBookings(false)}
             showToast={showToast}
