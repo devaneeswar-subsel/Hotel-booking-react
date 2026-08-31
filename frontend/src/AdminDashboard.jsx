@@ -10,7 +10,6 @@ import {
   CalendarIcon,
   CheckIcon,
   XIcon,
-  DownloadIcon,
   UserIcon,
   SearchIcon,
   ArrowRightIcon,

@@ -181,7 +181,6 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
   );
 
   const total = Number(booking.final_total || basePrice + gst);
-
   return (
     <div className="modal-bg">
       <div className="modal max-w-[460px]">
@@ -322,17 +321,39 @@ function BookingSuccessRoute() {
   return (
     <div className="min-h-screen bg-[#F7F5F0] px-6 py-16">
       <div className="mx-auto max-w-lg rounded-2xl bg-white p-8 text-center shadow-xl">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border-2 border-[#2D9A6E] text-3xl text-[#2D9A6E]">✓</div>
-        <h1 className="mt-5 font-display text-2xl font-semibold text-[#0F1923]">Booking Confirmed!</h1>
-        <p className="mt-2 text-sm text-gray-500">Payment successful. Your room is reserved.</p>
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border-2 border-[#2D9A6E] text-3xl text-[#2D9A6E]">
+          ✓
+        </div>
+        <h1 className="mt-5 font-display text-2xl font-semibold text-[#0F1923]">
+          Booking Confirmed!
+        </h1>
+        <p className="mt-2 text-sm text-gray-500">
+          Payment successful. Your room is reserved.
+        </p>
         {booking && (
           <div className="mt-6 space-y-2 border-t border-gray-100 pt-5 text-sm text-gray-600">
-            <p>Booking ID: <strong className="text-[#0F1923]">#{booking.booking_id}</strong></p>
-            <p>{booking.room_type} · {booking.check_in_date?.slice(0, 10)} to {booking.check_out_date?.slice(0, 10)}</p>
-            <p className="text-base font-bold text-[#0F1923]">Total paid: Rs.{Math.round(Number(booking.final_total || 0)).toLocaleString("en-IN")}</p>
+            <p>
+              Booking ID:{" "}
+              <strong className="text-[#0F1923]">#{booking.booking_id}</strong>
+            </p>
+            <p>
+              {booking.room_type} · {booking.check_in_date?.slice(0, 10)} to{" "}
+              {booking.check_out_date?.slice(0, 10)}
+            </p>
+            <p className="text-base font-bold text-[#0F1923]">
+              Total paid: Rs.
+              {Math.round(Number(booking.final_total || 0)).toLocaleString(
+                "en-IN",
+              )}
+            </p>
           </div>
         )}
-        <button onClick={() => window.location.assign("/")} className="mt-7 w-full rounded-xl bg-[#0F1923] py-3 text-sm font-semibold text-white">Back to hotel</button>
+        <button
+          onClick={() => window.location.assign("/")}
+          className="mt-7 w-full rounded-xl bg-[#0F1923] py-3 text-sm font-semibold text-white"
+        >
+          Back to hotel
+        </button>
       </div>
     </div>
   );
@@ -451,68 +472,67 @@ function BookingModal({ room, user, onClose, showToast }) {
   // }
   //Greyout the dates that are already booked for the selected room. This is done by fetching the booked dates from the backend and storing them in the `bookedDates` state. The `useEffect` hook is used to load the booked dates whenever the `room.room_id` changes.
   function handleSubmit(e) {
-  e.preventDefault();
+    e.preventDefault();
 
-  if (nights <= 0) {
-    showToast("Check-out must be after check-in!", "error");
-    return;
+    if (nights <= 0) {
+      showToast("Check-out must be after check-in!", "error");
+      return;
+    }
+
+    const checkoutData = {
+      room,
+      user,
+      form,
+      nights,
+      basePrice,
+      gst,
+      roomTotal: total,
+    };
+
+    // refresh ஆனாலும் checkout data போகாமல் இருக்க
+    sessionStorage.setItem(
+      "vvgrandpark_checkout",
+      JSON.stringify(checkoutData),
+    );
+
+    window.location.assign("/checkout");
   }
-
-  const checkoutData = {
-    room,
-    user,
-    form,
-    nights,
-    basePrice,
-    gst,
-    roomTotal: total,
-  };
-
-  // refresh ஆனாலும் checkout data போகாமல் இருக்க
-  sessionStorage.setItem(
-    "vvgrandpark_checkout",
-    JSON.stringify(checkoutData)
-  );
-
-  window.location.assign("/checkout");
-}  
   const [occupiedNights, setOccupiedNights] = useState(new Set());
 
+  useEffect(() => {
+    async function loadBookedDates() {
+      try {
+        const res = await apiFetch(`/api/rooms/${room.room_id}/booked-dates`);
+        const data = await res.json();
 
-    useEffect(() => {
-      async function loadBookedDates() {
-        try {
-          const res = await apiFetch(`/api/rooms/${room.room_id}/booked-dates`);
-          const data = await res.json();
+        const nights = new Set();
+        data.forEach((booking) => {
+          const start = new Date(booking.check_in_date);
+          const end = new Date(booking.check_out_date);
+          let current = new Date(
+            start.getFullYear(),
+            start.getMonth(),
+            start.getDate(),
+          );
+          const last = new Date(
+            end.getFullYear(),
+            end.getMonth(),
+            end.getDate(),
+          );
+          // occupy nights from check-in up to (not including) check-out
+          while (current < last) {
+            nights.add(current.toDateString());
+            current.setDate(current.getDate() + 1);
+          }
+        });
 
-          const nights = new Set();
-          data.forEach((booking) => {
-            const start = new Date(booking.check_in_date);
-            const end = new Date(booking.check_out_date);
-            let current = new Date(
-              start.getFullYear(),
-              start.getMonth(),
-              start.getDate(),
-            );
-            const last = new Date(
-              end.getFullYear(),
-              end.getMonth(),
-              end.getDate(),
-            );
-            // occupy nights from check-in up to (not including) check-out
-            while (current < last) {
-              nights.add(current.toDateString());
-              current.setDate(current.getDate() + 1);
-            }
-          });
-
-          setOccupiedNights(nights);
-        } catch (err) {
-          console.error(err);
-        }
+        setOccupiedNights(nights);
+      } catch (err) {
+        console.error(err);
       }
-      loadBookedDates();
-    }, [room.room_id]);
+    }
+    loadBookedDates();
+  }, [room.room_id]);
 
   // downloadInvoice stays unchanged — no CSS involved
   async function downloadInvoice() {
@@ -908,13 +928,13 @@ function BookingModal({ room, user, onClose, showToast }) {
             )}
 
             {/* Submit */}
-           <button
-  type="submit"
-  disabled={nights <= 0}
-  className="w-full flex items-center justify-center gap-2 bg-navy text-white font-semibold text-sm py-3 rounded-xl hover:bg-navy/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
->
-  Confirm Booking
-</button>
+            <button
+              type="submit"
+              disabled={nights <= 0}
+              className="w-full flex items-center justify-center gap-2 bg-navy text-white font-semibold text-sm py-3 rounded-xl hover:bg-navy/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Confirm Booking
+            </button>
 
             {/* Security note */}
             <p className="flex items-center justify-center gap-1.5 text-[0.7rem] text-gray-400">
@@ -1337,11 +1357,122 @@ function AuthModal({ onClose, onLogin }) {
     </div>
   );
 }
+function BookingReceiptModal({ booking, onClose }) {
+  const nights =
+    booking.check_in_date && booking.check_out_date
+      ? Math.max(
+          1,
+          Math.ceil(
+            (new Date(booking.check_out_date) -
+              new Date(booking.check_in_date)) /
+              86400000,
+          ),
+        )
+      : 1;
+  const basePrice = Number(booking.total_price || 0);
+  const gst = Number(booking.gst_amount || Math.round(basePrice * GST_RATE));
+  const addonCharges = Number(booking.addon_charges || 0);
+  const total = Number(booking.final_total || basePrice + gst);
+  const statusPill =
+    {
+      confirmed: "bg-emerald-100 text-emerald-700",
+      completed: "bg-blue-100 text-blue-700",
+      cancelled: "bg-red-100 text-red-700",
+      pending: "bg-yellow-100 text-yellow-700",
+    }[booking.status] || "bg-gray-100 text-gray-700";
+
+  return (
+    <div
+      className="modal-bg"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="modal max-w-[440px]">
+        <div className="modal-header">
+          <h2>Booking Details</h2>
+          <button className="modal-close" onClick={onClose}>
+            <XIcon size={14} color="#495057" />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="mb-4 flex items-center justify-between">
+            <span className="font-[var(--font-display)] text-base font-semibold text-[var(--navy)]">
+              {booking.room_type}
+            </span>
+            <span
+              className={`rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase ${statusPill}`}
+            >
+              {booking.status}
+            </span>
+          </div>
+
+          <div className="bg-[var(--gray-50)] rounded-lg px-4 py-3">
+            {[
+              ["Booking ID", `#${booking.booking_id}`],
+              [
+                "Room",
+                `${booking.room_type} (Room ${booking.room_number || booking.room_id})`,
+              ],
+              ["Check-in", booking.check_in_date?.slice(0, 10)],
+              ["Check-out", booking.check_out_date?.slice(0, 10)],
+              ["Nights", nights],
+              ["Guests", booking.guest_count || 1],
+              ["Room Charges", `Rs.${basePrice.toLocaleString("en-IN")}`],
+              ...(addonCharges > 0
+                ? [
+                    [
+                      "Add-on Charges",
+                      `Rs.${addonCharges.toLocaleString("en-IN")}`,
+                    ],
+                  ]
+                : []),
+              ["GST (18%)", `Rs.${Math.round(gst).toLocaleString("en-IN")}`],
+              ["Payment ID", booking.payment_id || "-"],
+            ].map(([label, val]) => (
+              <div
+                key={label}
+                className="flex justify-between border-t border-[var(--gray-200)] py-[6px] text-[0.82rem] first:border-t-0"
+              >
+                <span className="text-[var(--gray-400)]">{label}</span>
+                <span className="font-semibold text-[var(--navy)]">{val}</span>
+              </div>
+            ))}
+            <div className="flex justify-between border-t-[1.5px] border-[var(--navy)] pt-2.5 mt-1 text-[0.95rem]">
+              <span className="font-[var(--font-display)] font-semibold text-[var(--navy)]">
+                {booking.status === "cancelled" ? "Refunded" : "Total Paid"}
+              </span>
+              <span className="font-[var(--font-display)] text-[1.1rem] font-bold text-[var(--navy)]">
+                Rs.{Math.round(total).toLocaleString("en-IN")}
+              </span>
+            </div>
+          </div>
+
+          {booking.status === "confirmed" && (
+            <p className="mt-4 flex items-center gap-1.5 text-[0.78rem] text-[var(--gray-600)]">
+              📞 To cancel, call{" "}
+              <a
+                href="tel:+919384982510"
+                className="font-semibold text-blue-800"
+              >
+                +91 93849 82510
+              </a>
+            </p>
+          )}
+          <p className="mt-4 flex items-center gap-1.5 text-[0.78rem] text-[var(--gray-600)]">
+            Cancellation Policy: To cancel your room booking, please contact the
+            hotel administration at least 48 hours before the scheduled check-in
+            time.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reviewedBookings, setReviewedBookings] = useState([]);
   const [reviewBooking, setReviewBooking] = useState(null);
+  const [receiptBooking, setReceiptBooking] = useState(null);
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -1527,11 +1658,8 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                       {/* ── Clickable room section ── */}
                       <div
                         className="flex cursor-pointer"
-                        onClick={() => {
-                          onClose();
-                          onNavigateToRooms?.(b.room_id);
-                        }}
-                        title="View this room"
+                        onClick={() => setReceiptBooking(b)}
+                        title="View booking details"
                       >
                         {/* Room image */}
                         <div className="relative w-[100px] sm:w-[120px] flex-shrink-0">
@@ -1543,10 +1671,9 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                             alt={b.room_type}
                             className="block h-full min-h-[100px] sm:min-h-[110px] w-full object-cover"
                           />
-                          {/* Hover overlay */}
                           <div className="absolute inset-0 flex items-center justify-center bg-[rgba(15,25,35,0)] transition-colors duration-200 group-hover:bg-[rgba(15,25,35,0.35)]">
                             <span className="rounded-lg bg-[rgba(15,25,35,0.7)] px-2.5 py-1 text-[0.72rem] font-bold text-white opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover:opacity-100">
-                              View Room →
+                              View Details →
                             </span>
                           </div>
                         </div>
@@ -1557,7 +1684,6 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                             <h4 className="m-0 text-[0.88rem] sm:text-[0.92rem] font-bold leading-snug text-[#0F1923]">
                               {b.room_type}
                             </h4>
-                            {/* Status pill */}
                             <span
                               className={`inline-flex flex-shrink-0 items-center gap-1 sm:gap-1.5 rounded-full px-2 sm:px-2.5 py-[3px] text-[0.65rem] sm:text-[0.68rem] font-bold tracking-wide ${cfg.pill}`}
                             >
@@ -1568,7 +1694,6 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                             </span>
                           </div>
 
-                          {/* Dates */}
                           <div className="mt-2 flex flex-wrap items-center gap-1 sm:gap-1.5">
                             <span className="rounded-[7px] bg-[#F0F3F7] px-2 sm:px-2.5 py-1 text-[0.68rem] sm:text-[0.72rem] font-semibold text-[#3A4A5C]">
                               {formatDate(b.check_in_date)}
@@ -1586,7 +1711,6 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                             )}
                           </div>
 
-                          {/* Price + hint */}
                           <div className="mt-2 sm:mt-2.5 flex items-center justify-between">
                             <div>
                               <span className="text-[0.98rem] sm:text-[1.05rem] font-extrabold tracking-tight text-[#0F1923]">
@@ -1601,9 +1725,16 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
                                 </span>
                               )}
                             </div>
-                            <span className="hidden sm:inline text-[0.7rem] text-[#C4CAD4]">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onClose();
+                                onNavigateToRooms?.(b.room_id);
+                              }}
+                              className="hidden sm:inline text-[0.7rem] font-semibold text-blue-700 hover:underline"
+                            >
                               View room ↗
-                            </span>
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -1661,6 +1792,12 @@ function MyBookingsModal({ user, onClose, showToast, onNavigateToRooms }) {
           onClose={() => setReviewBooking(null)}
           showToast={showToast}
           onReviewSubmitted={fetchData}
+        />
+      )}
+      {receiptBooking && (
+        <BookingReceiptModal
+          booking={receiptBooking}
+          onClose={() => setReceiptBooking(null)}
         />
       )}
     </>
