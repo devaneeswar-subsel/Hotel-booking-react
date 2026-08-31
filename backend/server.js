@@ -119,6 +119,12 @@ async function runMigrations() {
       "pickup_location VARCHAR(255) DEFAULT NULL",
       "dropoff_location VARCHAR(255) DEFAULT NULL",
       "notes TEXT DEFAULT NULL",
+      // ── guest check-in details ──
+      "id_proof_type VARCHAR(50) DEFAULT NULL",
+      "id_proof_number VARCHAR(60) DEFAULT NULL",
+      "adults_count INT DEFAULT NULL",
+      "children_count INT DEFAULT 0",
+      "checkin_payment_mode VARCHAR(40) DEFAULT NULL",
     ];
     for (const col of cols) {
       try {
@@ -133,6 +139,18 @@ async function runMigrations() {
         "ALTER TABLE booking_addons ADD COLUMN paid TINYINT DEFAULT 0",
       );
     } catch (e) {}
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS booking_guests (
+        guest_id INT AUTO_INCREMENT PRIMARY KEY,
+        booking_id INT NOT NULL,
+        guest_type VARCHAR(10) NOT NULL DEFAULT 'adult',
+        name VARCHAR(120) NOT NULL,
+        age INT DEFAULT NULL,
+        gender VARCHAR(20) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE
+      )`,
+    );
     await db.query(
       `CREATE TABLE IF NOT EXISTS reviews (review_id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, booking_id INT NOT NULL, room_id INT NOT NULL, rating INT NOT NULL, review_text TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE, FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE, FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE)`,
     );
@@ -2438,8 +2456,24 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
     if (!rows.length) return res.status(404).json({ error: "Booking not found" });
 
     const booking = rows[0];
-    const remaining = Number(booking.remaining_amount || 0);
     const currentBalancePaid = Number(booking.balance_paid || 0);
+    const advancePaid = Number(booking.advance_paid || 0);
+
+    // total the guest owes for the room booking
+    const roomWithGst =
+      Math.round(Number(booking.total_price || 0) * (1 + GST_RATE) * 100) / 100;
+    const totalAmount = Number(
+      booking.total_amount || booking.final_total || roomWithGst,
+    );
+
+    // trust the stored column, but fall back to the derived figure when it is
+    // stale (e.g. advance-only bookings that never wrote remaining_amount)
+    const storedRemaining = Number(booking.remaining_amount || 0);
+    const derivedRemaining = Math.max(
+      0,
+      Math.round((totalAmount - advancePaid - currentBalancePaid) * 100) / 100,
+    );
+    const remaining = storedRemaining > 0 ? storedRemaining : derivedRemaining;
     const newBalancePaid = currentBalancePaid + remaining;
 
     await db.query(
@@ -2460,14 +2494,107 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
   }
 });
 
+// ── shared check-in detail persistence ───────────────────────────────────────
+// Creates the table on demand so a missed migration can never silently drop
+// the guest list, and returns what was actually written so the caller can
+// verify it landed.
+async function saveCheckinDetails(bookingId, body = {}) {
+  const {
+    id_proof_type = null,
+    id_proof_number = null,
+    adults_count = null,
+    children_count = null,
+    payment_mode = null,
+    guests = null,
+  } = body || {};
+
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS booking_guests (
+      guest_id INT AUTO_INCREMENT PRIMARY KEY,
+      booking_id INT NOT NULL,
+      guest_type VARCHAR(10) NOT NULL DEFAULT 'adult',
+      name VARCHAR(120) NOT NULL,
+      age INT DEFAULT NULL,
+      gender VARCHAR(20) DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX (booking_id)
+    )`,
+  );
+
+  await db.query(
+    `UPDATE bookings
+       SET id_proof_type        = COALESCE(?, id_proof_type),
+           id_proof_number      = COALESCE(?, id_proof_number),
+           adults_count         = COALESCE(?, adults_count),
+           children_count       = COALESCE(?, children_count),
+           checkin_payment_mode = COALESCE(?, checkin_payment_mode)
+     WHERE booking_id = ?`,
+    [
+      id_proof_type,
+      id_proof_number,
+      adults_count,
+      children_count,
+      payment_mode,
+      bookingId,
+    ],
+  );
+
+  if (Array.isArray(guests)) {
+    await db.query("DELETE FROM booking_guests WHERE booking_id=?", [bookingId]);
+    for (const g of guests) {
+      if (!g || !String(g.name || "").trim()) continue;
+      const age =
+        g.age === undefined || g.age === null || g.age === "" ? null : Number(g.age);
+      await db.query(
+        `INSERT INTO booking_guests (booking_id, guest_type, name, age, gender)
+         VALUES (?,?,?,?,?)`,
+        [
+          bookingId,
+          g.guest_type === "child" ? "child" : "adult",
+          String(g.name).trim().slice(0, 120),
+          Number.isFinite(age) ? age : null,
+          g.gender || null,
+        ],
+      );
+    }
+  }
+
+  const [guestRows] = await db.query(
+    "SELECT * FROM booking_guests WHERE booking_id=? ORDER BY guest_id ASC",
+    [bookingId],
+  );
+  return guestRows;
+}
+
 app.patch("/api/bookings/:id/checkin", requireAdmin, async (req, res) => {
   try {
+    const bookingId = req.params.id;
     const now = new Date();
+
+    // save the guest details FIRST — if this fails we must not leave the
+    // booking marked as checked in with no details behind it
+    const guests = await saveCheckinDetails(bookingId, req.body);
+
     await db.query(
       "UPDATE bookings SET actual_checkin=?, status='confirmed' WHERE booking_id=?",
-      [now, req.params.id],
+      [now, bookingId],
     );
-    res.json({ message: "Checked in successfully", actual_checkin: now });
+
+    res.json({
+      message: "Checked in successfully",
+      actual_checkin: now,
+      guests,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Save / update check-in details without triggering the check-in itself
+app.put("/api/bookings/:id/checkin-details", requireAdmin, async (req, res) => {
+  try {
+    const guests = await saveCheckinDetails(req.params.id, req.body);
+    res.json({ message: "Check-in details saved", guests });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2735,7 +2862,11 @@ app.get("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
       "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at ASC",
       [req.params.id],
     );
-    res.json({ ...rows[0], addons });
+    const [guests] = await db.query(
+      "SELECT * FROM booking_guests WHERE booking_id=? ORDER BY guest_id ASC",
+      [req.params.id],
+    );
+    res.json({ ...rows[0], addons, guests });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

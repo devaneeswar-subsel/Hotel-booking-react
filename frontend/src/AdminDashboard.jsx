@@ -2626,6 +2626,9 @@ export default function AdminDashboard({
             key={id}
             onClick={() => {
               setBookingRoom(null);
+              // the check-in page is an overlay — close it, or it stays on top
+              // of whichever tab you navigate to
+              setSelectedBookingId(null);
               setTab(id);
               setSidebarOpen(false);
             }}

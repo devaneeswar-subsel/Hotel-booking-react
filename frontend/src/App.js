@@ -2709,6 +2709,12 @@ useEffect(() => {
     setShowManager(false);
     showToast("Logged out successfully", "success");
   }
+    // one place that decides where "My Bookings" goes, for every button
+  const goToMyBookings = () => {
+    if (user?.role === "admin") return window.location.assign("/admin");
+    if (user?.role === "manager") return setShowManager(true);
+    window.location.assign("/my-bookings");
+  };
 
   if (legalPolicy) {
     return <LegalPolicy policy={legalPolicy} />;
@@ -2863,7 +2869,7 @@ if (currentPath === "/my-bookings") {
         user={user}
         onAuthClick={() => setShowAuth(true)}
         onLogout={handleLogout}
-        onMyBookings={() =>
+             onMyBookings={() =>
           user?.role === "admin"
             ? setShowAdmin(true)
             : user?.role === "manager"
@@ -2902,7 +2908,7 @@ if (currentPath === "/my-bookings") {
 
    
 
-      {showBookings &&
+      {/* {showBookings &&
         user &&
         user.role !== "admin" &&
         user.role !== "manager" && (
@@ -2926,7 +2932,7 @@ if (currentPath === "/my-bookings") {
               }
             }}
           />
-        )}
+        )} */}
 
       {toast && (
         <Toast
@@ -2938,7 +2944,7 @@ if (currentPath === "/my-bookings") {
 
       {user && user.role !== "admin" && user.role !== "manager" && (
         <button
-          onClick={() => setShowBookings(true)}
+onClick={goToMyBookings}
           className="
             fixed
             bottom-7
