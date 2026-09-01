@@ -64,6 +64,159 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
     return () => clearInterval(interval);
   }, []);
 
+  // ── SEO: page metadata + Hotel structured data ──
+  useEffect(() => {
+    const title =
+      "VV Grand Park Residency | Luxury Hotel in Thiruvarur, Tamil Nadu";
+
+    const description =
+      "Stay at VV Grand Park Residency, a comfortable luxury hotel in Thiruvarur, Tamil Nadu. Explore well-appointed AC rooms, modern facilities, nearby temples and attractions, and book your stay directly online.";
+
+    const canonicalUrl = "https://www.vvgrandpark.com/";
+
+    document.title = title;
+
+    const upsertMeta = (selector, attributes) => {
+      let element = document.head.querySelector(selector);
+
+      if (!element) {
+        element = document.createElement("meta");
+        document.head.appendChild(element);
+      }
+
+      Object.entries(attributes).forEach(([key, value]) => {
+        element.setAttribute(key, value);
+      });
+    };
+
+    const upsertLink = (selector, attributes) => {
+      let element = document.head.querySelector(selector);
+
+      if (!element) {
+        element = document.createElement("link");
+        document.head.appendChild(element);
+      }
+
+      Object.entries(attributes).forEach(([key, value]) => {
+        element.setAttribute(key, value);
+      });
+    };
+
+    upsertMeta('meta[name="description"]', {
+      name: "description",
+      content: description,
+    });
+
+    upsertMeta('meta[name="robots"]', {
+      name: "robots",
+      content:
+        "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1",
+    });
+
+    upsertMeta('meta[name="theme-color"]', {
+      name: "theme-color",
+      content: "#0f1923",
+    });
+
+    upsertMeta('meta[property="og:type"]', {
+      property: "og:type",
+      content: "website",
+    });
+
+    upsertMeta('meta[property="og:title"]', {
+      property: "og:title",
+      content: title,
+    });
+
+    upsertMeta('meta[property="og:description"]', {
+      property: "og:description",
+      content: description,
+    });
+
+    upsertMeta('meta[property="og:url"]', {
+      property: "og:url",
+      content: canonicalUrl,
+    });
+
+    upsertMeta('meta[property="og:site_name"]', {
+      property: "og:site_name",
+      content: "VV Grand Park Residency",
+    });
+
+    upsertMeta('meta[property="og:image"]', {
+      property: "og:image",
+      content: `${canonicalUrl}hotel-hero.webp`,
+    });
+
+    upsertMeta('meta[name="twitter:card"]', {
+      name: "twitter:card",
+      content: "summary_large_image",
+    });
+
+    upsertMeta('meta[name="twitter:title"]', {
+      name: "twitter:title",
+      content: title,
+    });
+
+    upsertMeta('meta[name="twitter:description"]', {
+      name: "twitter:description",
+      content: description,
+    });
+
+    upsertMeta('meta[name="twitter:image"]', {
+      name: "twitter:image",
+      content: `${canonicalUrl}hotel-hero.webp`,
+    });
+
+    upsertLink('link[rel="canonical"]', {
+      rel: "canonical",
+      href: canonicalUrl,
+    });
+
+    let schemaScript = document.head.querySelector(
+      'script[data-vvgrandpark-schema="hotel"]'
+    );
+
+    if (!schemaScript) {
+      schemaScript = document.createElement("script");
+      schemaScript.type = "application/ld+json";
+      schemaScript.setAttribute(
+        "data-vvgrandpark-schema",
+        "hotel"
+      );
+      document.head.appendChild(schemaScript);
+    }
+
+    schemaScript.textContent = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Hotel",
+      "@id": `${canonicalUrl}#hotel`,
+      name: "VV Grand Park Residency",
+      url: canonicalUrl,
+      description,
+      image: [
+        `${canonicalUrl}hotel-hero.webp`,
+        `${canonicalUrl}logo.png`,
+      ],
+      areaServed: {
+        "@type": "City",
+        name: "Thiruvarur",
+      },
+      address: {
+        "@type": "PostalAddress",
+        addressLocality: "Thiruvarur",
+        addressRegion: "Tamil Nadu",
+        addressCountry: "IN",
+      },
+    });
+
+    return () => {
+      document.head
+        .querySelector('script[data-vvgrandpark-schema="hotel"]')
+        ?.remove();
+    };
+  }, []);
+
   const scrollTo = (id) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
     setMenuOpen(false);
@@ -113,7 +266,7 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
         >
           <img
             src="/logo.png"
-            alt="VV Grand Park"
+            alt="VV Grand Park Residency logo"
             style={{ height: 38, width: 38, objectFit: "contain" }}
           />
           <div
@@ -501,9 +654,9 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
               maxWidth: 600,
             }}
           >
-            Where Luxury
+            Luxury Hotel
             <br />
-            Meets
+            in Thiruvarur
             <br />
             <em
               style={{
@@ -530,9 +683,9 @@ export default function Hero({ user, onAuthClick, onLogout, onMyBookings }) {
               marginBottom: 28,
             }}
           >
-            Experience world-class hospitality at VV Grand Park Residency —
-            breathtaking views, curated amenities, and moments you'll carry
-            forever.
+            Experience comfortable hospitality at VV Grand Park Residency,
+            a luxury hotel in Thiruvarur, Tamil Nadu, with well-appointed AC rooms,
+            modern facilities, and convenient access to nearby temples and attractions.
           </motion.p>
 
           {/* Buttons */}

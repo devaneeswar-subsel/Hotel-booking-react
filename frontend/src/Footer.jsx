@@ -83,9 +83,9 @@ export default function Footer() {
 
           <ul>
             {[
-              { label: "Privacy Policy", link: "/privacy-policy" },
-              { label: "Terms & Conditions", link: "/terms-and-conditions" },
-              { label: "Cancellation Policy", link: "/cancellation-policy" },
+              { label: "Privacy Policy", link: "/privacy" },
+              { label: "Terms & Conditions", link: "/terms" },
+              { label: "Cancellation Policy", link: "/cancellation" },
             ].map((item) => (
               <li key={item.label} className="mb-[11px]">
                 <a href={item.link} className="flex cursor-pointer items-center gap-2 text-[0.82rem] text-white/45 transition-colors duration-200 hover:text-[#E8D5A3]">

@@ -88,6 +88,12 @@ button {
   background: var(--gold);
   flex-shrink: 0;
 }
+.section-eyebrow.centered {
+  justify-content: center;
+}
+.section-eyebrow.centered::before {
+  display: none;
+}
 .section-eyebrow span {
   font-size: 0.7rem;
   font-weight: 600;
@@ -103,7 +109,7 @@ button {
   color: var(--navy);
   line-height: 1.15;
   letter-spacing: -0.5px;
-  margin-bottom: 36px;
+  margin-bottom: 20px;
 }
 .section-title em {
   font-style: italic;
