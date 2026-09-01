@@ -157,7 +157,8 @@ export default function VehicleCustomers({
      */
     if (
       booking.status === "cancelled" ||
-      getVehicleStatus(booking) === "completed"
+      getVehicleStatus(booking) === "completed" ||
+      getVehicleStatus(booking) === "cancelled"
     ) {
       return;
     }
@@ -701,8 +702,8 @@ export default function VehicleCustomers({
                       <div className="flex flex-col items-start gap-1">
 
                         {/* Vehicle price */}
-
-                        {/* {editing && (
+                      {/* 
+                        {editing && (
                           <input
                             type="number"
                             min="0"
@@ -758,11 +759,16 @@ export default function VehicleCustomers({
 
                         ) : isCancelled ? (
 
-                          <span className="rounded border border-[#F1D4D0] px-2 py-1 text-[0.65rem] font-semibold text-[#C0392B]">
-                            Cancelled
-                          </span>
+                          <button
+                            type="button"
+                            disabled
+                            className="cursor-not-allowed rounded border border-[#F1D4D0] bg-[#F8F9FA] px-2 py-1 text-[0.65rem] font-semibold text-[#C0392B] opacity-70"
+                          >
+                            Edit
+                          </button>
 
-                        ) : vehicleStatus === "completed" ? (
+                        ) : vehicleStatus === "completed" ||
+                          vehicleStatus === "cancelled" ? (
 
                           <button
                             type="button"
@@ -775,6 +781,7 @@ export default function VehicleCustomers({
                         ) : (
 
                           <button
+                            type="button"
                             onClick={() =>
                               startEditing(
                                 booking,
