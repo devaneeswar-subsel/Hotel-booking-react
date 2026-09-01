@@ -1641,6 +1641,7 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
     room_number: room.room_number || "",
     room_type: room.room_type || "",
     price_per_night: room.price_per_night || "",
+    price_double: room.price_double ?? "",
     capacity: room.capacity || 2,
     description: room.description || "",
     is_available: room.is_available,
@@ -1768,7 +1769,7 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
                   setForm({ ...form, room_type: e.target.value })
                 }
               >
-                {["Standard AC Room", "Suite Room", "Suite with Balcony"].map(
+                {["Deluxe Room", "Suite Room", "Suite with Balcony"].map(
                   (t) => (
                     <option key={t}>{t}</option>
                   ),
@@ -1780,13 +1781,25 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
           {/* Price + Capacity */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>Price / Night (₹)</label>
+              <label className={labelCls}>Price / Night — 1 Guest (₹)</label>
               <input
                 className={inputCls}
                 type="number"
                 value={form.price_per_night}
                 onChange={(e) =>
                   setForm({ ...form, price_per_night: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Price / Night — 2+ Guests (₹)</label>
+              <input
+                className={inputCls}
+                type="number"
+                placeholder="Leave blank for same rate"
+                value={form.price_double}
+                onChange={(e) =>
+                  setForm({ ...form, price_double: e.target.value })
                 }
               />
             </div>
@@ -1864,8 +1877,9 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
 function AddRoomModal({ onClose, showToast, onRefresh }) {
   const [form, setForm] = useState({
     room_number: "",
-    room_type: "Standard AC Room",
+    room_type: "Deluxe Room",
     price_per_night: "",
+    price_double: "",
     capacity: 2,
     description: "",
     image_url: "",
@@ -1893,9 +1907,9 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
   const labelCls =
     "block text-[0.62rem] font-bold text-gray-400 mb-1.5 tracking-[0.8px] uppercase";
 
-  const roomTypes = ["Standard AC Room", "Suite Room", "Suite with Balcony"];
+  const roomTypes = ["Deluxe Room", "Suite Room", "Suite with Balcony"];
   const typeColors = {
-    "Standard AC Room": {
+    "Deluxe Room": {
       border: "border-gold",
       bg: "bg-gold",
       text: "text-gold",
@@ -1988,17 +2002,31 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
               />
             </div>
             <div>
-              <label className={labelCls}>Price / Night (₹) *</label>
+              <label className={labelCls}>Price / Night — 1 Guest (₹) *</label>
               <input
                 className={inputCls}
                 type="number"
-                placeholder="e.g. 2500"
+                placeholder="e.g. 2000"
                 value={form.price_per_night}
                 onChange={(e) =>
                   setForm({ ...form, price_per_night: e.target.value })
                 }
               />
             </div>
+          </div>
+
+          {/* Double occupancy rate */}
+          <div>
+            <label className={labelCls}>Price / Night — 2+ Guests (₹)</label>
+            <input
+              className={inputCls}
+              type="number"
+              placeholder="e.g. 2300 — leave blank to charge the same rate"
+              value={form.price_double}
+              onChange={(e) =>
+                setForm({ ...form, price_double: e.target.value })
+              }
+            />
           </div>
 
           {/* Capacity */}

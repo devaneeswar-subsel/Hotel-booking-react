@@ -22,11 +22,11 @@ const FALLBACK_ROOMS = [
   {
     room_id: "fallback-standard-ac",
     room_number: "110",
-    room_type: "Standard AC Room",
+    room_type: "Deluxe Room",
     price_per_night: 2500,
     capacity: 2,
     description:
-      "Comfortable Standard AC Room at VV Grand Park Residency with a cozy stay, modern amenities, and a relaxing atmosphere in Thiruvarur.",
+      "Comfortable Deluxe Room at VV Grand Park Residency with a cozy stay, modern amenities, and a relaxing atmosphere in Thiruvarur.",
     image_url: FALLBACK.Standard,
   },
   {
@@ -192,7 +192,7 @@ export default function Rooms({
           }
         >
           <option value="">All Room Types</option>
-          <option>Standard Ac Room</option>
+          <option>Deluxe Room</option>
           <option>Suite Room</option>
           <option>Suite with Balcony</option>
         </select>

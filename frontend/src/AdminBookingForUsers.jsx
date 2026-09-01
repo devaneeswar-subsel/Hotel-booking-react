@@ -219,8 +219,17 @@ export default function AdminBookingForUsers({
       ? Math.max(0, Math.ceil((checkOutDate - checkInDate) / 86400000))
       : 0;
 
+  // rooms with a double-occupancy rate switch to it from 2 guests upward;
+  // rooms without one keep a single rate at every occupancy
+  const nightlyRate = useMemo(() => {
+    const single = Number(room.price_per_night || 0);
+    const double = Number(room.price_double || 0);
+    const guests = Math.max(1, Number(form.guest_count) || 1);
+    return guests >= 2 && double > 0 ? double : single;
+  }, [room.price_per_night, room.price_double, form.guest_count]);
+
   const totals = useMemo(() => {
-    const roomSubtotal = Number(room.price_per_night || 0) * nights;
+    const roomSubtotal = nightlyRate * nights;
     const gst = Math.round(roomSubtotal * GST_RATE * 100) / 100;
     const fullAmount = Math.round((roomSubtotal + gst) * 100) / 100;
     const suggestedAdvanceAmount = Math.floor(fullAmount * ADVANCE_RATE);
@@ -239,7 +248,7 @@ export default function AdminBookingForUsers({
       advanceAmount,
       remainingAmount,
     };
-  }, [form.advance_amount, nights, room.price_per_night]);
+  }, [form.advance_amount, nights, nightlyRate]);
 
   function update(name, value) {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -539,6 +548,12 @@ export default function AdminBookingForUsers({
                 onChange={(e) => update("guest_count", e.target.value)}
                 className="w-full rounded-md border border-[#E9ECEF] px-3 py-2.5 text-sm outline-none focus:border-[#C9A84C]"
               />
+              {Number(room.price_double || 0) > 0 && (
+                <div className="mt-1 text-[0.7rem] text-[#868E96]">
+                  1 guest {money(Number(room.price_per_night || 0))} · 2+ guests{" "}
+                  {money(Number(room.price_double))} per night, plus GST
+                </div>
+              )}
             </div>
           </div>
 
@@ -683,7 +698,12 @@ export default function AdminBookingForUsers({
             Payment Calculation
           </div>
           {[
-            ["Room subtotal", money(totals.roomSubtotal)],
+            [
+              `Room subtotal (${money(nightlyRate)} x ${nights} night${
+                nights === 1 ? "" : "s"
+              })`,
+              money(totals.roomSubtotal),
+            ],
             ["GST (18%)", money(totals.gst)],
             ["Full amount", money(totals.fullAmount)],
           ].map(([label, value], index) => (

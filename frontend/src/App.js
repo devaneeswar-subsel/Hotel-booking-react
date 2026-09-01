@@ -387,7 +387,12 @@ function BookingModal({ room, user, onClose, showToast }) {
         )
       : 0;
 
-  const basePrice = room.price_per_night * nights;
+  // rooms with a double-occupancy rate switch to it from 2 guests upward
+  const nightlyRate =
+    Number(form.guest_count) >= 2 && Number(room.price_double || 0) > 0
+      ? Number(room.price_double)
+      : Number(room.price_per_night || 0);
+  const basePrice = nightlyRate * nights;
   const gst = Math.round(basePrice * GST_RATE * 100) / 100;
   const total = basePrice + gst;
 
@@ -912,7 +917,7 @@ function BookingModal({ room, user, onClose, showToast }) {
               <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 space-y-2">
                 {[
                   {
-                    label: `Rs.${Number(room.price_per_night).toLocaleString()} × ${nights} night${nights > 1 ? "s" : ""}`,
+                    label: `Rs.${nightlyRate.toLocaleString()} × ${nights} night${nights > 1 ? "s" : ""}`,
                     val: `Rs.${basePrice.toLocaleString()}`,
                   },
                   {

@@ -229,7 +229,7 @@ const leftRef  = useFadeSlide("left");
                 </option>
 
                 {[
-                  "Standard Ac Room",
+                  "Deluxe Room",
                   "Suite Room",
                 "Suite with Balcony",
                 ].map((t) => (
