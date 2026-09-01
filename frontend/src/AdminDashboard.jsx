@@ -23,7 +23,10 @@ import { printInvoicePdf } from "./invoicePdf";
 
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
-
+function formatBookingId(booking) {
+  const year = new Date(booking.created_at || Date.now()).getFullYear();
+  return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
+}
 const apiFetch = (url, options = {}) =>
   fetch(`${API}${url}`, {
     ...options,
@@ -463,7 +466,7 @@ function CancelWarningModal({ booking, onConfirm, onClose }) {
         <div className="p-6">
           <div className="mb-5 rounded-xl bg-gray-50 p-4">
             <div className="mb-2 text-sm font-semibold text-slate-900">
-              #{booking.booking_id} — {booking.guest_name}
+              #{formatBookingId(booking)} — {booking.guest_name}
             </div>
 
             {[
@@ -2943,7 +2946,7 @@ export default function AdminDashboard({
                           <td
                             className={`${tdCls} text-[0.78rem] text-gray-400`}
                           >
-                            #{b.booking_id}
+                            {formatBookingId(b)}
                           </td>
                           <td
                             className={`${tdCls} text-[0.85rem] font-semibold text-navy`}
@@ -3105,7 +3108,7 @@ export default function AdminDashboard({
                         className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
                       >
                         <td className={`${tdCls} text-[0.75rem] text-gray-400`}>
-                          #{b.booking_id}
+                          {formatBookingId(b)}
                         </td>
                         <td
                           className={`${tdCls} text-[0.85rem] font-semibold text-navy whitespace-nowrap`}

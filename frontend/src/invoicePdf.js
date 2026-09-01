@@ -24,6 +24,10 @@ const C_DETAIL_W = 45;
 
 const money = (v) => `Rs.${Math.round(Number(v) || 0).toLocaleString("en-IN")}`;
 
+function formatBookingId(booking) {
+  const year = new Date(booking.created_at || Date.now()).getFullYear();
+  return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
+}
 export async function printInvoicePdf(
   booking,
   { paymentMode = "Online", showToast = () => {} } = {},
@@ -118,7 +122,7 @@ export async function printInvoicePdf(
   const grandTotal =
     Math.round((paymentTotal + addonTotal + addonGst) * 100) / 100;
 
-  const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
+const invNo = `INV-${formatBookingId(b)}`;
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric",
     month: "long",

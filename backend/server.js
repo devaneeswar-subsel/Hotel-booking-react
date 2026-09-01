@@ -421,7 +421,10 @@ app.get("/api/customers/lookup", requireManager, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+function formatBookingId(booking) {
+  const year = new Date(booking.created_at || Date.now()).getFullYear();
+  return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
+}
 function formatInvoiceMoney(value) {
   return `Rs.${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
 }
@@ -480,7 +483,7 @@ async function loadBookingForInvoice(bookingId) {
 }
 
 async function generateAdvanceInvoicePdf(booking) {
-  const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
+  const invNo = `INV-${formatBookingId(booking)}`;
   const nights = Math.max(
     1,
     Math.ceil(

@@ -43,7 +43,10 @@ const apiFetch = (url, options = {}) =>
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options.headers },
   });
-
+function formatBookingId(booking) {
+  const year = new Date(booking.created_at || Date.now()).getFullYear();
+  return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
+}
 function LockIcon({ size = 15, color = "currentColor" }) {
   return (
     <svg
@@ -340,7 +343,7 @@ export default function CheckoutPage({ user, showToast }) {
     const roomCharges = Number(booking.total_price || 0);
     const gst = Number(booking.gst_amount || Math.round(roomCharges * GST_RATE));
     const total = Number(booking.final_total || roomCharges + gst);
-    const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
+    const invNo = `INV-${formatBookingId(booking)}`;
     const guestName = booking.guest_name || user.name || "Guest";
     const fileGuest = guestName.replace(/\s+/g, "_");
     const displayDate = (value) =>
@@ -673,8 +676,9 @@ export default function CheckoutPage({ user, showToast }) {
                   Simple checkout details
                 </h2>
                 <p className="mt-2 text-[0.82rem] leading-6 text-[#3F4851]">
-                  Vehicle selection is only a reminder for hotel staff. Any vehicle
-                  pricing will be confirmed by the hotel admin separately.
+                  Vehicle selection is only a reminder for hotel staff. Any
+                  vehicle pricing will be confirmed by the hotel admin
+                  separately.
                 </p>
 
                 <div className="mt-5">
@@ -683,7 +687,8 @@ export default function CheckoutPage({ user, showToast }) {
                   </h3>
                   <p className="mt-1 text-[0.86rem] leading-6 text-[#3F4851]">
                     Local pickup/drop may have additional charges. For travel or
-                    outstation trips, please contact the hotel admin for pricing.
+                    outstation trips, please contact the hotel admin for
+                    pricing.
                   </p>
                 </div>
 
@@ -703,8 +708,8 @@ export default function CheckoutPage({ user, showToast }) {
                     <InfoIcon size={14} />
                   </span>
                   <p>
-                    <strong>Note:</strong> In case of 2 adults and 1 child (below
-                    5 years), the child's food is{" "}
+                    <strong>Note:</strong> In case of 2 adults and 1 child
+                    (below 5 years), the child's food is{" "}
                     <strong className="text-[#C98216]">complimentary.</strong>{" "}
                     Please inform the hotel staff during check-in.
                   </p>
@@ -814,11 +819,17 @@ export default function CheckoutPage({ user, showToast }) {
                     </span>
                   </div>
                   {[
-                    ["Booking ID", `#${confirmedBooking.booking_id}`],
+                    ["Booking ID", `${formatBookingId(confirmedBooking)}`],
                     ["Check-in", confirmedBooking.check_in_date?.slice(0, 10)],
-                    ["Check-out", confirmedBooking.check_out_date?.slice(0, 10)],
+                    [
+                      "Check-out",
+                      confirmedBooking.check_out_date?.slice(0, 10),
+                    ],
                     ["Nights", nights],
-                    ["Room Charges", formatAmount(confirmedBooking.total_price)],
+                    [
+                      "Room Charges",
+                      formatAmount(confirmedBooking.total_price),
+                    ],
                     ["GST (18%)", formatAmount(confirmedBooking.gst_amount)],
                     ["Payment ID", confirmedBooking.payment_id || "-"],
                   ].map(([label, value]) => (
@@ -827,7 +838,9 @@ export default function CheckoutPage({ user, showToast }) {
                       className="flex justify-between border-t border-[#E9ECEF] py-[5px] text-[0.82rem]"
                     >
                       <span className="text-[#ADB5BD]">{label}</span>
-                      <span className="font-semibold text-[#0F1923]">{value}</span>
+                      <span className="font-semibold text-[#0F1923]">
+                        {value}
+                      </span>
                     </div>
                   ))}
                   <div className="flex justify-between border-t-[1.5px] border-[#0F1923] pb-1 pt-2.5 text-[0.95rem]">
