@@ -470,42 +470,6 @@ export default function RoomDetail({
                 ))}
               </div>
             </motion.div>
-
-            {/* Policies */}
-            <motion.div
-              initial={{ opacity: 0, y: 24 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, amount: 0.2 }}
-              transition={{ duration: 0.5, ease: "easeOut" }}
-              className="mt-8 rounded-2xl border border-[var(--gold)]/20 bg-[var(--navy)] p-5"
-            >
-              <div className="mb-4 flex items-center gap-2">
-                <div className="h-4 w-1 rounded-full bg-[var(--gold)]" />
-                <h3 className="font-[var(--font-display)] text-base font-bold text-white">
-                  Hotel Policies
-                </h3>
-              </div>
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                {policies.map((p, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, x: -16 }}
-                    whileInView={{ opacity: 1, x: 0 }}
-                    viewport={{ once: true, amount: 0.3 }}
-                    transition={{ duration: 0.4, delay: i * 0.07, ease: "easeOut" }}
-                    whileHover={{ scale: 1.02 }}
-                    className="flex cursor-default items-center gap-3 rounded-xl border border-[var(--gold)] bg-white/5 px-3.5 py-2.5 transition-colors hover:border-[var(--gold)]/40 hover:bg-[var(--gold)]/10"
-                  >
-                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--gold)]/15 text-[var(--gold)]">
-                      {p.icon}
-                    </span>
-                    <span className="text-[0.8rem] leading-snug text-white/70">
-                      {p.text}
-                    </span>
-                  </motion.div>
-                ))}
-              </div>
-            </motion.div>
           </div>
         </div>
 
@@ -664,6 +628,42 @@ export default function RoomDetail({
         </div>
 
       </div>
+
+      {/* POLICIES SECTION - FULL WIDTH */}
+      <motion.div
+        initial={{ opacity: 0, y: 24 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        className="mt-12 w-full rounded-2xl border border-[var(--gold)]/20 bg-[var(--navy)] p-5"
+      >
+        <div className="mb-4 flex items-center gap-2">
+          <div className="h-4 w-1 rounded-full bg-[var(--gold)]" />
+          <h3 className="font-[var(--font-display)] text-base font-bold text-white">
+            Hotel Policies
+          </h3>
+        </div>
+        <div className="grid w-full grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-2">
+          {policies.map((p, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, x: -16 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.4, delay: i * 0.07, ease: "easeOut" }}
+              whileHover={{ scale: 1.02 }}
+              className="flex h-full cursor-default items-start gap-3 rounded-xl border border-[var(--gold)] bg-white/5 px-3.5 py-2.5 transition-colors hover:border-[var(--gold)]/40 hover:bg-[var(--gold)]/10"
+            >
+              <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--gold)]/15 text-[var(--gold)]">
+                {p.icon}
+              </span>
+              <span className="text-[0.8rem] leading-snug text-white/70">
+                {p.text}
+              </span>
+            </motion.div>
+          ))}
+        </div>
+      </motion.div>
     </div>
   </div>
 );
