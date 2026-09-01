@@ -125,6 +125,13 @@ async function runMigrations() {
       "adults_count INT DEFAULT NULL",
       "children_count INT DEFAULT 0",
       "checkin_payment_mode VARCHAR(40) DEFAULT NULL",
+      // ── split payment tracking (advance vs balance) ──
+      "advance_payment_mode VARCHAR(40) DEFAULT NULL",
+      "advance_paid_at DATETIME DEFAULT NULL",
+      "balance_payment_mode VARCHAR(40) DEFAULT NULL",
+      "balance_paid_at DATETIME DEFAULT NULL",
+      "addon_payment_mode VARCHAR(40) DEFAULT NULL",
+      "addon_paid_at DATETIME DEFAULT NULL",
     ];
     for (const col of cols) {
       try {
@@ -421,10 +428,13 @@ app.get("/api/customers/lookup", requireManager, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// invoice numbers are year-prefixed, e.g. INV-2026-0037
 function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
 }
+
 function formatInvoiceMoney(value) {
   return `Rs.${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
 }
@@ -623,73 +633,51 @@ async function generateAdvanceInvoicePdf(booking) {
         align: "right",
       });
 
-      y += 22;
-    doc.setFont("helvetica", "bold").setFontSize(7).setTextColor(80, 80, 80);
-    doc.text("TERMS & CONDITIONS", L, y);
-    doc.setDrawColor(201, 168, 76);
-    doc.setLineWidth(0.2);
-    doc.line(L, y + 2.5, R, y + 2.5);
-    y += 7;
-    const terms = [
-    " A valid government-issued photo ID must be presented at check-in.",
-  "Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
-  "Early check-in and late check-out are subject to availability and may incur additional charges.",
-  "Pets, outside food and beverages, alcohol, and smoking are not permitted on the hotel premises.",
-  "Cancellations must be made at least 48 hours before the scheduled check-in time to be eligible for a refund, subject to the applicable booking rate and cancellation policy.",
-  "For no-shows or cancellations made within 48 hours of check-in, a cancellation charge equivalent to the first night's room tariff may apply, subject to the booking terms.",
-  "Eligible refunds will be processed to the original payment method within 5-7 working days. The actual credit time may vary depending on the bank or payment provider.",
-  "Personal and identification data is processed for booking management, guest services, payment processing, security, and legal or regulatory compliance.",
-  "Payments are securely processed through approved payment methods. The hotel does not store full card details. Personal data is not sold to third parties.",
-  "Full Terms & Conditions, Privacy Policy, and Cancellation Policy are available at: https://vvgrandpark.com/policies",
-  "Please verify the booking dates, room type, guest count, tariff, and contact details shown on this invoice and report any discrepancy promptly.",
-  "Vehicle pickup and drop-off requests are subject to availability, applicable charges, and separate confirmation by the hotel.",
-  "Guests are responsible for room keys/cards and hotel property provided during their stay. Reasonable charges may apply for loss or damage caused during the stay.",
-  "Hotel policies may be updated from time to time for legal, safety, or operational reasons.",
-  "For booking assistance or invoice corrections, please contact the hotel as soon as possible and preferably before check-in.",
-  "The room tariff does not include additional services or charges unless expressly included in the booking.",
-  "Visitors are permitted only with hotel approval and may be required to provide valid identification.",
-  "All guests must comply with hotel quiet hours, safety instructions, and reasonable house rules during their stay.",
-  "Lost-property claims will be handled in accordance with hotel records, hotel policy, and applicable law.",
-  "This is an electronically generated invoice and does not require a physical signature where permitted under applicable law.",
-    ];
+    y += 20;
     doc
-      .setFont("helvetica", "normal")
-      .setFontSize(6.5)
-      .setTextColor(120, 120, 120);
-    terms.forEach((t) => {
-      doc.text(t, L, y);
-      y += 5;
-    });
+      .fillColor("#333333")
+      .font("Helvetica-Bold")
+      .fontSize(8)
+      .text("TERMS & CONDITIONS", 50, y);
+    doc
+      .moveTo(50, y + 12)
+      .lineTo(545, y + 12)
+      .strokeColor("#C9A84C")
+      .lineWidth(0.4)
+      .stroke();
+    y += 18;
+    doc.fillColor("#666666").font("Helvetica").fontSize(6);
+    doc.text(
+      INVOICE_TERMS.map((term, i) => `${i + 1}. ${term}`).join("   "),
+      50,
+      y,
+      { width: 495, align: "justify" },
+    );
 
-       // Footer
-    const footerY = 282;
+    const footerY = 762;
     doc
-      .setDrawColor(201, 168, 76)
-      .setLineWidth(0.3)
-      .line(L, footerY, R, footerY);
+      .moveTo(50, footerY)
+      .lineTo(545, footerY)
+      .strokeColor("#C9A84C")
+      .lineWidth(0.5)
+      .stroke();
     doc
-      .setFont("helvetica", "italic")
-      .setFontSize(8)
-      .setTextColor(134, 142, 150);
-    doc.text(
-      "Thank you for choosing VV Grand Park Residency!",
-      W / 2,
-      footerY + 5,
-      { align: "center" },
-    );
-    doc.setFont("helvetica", "normal").setFontSize(7.5);
-    doc.text(
-      "3/4/D, Thanjai Saalai, Thiruvarur - 610004",
-      W / 2,
-      footerY + 11,
-      { align: "center" },
-    );
-    doc.text(
-      "+91 93849 82510  |  vvgrandpark@gmail.com  |  vvgrandpark.com",
-      W / 2,
-      footerY + 17,
-      { align: "center" },
-    );
+      .fillColor("#868E96")
+      .font("Helvetica-Oblique")
+      .fontSize(9)
+      .text("Thank you for choosing VV Grand Park Residency!", 50, footerY + 10, {
+        width: 495,
+        align: "center",
+      });
+    doc
+      .font("Helvetica")
+      .fontSize(8)
+      .text(
+        "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510  |  vvgrandpark.com",
+        50,
+        footerY + 26,
+        { width: 495, align: "center" },
+      );
 
     doc.end();
   });
@@ -698,7 +686,7 @@ async function generateAdvanceInvoicePdf(booking) {
 async function sendAdvanceInvoiceEmail(booking) {
   if (!booking?.email) return;
 
-  const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
+  const invNo = `INV-${formatBookingId(booking)}`;
   const pdfBuffer = await generateAdvanceInvoicePdf(booking);
   const totalAmount = Number(
     booking.total_amount || booking.final_total || booking.total_price || 0,
@@ -1225,7 +1213,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
         const total = Number(
           booking.final_total || Math.round((basePrice + gst) * 100) / 100,
         );
-        const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
+        const invNo = `INV-${formatBookingId(booking)}`;
 
         // Generate PDF
         const pdfBuffer = await new Promise((resolve, reject) => {
@@ -2451,8 +2439,37 @@ app.post(
   },
 );
 
+// Adds a column if it is missing. The startup migration normally handles this,
+// but it only runs at boot — if the server was not restarted after an update,
+// writes to a missing column are silently dropped. Calling this from the routes
+// that need the columns makes them self-healing.
+const PAYMENT_TRACKING_COLUMNS = [
+  "advance_payment_mode VARCHAR(40) DEFAULT NULL",
+  "advance_paid_at DATETIME DEFAULT NULL",
+  "balance_payment_mode VARCHAR(40) DEFAULT NULL",
+  "balance_paid_at DATETIME DEFAULT NULL",
+  "addon_payment_mode VARCHAR(40) DEFAULT NULL",
+  "addon_paid_at DATETIME DEFAULT NULL",
+];
+
+let paymentColumnsChecked = false;
+async function ensurePaymentColumns() {
+  if (paymentColumnsChecked) return;
+  for (const col of PAYMENT_TRACKING_COLUMNS) {
+    try {
+      await db.query(`ALTER TABLE bookings ADD COLUMN ${col}`);
+      console.log(`✅ Added missing column: ${col.split(" ")[0]}`);
+    } catch (e) {
+      // already exists — expected on every call after the first
+    }
+  }
+  paymentColumnsChecked = true;
+}
+
 app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => {
   try {
+    await ensurePaymentColumns();
+
     const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
       req.params.id,
     ]);
@@ -2479,16 +2496,48 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
     const remaining = storedRemaining > 0 ? storedRemaining : derivedRemaining;
     const newBalancePaid = currentBalancePaid + remaining;
 
+    // how the balance was collected — the time is stamped by MySQL itself so
+    // there is no driver or timezone conversion to get wrong
+    const balanceMode = String(req.body?.payment_mode || "Cash").slice(0, 40);
+
     await db.query(
-      "UPDATE bookings SET balance_paid=?, remaining_amount=0, payment_status='PAID' WHERE booking_id=?",
-      [newBalancePaid, req.params.id],
+      `UPDATE bookings
+          SET balance_paid = ?,
+              remaining_amount = 0,
+              payment_status = 'PAID',
+              balance_payment_mode = ?,
+              balance_paid_at = NOW(),
+              advance_payment_mode = COALESCE(advance_payment_mode, payment_method),
+              advance_paid_at = COALESCE(advance_paid_at, created_at)
+        WHERE booking_id = ?`,
+      [newBalancePaid, balanceMode, req.params.id],
     );
+
+    const [saved] = await db.query(
+      `SELECT balance_paid, balance_payment_mode, balance_paid_at,
+              advance_payment_mode, advance_paid_at
+         FROM bookings WHERE booking_id=?`,
+      [req.params.id],
+    );
+    const row = saved[0] || {};
+
+    // if the timestamp came back null the column is missing — the migration
+    // did not run, which almost always means the server was not restarted
+    if (!row.balance_paid_at) {
+      console.warn(
+        `⚠ balance_paid_at did not persist for booking ${req.params.id}. ` +
+          `Restart the backend so runMigrations() adds the split-payment columns.`,
+      );
+    }
 
     res.json({
       message: "Balance marked as paid",
       totalAmount: Number(booking.total_amount || booking.final_total || 0),
       advancePaid: Number(booking.advance_paid || 0),
       balancePaid: newBalancePaid,
+      balancePaymentMode: row.balance_payment_mode || balanceMode,
+      balancePaidAt: row.balance_paid_at || null,
+      persisted: Boolean(row.balance_paid_at),
       remainingAmount: 0,
       paymentStatus: "PAID",
     });
@@ -2568,6 +2617,32 @@ async function saveCheckinDetails(bookingId, body = {}) {
   );
   return guestRows;
 }
+
+// One-off repair: bookings settled before the tracking columns existed have a
+// balance amount but no mode or date. Fill those from the best evidence we have
+// so the invoice and summary stop showing a dash.
+app.patch("/api/admin/backfill-payment-dates", requireAdmin, async (req, res) => {
+  try {
+    await ensurePaymentColumns();
+
+    const [result] = await db.query(
+      `UPDATE bookings
+          SET balance_payment_mode = COALESCE(balance_payment_mode, checkin_payment_mode, payment_method),
+              balance_paid_at      = COALESCE(balance_paid_at, actual_checkin, created_at),
+              advance_payment_mode = COALESCE(advance_payment_mode, payment_method),
+              advance_paid_at      = COALESCE(advance_paid_at, created_at)
+        WHERE balance_paid > 0
+          AND (balance_paid_at IS NULL OR balance_payment_mode IS NULL)`,
+    );
+
+    res.json({
+      message: "Backfilled payment details on older bookings",
+      updated: result.affectedRows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.patch("/api/bookings/:id/checkin", requireAdmin, async (req, res) => {
   try {
@@ -2763,10 +2838,28 @@ app.patch(
         return res
           .status(400)
           .json({ error: "Cannot mark a cancelled booking as paid" });
+
+      const [[unpaid]] = await db.query(
+        "SELECT COUNT(*) AS n FROM booking_addons WHERE booking_id=? AND paid=0",
+        [req.params.id],
+      );
+
       await db.query(
         "UPDATE booking_addons SET paid=1 WHERE booking_id=? AND paid=0",
         [req.params.id],
       );
+
+      // only stamp the mode/date when there was actually something to settle,
+      // so a repeat call doesn't overwrite the original record
+      if (Number(unpaid?.n || 0) > 0) {
+        await ensurePaymentColumns();
+        const mode = String(req.body?.payment_mode || "Cash").slice(0, 40);
+        await db.query(
+          "UPDATE bookings SET addon_payment_mode=?, addon_paid_at=NOW() WHERE booking_id=?",
+          [mode, req.params.id],
+        );
+      }
+
       const [addons] = await db.query(
         "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at ASC",
         [req.params.id],
