@@ -2872,13 +2872,7 @@ if (currentPath === "/my-bookings") {
         user={user}
         onAuthClick={() => setShowAuth(true)}
         onLogout={handleLogout}
-             onMyBookings={() =>
-          user?.role === "admin"
-            ? setShowAdmin(true)
-            : user?.role === "manager"
-              ? setShowManager(true)
-              : setShowBookings(true)
-        }
+        onMyBookings={goToMyBookings}
       />
 
       <Rooms
@@ -2905,7 +2899,7 @@ if (currentPath === "/my-bookings") {
       <Testimonials />
       <Footer />
 
-            {showAuth && (
+      {showAuth && (
         <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
       )}
 
@@ -2954,7 +2948,7 @@ if (currentPath === "/my-bookings") {
 
       {user && user.role !== "admin" && user.role !== "manager" && (
         <button
-onClick={goToMyBookings}
+          onClick={goToMyBookings}
           className="
             fixed
             bottom-7
