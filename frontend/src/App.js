@@ -2902,11 +2902,18 @@ if (currentPath === "/my-bookings") {
       <Testimonials />
       <Footer />
 
-      {showAuth && (
+            {showAuth && (
         <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
       )}
 
-   
+      {bookingRoom && user && (
+        <BookingModal
+          room={bookingRoom}
+          user={user}
+          onClose={() => setBookingRoom(null)}
+          showToast={showToast}
+        />
+      )}
 
       {/* {showBookings &&
         user &&
