@@ -59,6 +59,38 @@ export async function printInvoicePdf(
         )
       : 1;
 
+  // actual time in the room — minutes below an hour, "2 hr 15 min" above
+  let stayLabel = "";
+  if (b.actual_checkin && b.actual_checkout) {
+    const mins = Math.max(
+      0,
+      Math.round(
+        (new Date(b.actual_checkout) - new Date(b.actual_checkin)) / 60000,
+      ),
+    );
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    stayLabel = h > 0 ? `${h} hr ${m} min` : `${m} min`;
+  }
+
+  // guests actually recorded at check-in, falling back to the booked count
+  const guestRows = b.guests || [];
+  const adultCount =
+    guestRows.filter((g) => g.guest_type === "adult").length ||
+    Number(b.adults_count) ||
+    Number(b.guest_count) ||
+    1;
+  const childCount =
+    guestRows.filter((g) => g.guest_type === "child").length ||
+    Number(b.children_count) ||
+    0;
+  const guestSummary = [
+    `${adultCount} Adult${adultCount === 1 ? "" : "s"}`,
+    childCount > 0 ? `${childCount} Child${childCount === 1 ? "" : "ren"}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
   /* ── amounts ─────────────────────────────────────────────────────────── */
   const basePrice = Number(b.total_price || 0);
   const roomGst = Math.round(basePrice * GST_RATE * 100) / 100;
@@ -249,8 +281,8 @@ export async function printInvoicePdf(
   );
   tableRow("Check-in", ci, "—");
   tableRow("Check-out", co, "—");
-  if (b.hours_spent) tableRow("Hours Stayed", `${b.hours_spent} hrs`, "—");
-  tableRow("Guests", `${b.guest_count || 1}`, "—");
+  if (stayLabel) tableRow("Time Stayed", stayLabel, "—");
+  tableRow("Guests", guestSummary, "—");
 
   if (addons.length) {
     sectionRow("ADD-ON CHARGES");
@@ -312,7 +344,15 @@ export async function printInvoicePdf(
   sumHead("ADD-ON CHARGES");
   sumRow("Add-on Charges", money(addonTotal));
   sumRow("GST on Add-ons (18%)", money(addonGst));
-  sumBox(isAddonPaid ? "Add-ons Paid" : "Remaining to Pay", money(remaining));
+  const addonWithGst = Math.round((addonTotal + addonGst) * 100) / 100;
+  if (remaining > 0) {
+    sumBox("Remaining to Pay", money(remaining));
+  } else if (addonWithGst > 0) {
+    // everything settled — show what was collected, not a meaningless zero
+    sumBox("Add-ons Paid", money(addonWithGst));
+  } else {
+    sumBox("Fully Settled", money(0));
+  }
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);

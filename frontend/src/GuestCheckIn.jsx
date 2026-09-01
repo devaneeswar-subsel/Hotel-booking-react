@@ -195,12 +195,14 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
   const toast = showToast || (() => {});
 
   /* ── fetch booking (auto-populates every field) ─────────────────────────── */
-  const fetchBooking = () => {
+  // hydrate=false keeps whatever the user has typed; used after actions that
+  // only need fresh server totals (mark-as-paid, add-ons)
+  const fetchBooking = (hydrate = true) => {
     apiFetch(`/api/admin/bookings/${bookingId}`)
       .then((r) => r.json())
       .then((data) => {
         setBooking(data);
-
+        if (!hydrate) return;
         // hydrate the form from whatever the backend already knows
         if (data.id_proof_type) setIdType(data.id_proof_type);
         if (data.id_proof_number) setIdNumber(data.id_proof_number);
@@ -349,6 +351,15 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
   async function markPaid() {
     setSaving(true);
     try {
+      // persist whatever has been typed so far — otherwise the refetch below
+      // would discard the guest names the user just entered
+      if (!isCheckedIn) {
+        await apiFetch(`/api/bookings/${bookingId}/checkin-details`, {
+          method: "PUT",
+          body: JSON.stringify(buildPayload()),
+        }).catch(() => {});
+      }
+
       const res = await apiFetch(`/api/bookings/${bookingId}/balance-paid`, {
         method: "PATCH",
       });
@@ -365,7 +376,7 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
       }
 
       toast("Payment recorded", "success");
-      fetchBooking();
+      fetchBooking(false);
       onRefresh && onRefresh();
     } catch (e) {
       toast(e.message, "error");
@@ -397,13 +408,13 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
     setAddonLabel("");
     setAddonAmount("");
     toast("Add-on added", "success");
-    fetchBooking();
+    fetchBooking(false);
     onRefresh && onRefresh();
   }
 
   async function removeAddon(id) {
     await apiFetch(`/api/bookings/${bookingId}/addons/${id}`, { method: "DELETE" });
-    fetchBooking();
+    fetchBooking(false);
     onRefresh && onRefresh();
   }
 
@@ -482,6 +493,13 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
         })
       : "—";
 
+  const guestSummary = [
+    `${adults} Adult${adults === 1 ? "" : "s"}`,
+    children > 0 ? `${children} Child${children === 1 ? "" : "ren"}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
   const customerRows = [
     ["Name", b.guest_name],
     ["Email", b.email],
@@ -490,8 +508,7 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
     ["Check-in Date", fmtDate(b.check_in_date)],
     ["Check-out Date", fmtDate(b.check_out_date)],
     ["Room Type", `${b.room_type}${b.room_number ? ` · ${b.room_number}` : ""}`],
-    ["Guests", `${adults} Adult${adults > 1 ? "s" : ""}${children ? `, ${children} Child${children > 1 ? "ren" : ""}` : ""}`],
-    ["Special Requests", b.notes || "No special requests"],
+    ["Guests", guestSummary],
   ];
 
   return (
