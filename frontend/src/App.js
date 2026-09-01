@@ -25,7 +25,10 @@ import {
 } from "lucide-react";
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.18;
-
+function formatBookingId(booking) {
+  const year = new Date(booking.created_at || Date.now()).getFullYear();
+  return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
+}
 const apiFetch = (url, options = {}) =>
   fetch(`${API}${url}`, {
     ...options,
@@ -219,7 +222,7 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
             </div>
 
             {[
-              { label: "Booking ID", val: `#${booking.booking_id}` },
+              { label: "Booking ID", val: `${booking.booking_id}` },
               {
                 label: "Check-in",
                 val: booking.check_in_date?.slice(0, 10),
@@ -2435,7 +2438,7 @@ async function downloadInvoice(booking) {
     const roomCharges = Number(booking.total_price || 0);
     const gst = Number(booking.gst_amount || Math.round(roomCharges * GST_RATE));
     const total = Number(booking.final_total || roomCharges + gst);
-    const invNo = `INV-${String(booking.booking_id).padStart(5, "0")}`;
+    const invNo = `INV-${formatBookingId(booking)}`;
     const guestName = booking.guest_name || user.name || "Guest";
     const fileGuest = guestName.replace(/\s+/g, "_");
     const displayDate = (value) =>
