@@ -655,7 +655,7 @@ const grandTotalPdf = Math.round(
     doc.setTextColor(73, 80, 87);
     doc.text("vvgrandpark.com", W / 2 + 8, 57);
     doc.text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", W / 2 + 8, 63);
-    doc.text("+91 93849 82510 | vvgrandpark@gmail.com", W / 2 + 8, 69);
+    doc.text("+91 93849 82510 |+91 90032 51115| vvgrandpark@gmail.com", W / 2 + 8, 69);
 
     const tableTop = 76;
     doc.setFillColor(15, 25, 35);
@@ -919,7 +919,7 @@ const grandTotalPdf = Math.round(
       { align: "center" },
     );
     doc.text(
-      "+91 93849 82510  |  vvgrandpark@gmail.com  |  vvgrandpark.com",
+      "+91 93849 82510 |+91 90032 51115  |  vvgrandpark@gmail.com  |  vvgrandpark.com",
       W / 2,
       footerY + 17,
       { align: "center" },

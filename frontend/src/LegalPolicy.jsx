@@ -13,8 +13,8 @@ const hotel = {
   name: "VV Grand Park Residency",
   address:
     "3/4/D, Thanjai Saalai, near Navajeevan Hospital, Thiruvarur, Tamil Nadu - 610004, India",
-  phone: "+91 93849 82510",
-  phoneHref: "tel:+919384982510",
+  phone:["+919384982510" ,"+91 9003251115"],
+  phoneHref: ["tel:+919384982510" ,"+91 9003251115"],
   email: "vvgrandpark@gmail.com",
   emailHref: "mailto:vvgrandpark@gmail.com",
   effectiveDate: "18 August 2026",
@@ -520,26 +520,26 @@ export default function LegalPolicy({ policy }) {
                 </p>
 
                 <div className="flex flex-col gap-4">
-                  <a
-                    href={hotel.phoneHref}
-                    className="
-                      group
-                      flex
-                      items-center
-                      gap-3
-                      text-[0.84rem]
-                      text-[#59616A]
-                      no-underline
-                      transition-colors
-                      hover:text-[#0F1923]
-                    "
-                  >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F7F1E3]">
-                      <PhoneIcon size={14} color="#9A7A2E" />
-                    </span>
-
-                    <span>{hotel.phone}</span>
-                  </a>
+                  {hotel.phone.map((phone, index) => (
+  <a
+    key={index}
+    href={`tel:${phone}`}
+    className="
+      flex
+      items-center
+      gap-2
+      text-[0.82rem]
+      font-medium
+      text-[#4F5860]
+      no-underline
+      transition-colors
+      hover:text-[#C9A84C]
+    "
+  >
+    <PhoneIcon size={14} color="#C9A84C" />
+    {phone}
+  </a>
+))}
 
                   <a
                     href={hotel.emailHref}
@@ -614,30 +614,33 @@ export default function LegalPolicy({ policy }) {
                 </p>
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                  <a
-                    href={hotel.phoneHref}
-                    className="
-                      inline-flex
-                      items-center
-                      gap-2
-                      rounded-full
-                      border
-                      border-white/10
-                      bg-white/5
-                      px-5
-                      py-3
-                      text-[0.82rem]
-                      font-semibold
-                      text-white
-                      no-underline
-                      transition-all
-                      hover:border-[#C9A84C]/50
-                      hover:bg-[#C9A84C]/10
-                    "
-                  >
-                    <PhoneIcon size={14} color="#C9A84C" />
-                    {hotel.phone}
-                  </a>
+         {hotel.phone.map((phone, index) => (
+  <a
+    key={index}
+    href={`tel:${phone}`}
+    className="
+      inline-flex
+      items-center
+      gap-2
+      rounded-full
+      border
+      border-white/10
+      bg-white/5
+      px-5
+      py-3
+      text-[0.82rem]
+      font-semibold
+      text-white
+      no-underline
+      transition-all
+      hover:border-[#C9A84C]/50
+      hover:bg-[#C9A84C]/10
+    "
+  >
+    <PhoneIcon size={14} color="#C9A84C" />
+    {phone}
+  </a>
+))}
 
                   <a
                     href={hotel.emailHref}

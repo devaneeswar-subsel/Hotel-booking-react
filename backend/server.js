@@ -588,7 +588,7 @@ async function generateAdvanceInvoicePdf(booking) {
       .fontSize(9)
       .text("3/4/D, Thanjai Saalai", 350, 166)
       .text("Thiruvarur - 610004", 350, 180)
-      .text("+91 93849 82510", 350, 194);
+      .text("+91 93849 82510, +91 90032 51115", 350, 194);
 
     const tableTop = 230;
     doc.rect(50, tableTop, 495, 25).fill("#0F1923");
@@ -704,7 +704,7 @@ async function generateAdvanceInvoicePdf(booking) {
       .font("Helvetica")
       .fontSize(8)
       .text(
-        "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510  |  vvgrandpark.com",
+        "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510 | +91 90032 51115  |  vvgrandpark.com",
         50,
         footerY + 26,
         { width: 495, align: "center" },
@@ -775,7 +775,7 @@ async function sendAdvanceInvoiceEmail(booking) {
               <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:#0F1923;text-transform:uppercase;margin-bottom:8px;">Terms & Conditions</div>
               <ol style="margin:0;padding-left:18px;font-size:12px;">${emailTermsHtml}</ol>
             </div>
-            <p style="margin:20px 0 0;color:#868E96;font-size:12px;text-align:center;">VV Grand Park Residency | +91 93849 82510 | vvgrandpark@gmail.com</p>
+            <p style="margin:20px 0 0;color:#868E96;font-size:12px;text-align:center;">VV Grand Park Residency | +91 93849 82510 | +91 90032 51115 | vvgrandpark@gmail.com</p>
           </div>
         </div>
       </div>
@@ -1325,7 +1325,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
             .font("Helvetica")
             .fontSize(9)
             .text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", 350, 162)
-            .text("+91 93849 82510 | vvgrandpark@gmail.com", 350, 175);
+            .text("+91 93849 82510 | +91 90032 51115 | vvgrandpark@gmail.com", 350, 175);
 
           const tableTop = 210;
           doc.rect(50, tableTop, 495, 25).fill("#0F1923");
@@ -1482,7 +1482,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
             .font("Helvetica")
             .fontSize(8)
             .text(
-              "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510  |  vvgrandpark@gmail.com",
+              "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510 | +91 90032 51115  |  vvgrandpark@gmail.com",
               50,
               footerY + 38,
               { width: 495, align: "center" },
@@ -1968,7 +1968,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
               vvgrandpark.com
             </a>
             <br>
-            3/4/D, Thanjai Saalai, Thiruvarur - 610004 · +91 93849 82510 · vvgrandpark@gmail.com
+            3/4/D, Thanjai Saalai, Thiruvarur - 610004 · +91 93849 82510 · +91 90032 51115  · vvgrandpark@gmail.com
           </div>
         </div>
 

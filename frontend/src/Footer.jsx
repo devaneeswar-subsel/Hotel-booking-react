@@ -117,6 +117,8 @@ export default function Footer() {
               >
                 <PhoneIcon size={13} color="rgba(255,255,255,0.4)" />
                 +91 93849 82510
+                <br/>
+                +91 90032 51115
               </a>
             </li>
 

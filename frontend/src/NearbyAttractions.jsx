@@ -22,7 +22,7 @@ const categories = [
 
 const attractions = [
   {
-    title: "Thyagaraja Swamy Temple",
+    title: "Thiyagaraja Swamy Temple",
     distance: "3-4 km from hotel",
     category: "temple",
     featured: true,
@@ -81,7 +81,7 @@ const attractions = [
     ],
   },
   {
-    title: "Koothanur Saraswathi Temple",
+    title: "Koothanur Saraswathi Amman Temple",
     distance: "21 km from hotel",
     category: "temple",
     images: [
@@ -133,7 +133,7 @@ const attractions = [
     ],
   },
   {
-    title: "Muthupet Mangrove Forest",
+    title: "Muthupettai Mangrove Forest",
     distance: "55-60 km from hotel",
     category: "nature",
     images: [
