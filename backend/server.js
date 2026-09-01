@@ -138,6 +138,23 @@ async function runMigrations() {
         await db.query(`ALTER TABLE bookings ADD COLUMN ${col}`);
       } catch (e) {}
     }
+
+    // ── occupancy pricing ──
+    // price_double is the nightly rate when 2 or more adults stay. Rooms that
+    // leave it NULL keep charging price_per_night regardless of occupancy, so
+    // existing rooms are unaffected.
+    try {
+      await db.query(
+        "ALTER TABLE rooms ADD COLUMN price_double DECIMAL(10,2) DEFAULT NULL",
+      );
+    } catch (e) {}
+
+    // client renamed this room type
+    try {
+      await db.query(
+        "UPDATE rooms SET room_type='Deluxe Room' WHERE room_type='Standard AC Room'",
+      );
+    } catch (e) {}
     await db.query(
       `CREATE TABLE IF NOT EXISTS booking_addons (addon_id INT AUTO_INCREMENT PRIMARY KEY, booking_id INT NOT NULL, label VARCHAR(100) NOT NULL, amount DECIMAL(10,2) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE)`,
     );
@@ -275,11 +292,23 @@ function requireManager(req, res, next) {
   });
 }
 
+// Nightly rate for a room at a given occupancy.
+// Rooms with price_double set charge that rate from 2 adults upward; rooms
+// without it charge price_per_night at every occupancy, exactly as before.
+function resolveNightlyRate(room, guestCount) {
+  const single = Number(room.price_per_night || 0);
+  const double = Number(room.price_double || 0);
+  const guests = Math.max(1, Number(guestCount) || 1);
+  if (guests >= 2 && double > 0) return double;
+  return single;
+}
+
 async function calculateBookingAmounts({
   room_id,
   check_in_date,
   check_out_date,
   advance_amount,
+  guest_count,
 }) {
   const [roomRows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
     room_id,
@@ -322,7 +351,8 @@ async function calculateBookingAmounts({
     throw err;
   }
 
-  const roomSubtotal = Number(room.price_per_night) * nights;
+  const nightlyRate = resolveNightlyRate(room, guest_count);
+  const roomSubtotal = nightlyRate * nights;
   const gstAmount = Math.round(roomSubtotal * GST_RATE * 100) / 100;
   const totalAmount = Math.round((roomSubtotal + gstAmount) * 100) / 100;
   const advanceAmount = resolveAdvanceAmount(totalAmount, advance_amount);
@@ -332,6 +362,7 @@ async function calculateBookingAmounts({
   return {
     room,
     nights,
+    nightlyRate,
     roomSubtotal,
     gstAmount,
     totalAmount,
@@ -944,7 +975,7 @@ app.get("/api/rooms", async (req, res) => {
   try {
     const { type, min_price, max_price, check_in, check_out } = req.query;
     let q =
-      "SELECT room_id, room_number, room_type, price_per_night, capacity, description, image_url, is_available, created_at FROM rooms WHERE is_available=1";
+      "SELECT room_id, room_number, room_type, price_per_night, price_double, capacity, description, image_url, is_available, created_at FROM rooms WHERE is_available=1";
     const p = [];
     if (type) {
       q += " AND room_type=?";
@@ -1105,7 +1136,7 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
       (new Date(check_out_date) - new Date(check_in_date)) / 86400000,
     );
     if (nights <= 0) return res.status(400).json({ error: "Invalid dates" });
-    const base_price = nights * room.price_per_night;
+    const base_price = nights * resolveNightlyRate(room, guest_count);
     const vehicle_price = 0;
     const room_subtotal = base_price + vehicle_price;
     const gst_amount = Math.round(room_subtotal * GST_RATE * 100) / 100;
@@ -2113,7 +2144,7 @@ app.post("/api/bookings", requireAuth, async (req, res) => {
         error: "Selected dates are already booked for this room",
       });
     }
-    const base_price = nights * room.price_per_night;
+    const base_price = nights * resolveNightlyRate(room, guest_count);
     const gst_amount = Math.round(base_price * GST_RATE * 100) / 100;
     const total_price = Math.round((base_price + gst_amount) * 100) / 100;
     const [result] = await db.query(
@@ -2150,6 +2181,7 @@ app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) =
       check_in_date,
       check_out_date,
       advance_amount,
+      guest_count: req.body.guest_count,
     });
     const requestedGuests = Math.max(1, Number(req.body.guest_count) || 1);
     if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
@@ -2229,6 +2261,7 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
       check_in_date,
       check_out_date,
       advance_amount,
+      guest_count,
     });
     const requestedGuests = Math.max(1, Number(guest_count) || 1);
     if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
@@ -2364,6 +2397,7 @@ app.post(
         check_in_date,
         check_out_date,
         advance_amount,
+        guest_count,
       });
       const requestedGuests = Math.max(1, Number(guest_count) || 1);
       if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
@@ -3002,6 +3036,7 @@ app.post("/api/admin/rooms", requireAdmin, async (req, res) => {
       room_number,
       room_type,
       price_per_night,
+      price_double,
       capacity,
       description,
       image_url,
@@ -3011,11 +3046,12 @@ app.post("/api/admin/rooms", requireAdmin, async (req, res) => {
         .status(400)
         .json({ error: "room_number, room_type, price_per_night required" });
     const [r] = await db.query(
-      "INSERT INTO rooms (room_number,room_type,price_per_night,capacity,description,image_url,is_available) VALUES (?,?,?,?,?,?,1)",
+      "INSERT INTO rooms (room_number,room_type,price_per_night,price_double,capacity,description,image_url,is_available) VALUES (?,?,?,?,?,?,?,1)",
       [
         room_number,
         room_type,
         price_per_night,
+        price_double === undefined || price_double === "" ? null : price_double,
         capacity || 2,
         description || null,
         image_url || null,
@@ -3047,6 +3083,12 @@ app.patch("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
     if (price_per_night !== undefined) {
       fields.push("price_per_night=?");
       values.push(price_per_night);
+    }
+    if (req.body.price_double !== undefined) {
+      fields.push("price_double=?");
+      values.push(
+        req.body.price_double === "" ? null : req.body.price_double,
+      );
     }
     if (description !== undefined) {
       fields.push("description=?");
