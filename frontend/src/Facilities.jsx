@@ -13,14 +13,16 @@ import {
 import FacilityCard from "./Components/FacilityCard";
 import { motion } from "framer-motion";
 const facilities = [
-  { icon: SnowflakeIcon, name: "Air Conditioning", desc: "Comfortable rooms" },
-  { icon: TvIcon, name: "TV & Entertainment", desc: "Smart TV in rooms" },
-  { icon: DropletIcon, name: "24/7 Hot Water", desc: "Hot & cold water" },
-  { icon: CoffeeIcon, name: "Fine Dining", desc: "Multi-cuisine" },
-  { icon: CarIcon, name: "Safety Parking", desc: "Secure & free" },
-  { icon: WifiIcon, name: "High-Speed WiFi", desc: "Fibre broadband" },
-  { icon: PhoneIcon, name: "24/7 Concierge", desc: "Always available" },
-  { icon: AwardIcon, name: "Airport Transfer", desc: "Private luxury car" },
+  { icon: CoffeeIcon, name: "Complimentary Breakfast", desc: "7:30 AM to 10:00 AM" },
+  { icon: PhoneIcon, name: "24 Hours Room Service", desc: "Always available" },
+  { icon: TvIcon, name: "LED TV", desc: "In-room entertainment" },
+  { icon: DropletIcon, name: "Kettle", desc: "Hot beverage facility" },
+  { icon: CoffeeIcon, name: "Pure Veg Restaurant", desc: "VASAN’S CAFÉ" },
+  { icon: CarIcon, name: "Ample Parking", desc: "Spacious guest parking" },
+  { icon: AwardIcon, name: "Uninterrupted Power Supply", desc: "DG automatic backup" },
+  { icon: DropletIcon, name: "24-Hour Hot Water", desc: "Bathroom comfort" },
+  { icon: CarIcon, name: "Cab Service", desc: "Tariff based on km basis" },
+  { icon: WifiIcon, name: "24 Hours CCTV Surveillance", desc: "Guest safety" },
 ];
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 24 },

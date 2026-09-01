@@ -21,9 +21,9 @@ const hotel = {
 };
 
 const guestChildPolicyBullets = [
+  "Child policy: Below 8 years - Complimentary, 9 to 12 Years - Child policy, 12 Years & above - Adult.",
   "Maximum occupancy: 2 adults + 1 child per room.",
-  "Children below 5 years: Stay free of charge when sharing the existing bed with parents.",
-  "Complimentary food: One child below 5 years is eligible for complimentary food during the stay.",
+  "Children below 8 years: Complimentary stay when sharing the existing bed with parents.",
   "Extra bed: An extra bed is not included unless specifically requested and approved by the hotel.",
   "Age verification: The hotel may request proof of the child's age at check-in.",
 ];
@@ -53,16 +53,16 @@ const policies = {
       {
         title: "Check-in / Check-out",
         bullets: [
-          "Check-in: 1:00 PM. Check-out: 11:00 AM.",
-          "Early check-in and late check-out are subject to availability and may attract additional charges.",
-          "Retention of the room beyond check-out time without prior approval may be charged as an additional day.",
+          "Check In & Check Out time is 24 hours.",
+          "50% advance payment for confirmation, balance amount to be paid on or before arrival.",
+          "Taxes as applicable.",
         ],
       },
       {
         title: "Identity Verification",
         bullets: [
-          "Every Guest must present a valid, original government-issued photo ID at check-in as required under applicable law.",
-          "Foreign nationals must present a valid passport and visa; we are required to record and, where applicable, report these details to the authorities.",
+          "Accordingly, to government regulations, a valid Photo ID has to be carried by every person above the age of 18.",
+          "The identification proofs accepted are Driver’s License, Voters Card, Passport & Aadhar card.",
           "We reserve the right to refuse check-in where valid identification is not provided.",
         ],
       },
@@ -81,10 +81,11 @@ const policies = {
       {
         title: "House Rules",
         bullets: [
-          "Pets are not permitted anywhere on the Hotel premises.",
-          "Smoking is prohibited inside guest rooms and designated non-smoking areas.",
-          "Guests shall not engage in illegal activity, cause damage, create a nuisance, or disturb other guests.",
-          "We reserve the right to refuse service to, or evict without refund, any Guest who breaches these Terms.",
+          "We do not allow unmarried / unrelated couples to check-in. This is at the full discretion of the hotel management. No refund would be applicable in case the hotel denies check-in under such circumstances.",
+          "Kindly note that smoking & Alcoholic Beverages strictly prohibited inside our hotel premises.",
+          "Usage of electrical items other than facilities provided by residency is strictly prohibited.",
+          "In the Hotel Premises please refrain from gambling or any conduct corrupting public morals and safety or any speech which may cause an annoyance to other Guests.",
+          "The amount paid for room does not include charges for optional services and facilities (such as lunch, dinner, snacks and etc.,). These will be charged at the time of check-out from the Hotel.",
         ],
       },
       {
@@ -192,46 +193,30 @@ const policies = {
     sections: [
       {
         title: "Cancellation Charges",
-        table: {
-          headers: ["When you cancel", "Charge"],
-          rows: [
-            ["More than 48 hours before check-in", "Free - full refund"],
-            [
-              "Between 24 and 48 hours before check-in",
-              "50% of the first night's room charge",
-            ],
-            [
-              "Less than 24 hours before check-in",
-              "100% of the first night's room charge",
-            ],
-          ],
-        },
+        body:
+          "In case of cancellation / amendment a mail / written notice must be received by the hotel at least 03 days prior to the date of arrival or else retention charges will be applicable for all the booked room nights.",
       },
       {
         title: "No-Show",
         body:
-          "If you do not arrive and do not cancel, the booking is treated as a no-show and the first night's charge is non-refundable.",
+          "Retention charge of total booked room nights will be applicable if the guest does not check in on the designated date of arrival.",
       },
       {
-        title: "Early Check-out",
+        title: "Policy Update",
         body:
-          "If you check out earlier than your confirmed departure date, charges for the unused nights may not be refunded, at the Hotel's discretion.",
+          "The Hotel reserves the right to change/amend the above policy from time to time.",
       },
       {
-        title: "Non-Refundable / Special Bookings",
+        title: "Payment Options",
         body:
-          "Certain promotional rates, group bookings, and bookings during peak season or festival dates may be fully non-refundable. This will be clearly indicated at the time of booking.",
+          "Payment options: Cash / credit / debit cards / Razor pay / Mobile banking.",
       },
       {
-        title: "How to Cancel",
-        body:
-          "To cancel or modify a booking, contact us with your Booking ID or use the View Booking link in your confirmation email.",
-      },
-      {
-        title: "Refund Method & Timeline",
+        title: "Guest Facilities",
         bullets: [
-          "Eligible refunds are made to the original payment method via Razorpay.",
-          "Refunds are typically processed within 5-7 working days. The time for the amount to reflect in your account depends on your bank or card issuer.",
+          "Two bottles of RO treated drinking water are provided on complimentary basis.",
+          "Wi-Fi is provided on complimentary basis.",
+          "Breakfast is provided on complimentary basis from 7.30am to 10.00am.",
         ],
       },
     ],

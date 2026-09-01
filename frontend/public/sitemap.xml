@@ -1,112 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <!-- Homepage -->
   <url>
-    <loc>https://vvgrandpark.com/</loc>
+    <loc>https://www.vvgrandpark.com/</loc>
     <lastmod>2026-08-17</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
-  
-  <!-- Thiruvarur Location Page -->
+
   <url>
-    <loc>https://vvgrandpark.com/thiruvarur</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.95</priority>
-  </url>
-  
-  <!-- Rooms Page -->
-  <url>
-    <loc>https://vvgrandpark.com/rooms</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
-  </url>
-  
-  <!-- Rooms in Thiruvarur Page -->
-  <url>
-    <loc>https://vvgrandpark.com/rooms/thiruvarur</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.85</priority>
-  </url>
-  
-  <!-- Gallery Page -->
-  <url>
-    <loc>https://vvgrandpark.com/gallery</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  
-  <!-- Facilities Page -->
-  <url>
-    <loc>https://vvgrandpark.com/facilities</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  
-  <!-- Contact Page -->
-  <url>
-    <loc>https://vvgrandpark.com/contact</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  
-  <!-- Booking Page -->
-  <url>
-    <loc>https://vvgrandpark.com/booking</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
-  </url>
-  
-  <!-- Room Detail Pages (Examples - add actual room IDs as needed) -->
-  <url>
-    <loc>https://vvgrandpark.com/room/deluxe-room</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.85</priority>
-  </url>
-  
-  <url>
-    <loc>https://vvgrandpark.com/room/premium-suite</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.85</priority>
-  </url>
-  
-  <url>
-    <loc>https://vvgrandpark.com/room/luxury-suite</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.85</priority>
-  </url>
-  
-  <!-- FAQ Page (if exists) -->
-  <url>
-    <loc>https://vvgrandpark.com/faq</loc>
-    <lastmod>2026-08-17</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  
-  <!-- Terms & Conditions -->
-  <url>
-    <loc>https://vvgrandpark.com/terms</loc>
+    <loc>https://www.vvgrandpark.com/terms</loc>
     <lastmod>2026-08-17</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.5</priority>
   </url>
-  
-  <!-- Privacy Policy -->
+
   <url>
-    <loc>https://vvgrandpark.com/privacy</loc>
+    <loc>https://www.vvgrandpark.com/privacy</loc>
     <lastmod>2026-08-17</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.5</priority>
+  </url>
+
+  <url>
+    <loc>https://www.vvgrandpark.com/cancellation</loc>
+    <lastmod>2026-08-17</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.4</priority>
   </url>
 </urlset>

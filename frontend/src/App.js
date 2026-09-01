@@ -2386,6 +2386,7 @@ const [visibleBookings, setVisibleBookings] = useState(5);
 
 export default function App() {
   const legalPolicy = getLegalPolicyByPath(window.location.pathname);
+
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(!legalPolicy);
   const [bookingRoom, setBookingRoom] = useState(null);
@@ -2396,14 +2397,21 @@ export default function App() {
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [toast, setToast] = useState(null);
   const [availableRoomIds, setAvailableRoomIds] = useState(null);
-    const [currentPath, setCurrentPath] = useState(
-  window.location.pathname
-);
 
-  // null = no filter active, [] = none available, [1,2,3] = filter active
+  const [currentPath, setCurrentPath] = useState(
+    window.location.pathname
+  );
+
+  // null = no filter active
+  // [] = none available
+  // [1,2,3] = filter active
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
   }, []);
+
+  // ------------------------------------------------------------
+  // AUTH CHECK
+  // ------------------------------------------------------------
   useEffect(() => {
     if (legalPolicy) return;
 
@@ -2412,6 +2420,7 @@ export default function App() {
       .then((data) => {
         if (data.user) {
           setUser(data.user);
+
           if (data.user.role === "admin") {
             setShowAdmin(true);
             setShowManager(false);
@@ -2423,24 +2432,44 @@ export default function App() {
       })
       .catch(() => {})
       .finally(() => setAuthLoading(false));
-
   }, [legalPolicy]);
-async function downloadInvoice(booking) {
-  if (!booking) return;
+
+  // ------------------------------------------------------------
+  // DOWNLOAD INVOICE
+  // ------------------------------------------------------------
+  async function downloadInvoice(booking) {
+    if (!booking) return;
 
     const nights = Math.max(
       1,
       Math.ceil(
-        (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
-          86400000,
-      ),
+        (new Date(booking.check_out_date) -
+          new Date(booking.check_in_date)) /
+          86400000
+      )
     );
+
     const roomCharges = Number(booking.total_price || 0);
-    const gst = Number(booking.gst_amount || Math.round(roomCharges * GST_RATE));
-    const total = Number(booking.final_total || roomCharges + gst);
+
+    const gst = Number(
+      booking.gst_amount ||
+        Math.round(roomCharges * GST_RATE)
+    );
+
+    const total = Number(
+      booking.final_total ||
+        roomCharges + gst
+    );
+
     const invNo = `INV-${formatBookingId(booking)}`;
-    const guestName = booking.guest_name || user.name || "Guest";
+
+    const guestName =
+      booking.guest_name ||
+      user?.name ||
+      "Guest";
+
     const fileGuest = guestName.replace(/\s+/g, "_");
+
     const displayDate = (value) =>
       value
         ? new Date(value).toLocaleDateString("en-IN", {
@@ -2449,32 +2478,72 @@ async function downloadInvoice(booking) {
             year: "numeric",
           })
         : "-";
+
     const { jsPDF } = await import("jspdf");
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+    const doc = new jsPDF({
+      unit: "pt",
+      format: "a4",
+    });
+
     const textTop = (text, x, y, options = {}) => {
-      doc.text(text, x, y + doc.getFontSize() * 0.72, options);
+      doc.text(
+        text,
+        x,
+        y + doc.getFontSize() * 0.72,
+        options
+      );
     };
 
+    // ------------------------------------------------------------
+    // HEADER
+    // ------------------------------------------------------------
     doc.setFillColor("#0F1923");
     doc.rect(0, 0, 595, 100, "F");
 
     doc.setTextColor("#C9A84C");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(22);
-    textTop("VV GRAND PARK", 50, 30);
+
+    textTop(
+      "VV GRAND PARK",
+      50,
+      30
+    );
+
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    textTop("RESIDENCY", 50, 56);
+
+    textTop(
+      "RESIDENCY",
+      50,
+      56
+    );
 
     doc.setTextColor("#ffffff");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(22);
-    textTop("INVOICE", 545, 30, { align: "right" });
+
+    textTop(
+      "INVOICE",
+      545,
+      30,
+      { align: "right" }
+    );
+
     doc.setTextColor("#8B9298");
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    textTop(invNo, 545, 56, { align: "right" });
+
+    textTop(
+      invNo,
+      545,
+      56,
+      { align: "right" }
+    );
+
     doc.setFontSize(9);
+
     textTop(
       new Date().toLocaleDateString("en-IN", {
         day: "numeric",
@@ -2483,119 +2552,334 @@ async function downloadInvoice(booking) {
       }),
       545,
       72,
-      { align: "right" },
+      { align: "right" }
     );
 
+    // ------------------------------------------------------------
+    // GOLD LINE
+    // ------------------------------------------------------------
     doc.setDrawColor("#C9A84C");
     doc.setLineWidth(1);
-    doc.line(50, 115, 545, 115);
 
+    doc.line(
+      50,
+      115,
+      545,
+      115
+    );
+
+    // ------------------------------------------------------------
+    // BILL TO
+    // ------------------------------------------------------------
     doc.setTextColor("#868E96");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    textTop("BILL TO", 50, 130);
+
+    textTop(
+      "BILL TO",
+      50,
+      130
+    );
+
     doc.setTextColor("#0F1923");
     doc.setFontSize(13);
-    textTop(guestName, 50, 145);
+
+    textTop(
+      guestName,
+      50,
+      145
+    );
+
     doc.setTextColor("#495057");
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    textTop(booking.email || user.email || "", 50, 162);
-    if (booking.phone || user.phone) textTop(booking.phone || user.phone, 50, 175);
 
+    textTop(
+      booking.email ||
+        user?.email ||
+        "",
+      50,
+      162
+    );
+
+    if (booking.phone || user?.phone) {
+      textTop(
+        booking.phone ||
+          user?.phone,
+        50,
+        175
+      );
+    }
+
+    // ------------------------------------------------------------
+    // FROM
+    // ------------------------------------------------------------
     doc.setTextColor("#868E96");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    textTop("FROM", 350, 130);
+
+    textTop(
+      "FROM",
+      350,
+      130
+    );
+
     doc.setTextColor("#0F1923");
     doc.setFontSize(13);
-    textTop("VV Grand Park Residency", 350, 145);
+
+    textTop(
+      "VV Grand Park Residency",
+      350,
+      145
+    );
+
     doc.setTextColor("#495057");
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    textTop("3/4/D, Thanjai Saalai, Thiruvarur - 610004", 350, 162);
-    textTop("+91 93849 82510 | vvgrandpark@gmail.com", 350, 175);
 
+    textTop(
+      "3/4/D, Thanjai Saalai, Thiruvarur - 610004",
+      350,
+      162
+    );
+
+    textTop(
+      "+91 93849 82510 | vvgrandpark@gmail.com",
+      350,
+      175
+    );
+
+    // ------------------------------------------------------------
+    // TABLE HEADER
+    // ------------------------------------------------------------
     const tableTop = 210;
+
     doc.setFillColor("#0F1923");
-    doc.rect(50, tableTop, 495, 25, "F");
+
+    doc.rect(
+      50,
+      tableTop,
+      495,
+      25,
+      "F"
+    );
+
     doc.setTextColor("#C9A84C");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    textTop("DESCRIPTION", 60, tableTop + 8);
-    textTop("DETAILS", 280, tableTop + 8);
-    textTop("AMOUNT", 472.5, tableTop + 8, { align: "center" });
 
+    textTop(
+      "DESCRIPTION",
+      60,
+      tableTop + 8
+    );
+
+    textTop(
+      "DETAILS",
+      280,
+      tableTop + 8
+    );
+
+    textTop(
+      "AMOUNT",
+      472.5,
+      tableTop + 8,
+      { align: "center" }
+    );
+
+    // ------------------------------------------------------------
+    // TABLE ROWS
+    // ------------------------------------------------------------
     const tableRows = [
       [
         `${booking.room_type || "Room"} - Room ${
-          booking.room_number || booking.room_id
+          booking.room_number ||
+          booking.room_id
         }`,
-        `${nights} night${nights > 1 ? "s" : ""}`,
+        `${nights} night${
+          nights > 1 ? "s" : ""
+        }`,
         `Rs.${roomCharges.toLocaleString()}`,
       ],
-      ["Check-in", displayDate(booking.check_in_date), "-"],
-      ["Check-out", displayDate(booking.check_out_date), "-"],
-      ["Guests", String(booking.guest_count || 1), "-"],
-      ["Payment ID", booking.payment_id || "-", "-"],
+      [
+        "Check-in",
+        displayDate(
+          booking.check_in_date
+        ),
+        "-",
+      ],
+      [
+        "Check-out",
+        displayDate(
+          booking.check_out_date
+        ),
+        "-",
+      ],
+      [
+        "Guests",
+        String(
+          booking.guest_count || 1
+        ),
+        "-",
+      ],
+      [
+        "Payment ID",
+        booking.payment_id || "-",
+        "-",
+      ],
     ];
 
     let y = tableTop + 30;
+
     tableRows.forEach((row, index) => {
       if (index % 2 === 0) {
         doc.setFillColor("#F8F9FA");
-        doc.rect(50, y - 5, 495, 22, "F");
+
+        doc.rect(
+          50,
+          y - 5,
+          495,
+          22,
+          "F"
+        );
       }
+
       doc.setTextColor("#0F1923");
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      textTop(row[0], 60, y);
-      textTop(row[1], 280, y);
-      textTop(row[2], 472.5, y, { align: "center" });
+
+      textTop(
+        row[0],
+        60,
+        y
+      );
+
+      textTop(
+        row[1],
+        280,
+        y
+      );
+
+      textTop(
+        row[2],
+        472.5,
+        y,
+        { align: "center" }
+      );
+
       y += 22;
     });
 
+    // ------------------------------------------------------------
+    // TOTAL SECTION
+    // ------------------------------------------------------------
     y += 15;
+
     doc.setDrawColor("#E9ECEF");
     doc.setLineWidth(0.5);
-    doc.line(50, y, 545, y);
+
+    doc.line(
+      50,
+      y,
+      545,
+      y
+    );
+
     y += 15;
 
     [
-      ["Room Charges", `Rs.${roomCharges.toLocaleString()}`],
-      ["GST (18%)", `Rs.${Math.round(gst).toLocaleString()}`],
+      [
+        "Room Charges",
+        `Rs.${roomCharges.toLocaleString()}`,
+      ],
+      [
+        "GST (18%)",
+        `Rs.${Math.round(gst).toLocaleString()}`,
+      ],
     ].forEach(([label, value]) => {
       doc.setTextColor("#868E96");
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
-      textTop(label, 350, y);
+
+      textTop(
+        label,
+        350,
+        y
+      );
+
       doc.setTextColor("#0F1923");
       doc.setFont("helvetica", "bold");
-      textTop(value, 472.5, y, { align: "center" });
+
+      textTop(
+        value,
+        472.5,
+        y,
+        { align: "center" }
+      );
+
       y += 20;
     });
 
     y += 5;
+
+    // ------------------------------------------------------------
+    // TOTAL PAID
+    // ------------------------------------------------------------
     doc.setFillColor("#0F1923");
-    doc.rect(350, y, 195, 36, "F");
+
+    doc.rect(
+      350,
+      y,
+      195,
+      36,
+      "F"
+    );
+
     doc.setTextColor("#C9A84C");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
-    textTop("TOTAL PAID", 360, y + 12);
+
+    textTop(
+      "TOTAL PAID",
+      360,
+      y + 12
+    );
+
     doc.setTextColor("#ffffff");
     doc.setFontSize(14);
-    textTop(`Rs.${Math.round(total).toLocaleString()}`, 472.5, y + 10, {
-      align: "center",
-    });
 
+    textTop(
+      `Rs.${Math.round(total).toLocaleString()}`,
+      472.5,
+      y + 10,
+      { align: "center" }
+    );
+
+    // ------------------------------------------------------------
+    // TERMS
+    // ------------------------------------------------------------
     y += 60;
+
     doc.setTextColor("#333333");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    textTop("TERMS & CONDITIONS", 50, y);
+
+    textTop(
+      "TERMS & CONDITIONS",
+      50,
+      y
+    );
+
     doc.setDrawColor("#C9A84C");
     doc.setLineWidth(0.5);
-    doc.line(50, y + 11, 545, y + 11);
+
+    doc.line(
+      50,
+      y + 11,
+      545,
+      y + 11
+    );
+
     y += 18;
 
     const terms = [
@@ -2620,109 +2904,261 @@ async function downloadInvoice(booking) {
       "19. Lost-property claims will be handled in accordance with hotel records, hotel policy, and applicable law.",
       "20. This is an electronically generated invoice and does not require a physical signature where permitted under applicable law.",
     ];
+
     doc.setTextColor("#666666");
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.2);
+
     const termColumnWidth = 245;
-    const drawTermsColumn = (items, x, startY) => {
+
+    const drawTermsColumn = (
+      items,
+      x,
+      startY
+    ) => {
       let termY = startY;
+
       items.forEach((term) => {
-        const lines = doc.splitTextToSize(term, termColumnWidth);
-        lines.forEach((line, index) => {
-          textTop(line, x, termY + index * 7, { maxWidth: termColumnWidth });
-        });
-        termY += Math.max(7, lines.length * 7) + 1.5;
+        const lines =
+          doc.splitTextToSize(
+            term,
+            termColumnWidth
+          );
+
+        lines.forEach(
+          (line, index) => {
+            textTop(
+              line,
+              x,
+              termY + index * 7,
+              {
+                maxWidth:
+                  termColumnWidth,
+              }
+            );
+          }
+        );
+
+        termY +=
+          Math.max(
+            7,
+            lines.length * 7
+          ) + 1.5;
       });
+
       return termY;
     };
-    const termsEndY = Math.max(
-      drawTermsColumn(terms.slice(0, 10), 50, y),
-      drawTermsColumn(terms.slice(10), 300, y),
-    );
-    const footerY = Math.max(775, termsEndY + 22);
 
+    const termsEndY = Math.max(
+      drawTermsColumn(
+        terms.slice(0, 10),
+        50,
+        y
+      ),
+      drawTermsColumn(
+        terms.slice(10),
+        300,
+        y
+      )
+    );
+
+    const footerY = Math.max(
+      775,
+      termsEndY + 22
+    );
+
+    // ------------------------------------------------------------
+    // FOOTER
+    // ------------------------------------------------------------
     doc.setDrawColor("#C9A84C");
     doc.setLineWidth(0.5);
-    doc.line(50, footerY, 545, footerY);
+
+    doc.line(
+      50,
+      footerY,
+      545,
+      footerY
+    );
+
     const footerCenter = 297.5;
+
     doc.setTextColor("#868E96");
     doc.setFont("helvetica", "italic");
     doc.setFontSize(9);
-    textTop("Thank you for choosing VV Grand Park Residency!", footerCenter, footerY + 10, {
-      maxWidth: 495,
-      align: "center",
-    });
+
+    textTop(
+      "Thank you for choosing VV Grand Park Residency!",
+      footerCenter,
+      footerY + 10,
+      {
+        maxWidth: 495,
+        align: "center",
+      }
+    );
+
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
-    textTop("vvgrandpark.com  |  bookings@vvgrandpark.com", footerCenter, footerY + 24, {
-      maxWidth: 495,
-      align: "center",
-    });
+
+    textTop(
+      "vvgrandpark.com  |  bookings@vvgrandpark.com",
+      footerCenter,
+      footerY + 24,
+      {
+        maxWidth: 495,
+        align: "center",
+      }
+    );
+
     textTop(
       "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510  |  vvgrandpark@gmail.com",
       footerCenter,
       footerY + 38,
-      { maxWidth: 495, align: "center" },
+      {
+        maxWidth: 495,
+        align: "center",
+      }
     );
 
-    doc.save(`${invNo}-${fileGuest}.pdf`);
+    doc.save(
+      `${invNo}-${fileGuest}.pdf`
+    );
   }
-  useEffect(() => {
-    if (legalPolicy || authLoading || !window.location.hash) return;
 
-    const sectionId = decodeURIComponent(window.location.hash.slice(1));
+  // ------------------------------------------------------------
+  // HASH SCROLL
+  // ------------------------------------------------------------
+  useEffect(() => {
+    if (
+      legalPolicy ||
+      authLoading ||
+      !window.location.hash
+    ) {
+      return;
+    }
+
+    const sectionId = decodeURIComponent(
+      window.location.hash.slice(1)
+    );
+
     const timeout = setTimeout(() => {
       document
         .getElementById(sectionId)
-        ?.scrollIntoView({ behavior: "smooth" });
+        ?.scrollIntoView({
+          behavior: "smooth",
+        });
     }, 100);
 
     return () => clearTimeout(timeout);
   }, [authLoading, legalPolicy]);
 
+  // ------------------------------------------------------------
+  // LOGIN
+  // ------------------------------------------------------------
   function handleLogin(u) {
     setUser(u);
-    showToast(`Welcome, ${u.name.split(" ")[0]}!`, "success");
+
+    showToast(
+      `Welcome, ${u.name.split(" ")[0]}!`,
+      "success"
+    );
+
+    // Always reset dashboard states first
+    setShowAdmin(false);
+    setShowManager(false);
+
     if (u.role === "admin") {
       setShowAdmin(true);
-      setShowManager(false);
     } else if (u.role === "manager") {
       setShowManager(true);
-      setShowAdmin(false);
     }
   }
 
-useEffect(() => {
-  const handlePopState = () => {
-    setCurrentPath(window.location.pathname);
-  };
+  // ------------------------------------------------------------
+  // URL / BROWSER BACK-FORWARD
+  // ------------------------------------------------------------
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(
+        window.location.pathname
+      );
 
-  window.addEventListener("popstate", handlePopState);
+      // Clear UI overlays when browser navigation occurs
+      setSelectedRoom(null);
+      setBookingRoom(null);
+      setShowAuth(false);
+    };
 
-  return () => {
-    window.removeEventListener("popstate", handlePopState);
-  };
-}, []);
+    window.addEventListener(
+      "popstate",
+      handlePopState
+    );
 
+    return () => {
+      window.removeEventListener(
+        "popstate",
+        handlePopState
+      );
+    };
+  }, []);
+
+  // ------------------------------------------------------------
+  // LOGOUT
+  // ------------------------------------------------------------
   async function handleLogout() {
-    await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    await apiFetch(
+      "/api/auth/logout",
+      {
+        method: "POST",
+      }
+    ).catch(() => {});
+
     setUser(null);
     setShowBookings(false);
     setShowAdmin(false);
     setShowManager(false);
-    showToast("Logged out successfully", "success");
+    setSelectedRoom(null);
+    setBookingRoom(null);
+
+    showToast(
+      "Logged out successfully",
+      "success"
+    );
   }
-    // one place that decides where "My Bookings" goes, for every button
+
+  // ------------------------------------------------------------
+  // MY BOOKINGS ROUTER
+  // ------------------------------------------------------------
   const goToMyBookings = () => {
-    if (user?.role === "admin") return window.location.assign("/admin");
-    if (user?.role === "manager") return setShowManager(true);
-    window.location.assign("/my-bookings");
+    if (user?.role === "admin") {
+      window.location.assign("/admin");
+      return;
+    }
+
+    if (user?.role === "manager") {
+      setShowManager(true);
+      setShowAdmin(false);
+      return;
+    }
+
+    window.location.assign(
+      "/my-bookings"
+    );
   };
 
+  // ------------------------------------------------------------
+  // LEGAL POLICY
+  // ------------------------------------------------------------
   if (legalPolicy) {
-    return <LegalPolicy policy={legalPolicy} />;
+    return (
+      <LegalPolicy
+        policy={legalPolicy}
+      />
+    );
   }
 
+  // ------------------------------------------------------------
+  // AUTH LOADING
+  // ------------------------------------------------------------
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0F1923]">
@@ -2731,27 +3167,51 @@ useEffect(() => {
             VV GRAND PARK
           </div>
 
-          <div className="text-[0.8rem] text-white/40">Loading...</div>
+          <div className="text-[0.8rem] text-white/40">
+            Loading...
+          </div>
         </div>
       </div>
     );
   }
 
-  if (window.location.pathname.startsWith("/booking-success/")) {
-    return <BookingSuccessRoute />;
+  // ------------------------------------------------------------
+  // BOOKING SUCCESS
+  // ------------------------------------------------------------
+  if (
+    currentPath.startsWith(
+      "/booking-success/"
+    )
+  ) {
+    return (
+      <BookingSuccessRoute />
+    );
   }
 
-  if (window.location.pathname === "/checkout") {
-    return <CheckoutPage user={user} showToast={showToast} />;
+  // ------------------------------------------------------------
+  // CHECKOUT
+  // ------------------------------------------------------------
+  if (currentPath === "/checkout") {
+    return (
+      <CheckoutPage
+        user={user}
+        showToast={showToast}
+      />
+    );
   }
 
+  // ------------------------------------------------------------
+  // SELECTED ROOM
+  // ------------------------------------------------------------
   if (selectedRoom) {
     return (
       <>
         <RoomDetail
           room={selectedRoom}
           user={user}
-          onBack={() => setSelectedRoom(null)}
+          onBack={() =>
+            setSelectedRoom(null)
+          }
           onBook={(room) => {
             setSelectedRoom(null);
             setBookingRoom(room);
@@ -2766,48 +3226,76 @@ useEffect(() => {
           <BookingModal
             room={bookingRoom}
             user={user}
-            onClose={() => setBookingRoom(null)}
+            onClose={() =>
+              setBookingRoom(null)
+            }
             showToast={showToast}
           />
         )}
 
         {showAuth && (
-          <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
+          <AuthModal
+            onClose={() =>
+              setShowAuth(false)
+            }
+            onLogin={handleLogin}
+          />
         )}
 
         {toast && (
           <Toast
             msg={toast.msg}
             type={toast.type}
-            onHide={() => setToast(null)}
+            onHide={() =>
+              setToast(null)
+            }
           />
         )}
       </>
     );
   }
 
-  if (showManager && user?.role === "manager") {
+  // ------------------------------------------------------------
+  // MANAGER DASHBOARD
+  // ------------------------------------------------------------
+  if (
+    showManager &&
+    user?.role === "manager"
+  ) {
     return (
       <>
-        <ManagerDashboard managerUser={user} onLogout={handleLogout} />
+        <ManagerDashboard
+          managerUser={user}
+          onLogout={handleLogout}
+        />
 
         {toast && (
           <Toast
             msg={toast.msg}
             type={toast.type}
-            onHide={() => setToast(null)}
+            onHide={() =>
+              setToast(null)
+            }
           />
         )}
       </>
     );
   }
 
-  if (showAdmin && user?.role === "admin") {
+  // ------------------------------------------------------------
+  // ADMIN DASHBOARD
+  // ------------------------------------------------------------
+  if (
+    showAdmin &&
+    user?.role === "admin"
+  ) {
     return (
       <>
         <AdminDashboard
           adminUser={user}
-          onClose={() => setShowAdmin(false)}
+          onClose={() =>
+            setShowAdmin(false)
+          }
           showToast={showToast}
           fullPage={true}
         />
@@ -2816,164 +3304,213 @@ useEffect(() => {
           <Toast
             msg={toast.msg}
             type={toast.type}
-            onHide={() => setToast(null)}
+            onHide={() =>
+              setToast(null)
+            }
           />
         )}
       </>
     );
   }
-if (currentPath === "/my-bookings") {
-  return (
-    <>
-      <MyBookings
-        user={user}
-        onClose={() => setShowBookings(false)}
-        showToast={showToast}
-        onAuthClick={() => setShowAuth(true)}
-        onLogout={handleLogout}
-        onDownloadInvoice={downloadInvoice}
-        onNavigateToRooms={(roomId) => {
-          if (roomId) {
-            apiFetch(`/api/rooms/${roomId}`)
-              .then((r) => r.json())
-              .then((room) => {
-                if (room?.room_id) {
-                  setSelectedRoom(room);
-                }
-              })
-              .catch(() => {});
-          } else {
-            window.location.assign("/#rooms");
+
+  // ------------------------------------------------------------
+  // MY BOOKINGS
+  // ------------------------------------------------------------
+  if (
+    currentPath === "/my-bookings"
+  ) {
+    return (
+      <>
+        <MyBookings
+          user={user}
+          onClose={() =>
+            setShowBookings(false)
           }
-        }}
-      />
-
-      {showAuth && (
-        <AuthModal
-          onClose={() => setShowAuth(false)}
-          onLogin={handleLogin}
+          showToast={showToast}
+          onAuthClick={() =>
+            setShowAuth(true)
+          }
+          onLogout={handleLogout}
+          onDownloadInvoice={
+            downloadInvoice
+          }
+          onNavigateToRooms={(roomId) => {
+            if (roomId) {
+              apiFetch(
+                `/api/rooms/${roomId}`
+              )
+                .then((r) =>
+                  r.json()
+                )
+                .then((room) => {
+                  if (room?.room_id) {
+                    setSelectedRoom(
+                      room
+                    );
+                  }
+                })
+                .catch(() => {});
+            } else {
+              window.location.assign(
+                "/#rooms"
+              );
+            }
+          }}
         />
-      )}
 
-      {toast && (
-        <Toast
-          msg={toast.msg}
-          type={toast.type}
-          onHide={() => setToast(null)}
-        />
-      )}
-    </>
-  );
-}
+        {showAuth && (
+          <AuthModal
+            onClose={() =>
+              setShowAuth(false)
+            }
+            onLogin={handleLogin}
+          />
+        )}
 
+        {toast && (
+          <Toast
+            msg={toast.msg}
+            type={toast.type}
+            onHide={() =>
+              setToast(null)
+            }
+          />
+        )}
+      </>
+    );
+  }
+
+  // ------------------------------------------------------------
+  // HOME PAGE
+  // ------------------------------------------------------------
   return (
-    <div style={{ overflowX: "hidden", width: "100%" }}>
+    <div
+      style={{
+        overflowX: "hidden",
+        width: "100%",
+      }}
+    >
       <Hero
         user={user}
-        onAuthClick={() => setShowAuth(true)}
+        onAuthClick={() =>
+          setShowAuth(true)
+        }
         onLogout={handleLogout}
-        onMyBookings={goToMyBookings}
+        onMyBookings={
+          goToMyBookings
+        }
       />
 
       <Rooms
         user={user}
-        availableRoomIds={availableRoomIds} // ← add this
-        onBookClick={(room) => setBookingRoom(room)}
-        onCardClick={(room) => setSelectedRoom(room)}
-        onAuthPrompt={() => setShowAuth(true)}
+        availableRoomIds={
+          availableRoomIds
+        }
+        onBookClick={(room) =>
+          setBookingRoom(room)
+        }
+        onCardClick={(room) =>
+          setSelectedRoom(room)
+        }
+        onAuthPrompt={() =>
+          setShowAuth(true)
+        }
       />
 
       <CalendarSection
         onViewRooms={(ids) => {
           setAvailableRoomIds(ids);
+
           setTimeout(() => {
             document
               .getElementById("rooms")
-              ?.scrollIntoView({ behavior: "smooth" });
+              ?.scrollIntoView({
+                behavior: "smooth",
+              });
           }, 300);
         }}
       />
+
       <NearbyAttractions />
+
       <Facilities />
+
       <Gallery />
+
       <Testimonials />
+
       <Footer />
 
+      {/* AUTH MODAL */}
       {showAuth && (
-        <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
+        <AuthModal
+          onClose={() =>
+            setShowAuth(false)
+          }
+          onLogin={handleLogin}
+        />
       )}
 
+      {/* BOOKING MODAL */}
       {bookingRoom && user && (
         <BookingModal
           room={bookingRoom}
           user={user}
-          onClose={() => setBookingRoom(null)}
+          onClose={() =>
+            setBookingRoom(null)
+          }
           showToast={showToast}
         />
       )}
 
-      {/* {showBookings &&
-        user &&
-        user.role !== "admin" &&
-        user.role !== "manager" && (
-          <MyBookings
-            user={user}
-            onClose={() => setShowBookings(false)}
-            showToast={showToast}
-            onNavigateToRooms={(roomId) => {
-              setShowBookings(false);
-              if (roomId) {
-                apiFetch(`/api/rooms/${roomId}`)
-                  .then((r) => r.json())
-                  .then((room) => {
-                    if (room?.room_id) setSelectedRoom(room);
-                  })
-                  .catch(() => {});
-              } else {
-                document
-                  .getElementById("rooms")
-                  ?.scrollIntoView({ behavior: "smooth" });
-              }
-            }}
-          />
-        )} */}
-
+      {/* TOAST */}
       {toast && (
         <Toast
           msg={toast.msg}
           type={toast.type}
-          onHide={() => setToast(null)}
+          onHide={() =>
+            setToast(null)
+          }
         />
       )}
 
-      {user && user.role !== "admin" && user.role !== "manager" && (
-        <button
-          onClick={goToMyBookings}
-          className="
-            fixed
-            bottom-7
-            left-7
-            z-[300]
-            flex
-            items-center
-            gap-2
-            rounded-[50px]
-            bg-[var(--navy)]
-            px-[22px]
-            py-3
-            text-[0.82rem]
-            font-semibold
-            text-[var(--white)]
-            shadow-[0_6px_24px_rgba(15,25,35,0.3)]
-            transition-all
-            duration-200
-            hover:bg-[var(--gold)]
-          "
-        >
-          <BookingIcon size={15} color="var(--gold-light)" />
-          My Bookings
-        </button>
-      )}
+      {/* MY BOOKINGS BUTTON */}
+      {user &&
+        user.role !== "admin" &&
+        user.role !== "manager" && (
+          <button
+            onClick={
+              goToMyBookings
+            }
+            className="
+              fixed
+              bottom-7
+              left-7
+              z-[300]
+              flex
+              items-center
+              gap-2
+              rounded-[50px]
+              bg-[var(--navy)]
+              px-[22px]
+              py-3
+              text-[0.82rem]
+              font-semibold
+              text-[var(--white)]
+              shadow-[0_6px_24px_rgba(15,25,35,0.3)]
+              transition-all
+              duration-200
+              hover:bg-[var(--gold)]
+            "
+          >
+            <BookingIcon
+              size={15}
+              color="var(--gold-light)"
+            />
+
+            My Bookings
+          </button>
+        )}
     </div>
   );
 }
