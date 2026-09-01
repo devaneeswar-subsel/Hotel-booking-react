@@ -188,9 +188,25 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
     return () => clearInterval(t);
   }, []);
 
+  // this page is a fixed overlay — freeze the dashboard behind it so zooming
+  // doesn't produce a second scrollbar that scrolls the background.
+  // both html and body need locking: the admin shell scrolls on <html>.
+  useEffect(() => {
+    const html = document.documentElement;
+    const prevHtml = html.style.overflow;
+    const prevBody = document.body.style.overflow;
+    html.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
+    };
+  }, []);
+
   /* add-on state (used after check-in) */
   const [addonLabel, setAddonLabel] = useState("");
   const [addonAmount, setAddonAmount] = useState("");
+  const [addonMode, setAddonMode] = useState("Cash");
 
   const toast = showToast || (() => {});
 
@@ -206,6 +222,7 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
         // hydrate the form from whatever the backend already knows
         if (data.id_proof_type) setIdType(data.id_proof_type);
         if (data.id_proof_number) setIdNumber(data.id_proof_number);
+        if (data.addon_payment_mode) setAddonMode(data.addon_payment_mode);
         if (data.checkin_payment_mode) {
           setPayMethod(data.checkin_payment_mode);
         } else if (data.payment_method) {
@@ -362,13 +379,20 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
 
       const res = await apiFetch(`/api/bookings/${bookingId}/balance-paid`, {
         method: "PATCH",
+        body: JSON.stringify({ payment_mode: payMethod }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Unable to mark as paid");
+      if (data.persisted === false)
+        toast(
+          "Payment recorded, but the date did not save — restart the backend",
+          "error",
+        );
 
-      // settle any unpaid add-ons in the same action
+      // settle any unpaid add-ons in the same action, recording their own mode
       const addonRes = await apiFetch(`/api/bookings/${bookingId}/addons/mark-paid`, {
         method: "PATCH",
+        body: JSON.stringify({ payment_mode: addonMode }),
       });
       if (!addonRes.ok) {
         const a = await addonRes.json();
@@ -493,6 +517,24 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
         })
       : "—";
 
+  const fmtStamp = (d) =>
+    d
+      ? new Date(d).toLocaleString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "—";
+
+  // the advance and the balance can be collected through different channels.
+  // bookings settled before mode tracking existed fall back to the check-in mode
+  const advanceMode = b.advance_payment_mode || b.payment_method || "—";
+  const balanceMode =
+    b.balance_payment_mode || b.checkin_payment_mode || "Not recorded";
+  const advanceAt = b.advance_paid_at || b.created_at;
+
   const guestSummary = [
     `${adults} Adult${adults === 1 ? "" : "s"}`,
     children > 0 ? `${children} Child${children === 1 ? "" : "ren"}` : null,
@@ -515,24 +557,24 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
     // sits inside the admin frame: below the 64px topbar, right of the 220px
     // sidebar, so the shell stays visible and navigation feels continuous
     <div className="fixed bottom-0 left-0 right-0 top-16 z-[90] overflow-y-auto bg-[#F5F6F8] md:left-[220px]">
-      <div className="mx-auto max-w-[1500px] px-4 py-4 md:px-6">
+      <div className="mx-auto max-w-[1500px] px-4 py-3 md:px-6">
         {/* ── page heading ────────────────────────────────────────────────── */}
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
           <button
             onClick={onClose}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-navy transition hover:bg-gray-50"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white text-navy transition hover:bg-gray-50"
             title="Back to bookings"
           >
             {I.back}
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="font-display text-[1.15rem] font-bold leading-tight text-navy">
+            <h1 className="font-display text-[0.98rem] font-bold leading-tight text-navy">
               {isCheckedOut ? "Stay Summary" : isCheckedIn ? "Checked-In Guest" : "Guest Check-In"}
-              <span className="ml-2 font-body text-[0.78rem] font-normal text-gray-400">
+              <span className="ml-2 font-body text-[0.72rem] font-normal text-gray-400">
                 #{b.booking_id} · {b.guest_name}
               </span>
             </h1>
-            <p className="text-[0.72rem] text-gray-500">
+            <p className="text-[0.66rem] leading-tight text-gray-500">
               {isCheckedIn
                 ? `Checked in ${new Date(b.actual_checkin).toLocaleString("en-IN")}`
                 : "Complete the remaining details to check in"}
@@ -541,7 +583,7 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
           <div className="flex items-center gap-2">
             {stayDuration && (
               <span
-                className="flex items-center gap-1.5 rounded-full border border-navy/15 bg-navy/[0.04] px-3.5 py-1.5 text-[0.85rem] font-bold text-navy"
+                className="flex items-center gap-1.5 rounded-full border border-navy/15 bg-navy/[0.04] px-3 py-1 text-[0.78rem] font-bold text-navy"
                 title={isCheckedOut ? "Total stay duration" : "Time since check-in"}
               >
                 <svg
@@ -816,9 +858,11 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
               )}
             </Card>
 
-            {/* Add-on charges — only relevant once the guest is in the room */}
-            {isCheckedIn && !isCheckedOut && (
+            {/* Add-on charges — entry closes at check-out, record stays visible */}
+            {isCheckedIn && (
               <Card icon={I.receipt} title="Add-on Charges" subtitle="Services used during the stay">
+                {!isCheckedOut && (
+                  <>
                 <div className="mb-3 flex flex-wrap gap-1.5">
                   {PRESET_ADDONS.map((p) => (
                     <button
@@ -855,6 +899,8 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
                     + Add
                   </button>
                 </div>
+                  </>
+                )}
                 {addonsList.length ? (
                   <div className="space-y-1.5">
                     {addonsList.map((a) => (
@@ -886,6 +932,36 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
                 ) : (
                   <div className="py-2 text-center text-[0.76rem] text-gray-400">No add-ons yet</div>
                 )}
+
+                {/* how the add-ons are settled — locked once checked out */}
+                <div className="mt-3 border-t border-gray-100 pt-3">
+                  <label className="mb-1 block text-[0.68rem] font-semibold text-gray-500">
+                    Add-on Payment Mode
+                  </label>
+                  {isCheckedOut ? (
+                    <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5">
+                      <span className="text-[0.8rem] font-semibold text-navy">
+                        {b.addon_payment_mode || addonMode}
+                      </span>
+                      <span className="text-[0.66rem] text-gray-400">Locked</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={addonMode}
+                      onChange={(e) => setAddonMode(e.target.value)}
+                      className={inputCls}
+                    >
+                      {PAYMENT_METHODS.map((m) => (
+                        <option key={m}>{m}</option>
+                      ))}
+                    </select>
+                  )}
+                  {b.addon_paid_at && (
+                    <div className="mt-1.5 text-[0.7rem] text-gray-500">
+                      Add-ons settled {fmtStamp(b.addon_paid_at)}
+                    </div>
+                  )}
+                </div>
               </Card>
             )}
 
@@ -994,35 +1070,51 @@ export default function GuestCheckIn({ bookingId, onClose, showToast, onRefresh 
               </div>
             </Card>
 
-            <Card icon={I.receipt} title="Payment Summary" subtitle="Already paid">
+            <Card icon={I.receipt} title="Payment Summary" subtitle="Advance and balance">
               <div className="rounded-lg bg-gray-50 px-3.5 py-2.5">
                 <Row label="Total Paid Amount" value={money(alreadyPaid)} strong />
-                <Row label="Payment Method" value={b.payment_method || payMethod} />
-                <Row
-                  label="Paid Date"
-                  value={
-                    b.created_at
-                      ? new Date(b.created_at).toLocaleString("en-IN", {
-                          day: "2-digit",
-                          month: "short",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "—"
-                  }
-                />
-                <Row label="Transaction ID" value={b.payment_id || b.advance_payment_id || "—"} />
-              </div>
-
-              <div className="mt-3">
-                <div className="mb-1 text-[0.68rem] font-bold uppercase tracking-wider text-gray-400">
-                  Payment Breakdown
-                </div>
-                <Row label="Advance Payment" value={money(advancePaid)} />
-                {balancePaid > 0 && <Row label="Balance Paid" value={money(balancePaid)} />}
                 <Row label="Balance (Remaining)" value={money(remaining)} strong />
               </div>
+
+              {/* advance — collected at the time of booking */}
+              <div className="mt-3 rounded-lg border border-gray-200 px-3.5 py-2.5">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-[0.68rem] font-bold uppercase tracking-wider text-gray-400">
+                    Advance Payment
+                  </span>
+                  <span className="text-[0.9rem] font-bold text-navy">
+                    {money(advancePaid)}
+                  </span>
+                </div>
+                <Row label="Mode" value={advanceMode} />
+                <Row label="Paid On" value={fmtStamp(advanceAt)} />
+                {(b.advance_payment_id || b.payment_id) && (
+                  <Row
+                    label="Transaction ID"
+                    value={b.advance_payment_id || b.payment_id}
+                  />
+                )}
+              </div>
+
+              {/* balance — collected at the desk, often a different mode */}
+              {balancePaid > 0 ? (
+                <div className="mt-2 rounded-lg border border-gray-200 px-3.5 py-2.5">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-[0.68rem] font-bold uppercase tracking-wider text-gray-400">
+                      Balance Payment
+                    </span>
+                    <span className="text-[0.9rem] font-bold text-navy">
+                      {money(balancePaid)}
+                    </span>
+                  </div>
+                  <Row label="Mode" value={balanceMode} />
+                  <Row label="Paid On" value={fmtStamp(b.balance_paid_at)} />
+                </div>
+              ) : (
+                <div className="mt-2 rounded-lg border border-dashed border-gray-200 px-3.5 py-2.5 text-center text-[0.74rem] text-gray-400">
+                  Balance not collected yet
+                </div>
+              )}
             </Card>
 
             {isCheckedIn && !isCheckedOut && (
