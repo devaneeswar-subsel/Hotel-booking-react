@@ -206,7 +206,7 @@ export async function printInvoicePdf(
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       ink(WHITE);
-      doc.text("+91 93849 82510", L, FOOTER_TOP + 11);
+      doc.text("+91 93849 82510, +91 9003251115", L, FOOTER_TOP + 11);
       doc.text("vvgrandpark@gmail.com", L + 45, FOOTER_TOP + 11);
       doc.text("vvgrandpark.com", L + 105, FOOTER_TOP + 11);
       doc.setFont("helvetica", "italic");
@@ -331,7 +331,7 @@ export async function printInvoicePdf(
 
   doc.text("vvgrandpark.com", FX, y + 9);
   doc.text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", FX, y + 16);
-  doc.text("+91 93849 82510  |  vvgrandpark@gmail.com", FX, y + 23);
+  doc.text("+91 93849 82510 |+91 90032 51115  |  vvgrandpark@gmail.com", FX, y + 23);
 
   y = Math.max(leftY, y + 28) + 6;
 

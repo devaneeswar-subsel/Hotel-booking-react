@@ -419,7 +419,7 @@ export default function CheckoutPage({ user, showToast }) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     textTop("3/4/D, Thanjai Saalai, Thiruvarur - 610004", 350, 162);
-    textTop("+91 93849 82510 | vvgrandpark@gmail.com", 350, 175);
+    textTop("+91 93849 82510 |+91 90032 51115 | vvgrandpark@gmail.com", 350, 175);
 
     const tableTop = 210;
     doc.setFillColor("#0F1923");
@@ -564,7 +564,7 @@ export default function CheckoutPage({ user, showToast }) {
       align: "center",
     });
     textTop(
-      "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510  |  vvgrandpark@gmail.com",
+      "3/4/D, Thanjai Saalai, Thiruvarur - 610004  |  +91 93849 82510 |+91 90032 51115  |  vvgrandpark@gmail.com",
       footerCenter,
       footerY + 38,
       { maxWidth: 495, align: "center" },

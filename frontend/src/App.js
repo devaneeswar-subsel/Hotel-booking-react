@@ -1473,10 +1473,16 @@ function BookingReceiptModal({ booking, onClose, onDownloadInvoice }) {
             <p className="mt-4 flex items-center gap-1.5 text-[0.78rem] text-[var(--gray-600)]">
               📞 To cancel, call{" "}
               <a
-                href="tel:+919384982510"
+                href="tel:+919384982510 "
                 className="font-semibold text-blue-800"
               >
                 +91 93849 82510
+              </a>
+              <a
+                href="tel:+919003251115"
+                className="font-semibold text-blue-800"
+              >
+                +91 90032 51115
               </a>
             </p>
           )}
@@ -2310,6 +2316,16 @@ const [visibleBookings, setVisibleBookings] = useState(5);
                           >
                             +91 93849 82510
                           </a>
+                          <a
+                            href="tel:+919003251115"
+                            className="font-semibold text-blue-800 no-underline"
+                            onClick={(e) =>
+                              e.stopPropagation()
+                            }
+                          >
+                            +91 90032 51115
+                          </a>
+                          
                         </p>
                       ) : (
                         <div />
