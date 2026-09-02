@@ -96,6 +96,9 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // ─── AUTO MIGRATE ────────────────────────────────────────────────────────────
 async function runMigrations() {
   try {
+    try {
+      await db.query("ALTER TABLE users MODIFY COLUMN email VARCHAR(255) NULL");
+    } catch (e) {}
     const cols = [
       "actual_checkin DATETIME DEFAULT NULL",
       "actual_checkout DATETIME DEFAULT NULL",
@@ -132,6 +135,14 @@ async function runMigrations() {
       "balance_paid_at DATETIME DEFAULT NULL",
       "addon_payment_mode VARCHAR(40) DEFAULT NULL",
       "addon_paid_at DATETIME DEFAULT NULL",
+      "discount_applied TINYINT DEFAULT 0",
+      "discount_amount DECIMAL(10,2) DEFAULT 0",
+      // ── checkout-time discount (separate from booking-time discount) ──
+      "checkout_discount_applied TINYINT DEFAULT 0",
+      "checkout_discount_amount DECIMAL(10,2) DEFAULT 0",
+      "checkout_discount_reason VARCHAR(255) DEFAULT NULL",
+      "checkout_discount_at DATETIME DEFAULT NULL",
+      "checkout_discount_by INT DEFAULT NULL",
     ];
     for (const col of cols) {
       try {
@@ -158,6 +169,14 @@ async function runMigrations() {
     await db.query(
       `CREATE TABLE IF NOT EXISTS booking_addons (addon_id INT AUTO_INCREMENT PRIMARY KEY, booking_id INT NOT NULL, label VARCHAR(100) NOT NULL, amount DECIMAL(10,2) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE)`,
     );
+      await db.query(
+        `CREATE TABLE IF NOT EXISTS room_blocked_dates (
+          room_id INT NOT NULL,
+          blocked_date DATE NOT NULL,
+          PRIMARY KEY (room_id, blocked_date),
+          FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
+        )`,
+      );
     try {
       await db.query(
         "ALTER TABLE booking_addons ADD COLUMN paid TINYINT DEFAULT 0",
@@ -309,6 +328,8 @@ async function calculateBookingAmounts({
   check_out_date,
   advance_amount,
   guest_count,
+  discount_applied = false,
+  discount_amount = 0,
 }) {
   const [roomRows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
     room_id,
@@ -351,10 +372,36 @@ async function calculateBookingAmounts({
     throw err;
   }
 
+    const [blockedDates] = await db.query(
+      `SELECT blocked_date
+       FROM room_blocked_dates
+       WHERE room_id = ? AND blocked_date >= ? AND blocked_date < ?
+       LIMIT 1`,
+      [room_id, check_in_date, check_out_date],
+    );
+    if (blockedDates.length) {
+      const err = new Error("Room is blocked for one or more selected dates");
+      err.status = 400;
+      throw err;
+    }
+
   const nightlyRate = resolveNightlyRate(room, guest_count);
   const roomSubtotal = nightlyRate * nights;
-  const gstAmount = Math.round(roomSubtotal * GST_RATE * 100) / 100;
-  const totalAmount = Math.round((roomSubtotal + gstAmount) * 100) / 100;
+  const requestedDiscount = Number(discount_amount || 0);
+  const discountAmount = discount_applied ? requestedDiscount : 0;
+  if (!Number.isFinite(discountAmount) || discountAmount < 0) {
+    const err = new Error("Discount must be a valid non-negative amount");
+    err.status = 400;
+    throw err;
+  }
+  if (discountAmount > roomSubtotal) {
+    const err = new Error("Discount cannot exceed room subtotal");
+    err.status = 400;
+    throw err;
+  }
+  const discountedRoomAmount = Math.max(0, roomSubtotal - discountAmount);
+  const gstAmount = Math.round(discountedRoomAmount * GST_RATE * 100) / 100;
+  const totalAmount = Math.round((discountedRoomAmount + gstAmount) * 100) / 100;
   const advanceAmount = resolveAdvanceAmount(totalAmount, advance_amount);
   const remainingAmount =
     Math.round(Math.max(0, totalAmount - advanceAmount) * 100) / 100;
@@ -364,6 +411,9 @@ async function calculateBookingAmounts({
     nights,
     nightlyRate,
     roomSubtotal,
+    discountApplied: Boolean(discount_applied),
+    discountAmount,
+    discountedRoomAmount,
     gstAmount,
     totalAmount,
     advanceAmount,
@@ -375,8 +425,8 @@ async function findOrCreateGuestUser({ name, email, phone }) {
   const normalizedName = String(name || "").trim();
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const rawPhone = String(phone || "").trim();
-  if (!normalizedName || !normalizedEmail || !rawPhone) {
-    const err = new Error("Customer name, email and phone are required");
+  if (!normalizedName || !rawPhone) {
+    const err = new Error("Customer name and phone are required");
     err.status = 400;
     throw err;
   }
@@ -385,7 +435,7 @@ async function findOrCreateGuestUser({ name, email, phone }) {
     err.status = 400;
     throw err;
   }
-  if (!EMAIL_PATTERN.test(normalizedEmail)) {
+  if (normalizedEmail && !EMAIL_PATTERN.test(normalizedEmail)) {
     const err = new Error("Enter a valid email address");
     err.status = 400;
     throw err;
@@ -399,17 +449,18 @@ async function findOrCreateGuestUser({ name, email, phone }) {
   }
 
   const [existing] = await db.query(
-    "SELECT user_id, role FROM users WHERE email=? LIMIT 1",
-    [normalizedEmail],
+    "SELECT user_id, role, email FROM users WHERE phone=? LIMIT 1",
+    [normalizedPhone],
   );
   if (existing.length) {
     if (existing[0].role !== "guest") {
-      const err = new Error("Use a guest/customer email address");
+      const err = new Error("This phone number belongs to a staff account");
       err.status = 400;
       throw err;
     }
-    await db.query("UPDATE users SET name=?, phone=? WHERE user_id=?", [
+    await db.query("UPDATE users SET name=?, email=COALESCE(?, email), phone=? WHERE user_id=?", [
       normalizedName,
+      normalizedEmail || null,
       normalizedPhone,
       existing[0].user_id,
     ]);
@@ -420,22 +471,22 @@ async function findOrCreateGuestUser({ name, email, phone }) {
   const hashed = await bcrypt.hash(randomPassword, 12);
   const [result] = await db.query(
     "INSERT INTO users (name,email,password,phone,role) VALUES (?,?,?,?,'guest')",
-    [normalizedName, normalizedEmail, hashed, normalizedPhone],
+    [normalizedName, normalizedEmail || null, hashed, normalizedPhone],
   );
   return result.insertId;
 }
 
 app.get("/api/customers/lookup", requireManager, async (req, res) => {
   try {
-    const email = String(req.query.email || "").trim().toLowerCase();
-    if (!email) return res.status(400).json({ error: "Email is required" });
-    if (!EMAIL_PATTERN.test(email)) {
-      return res.status(400).json({ error: "Enter a valid email address" });
+    const phone = normalizeCustomerPhone(req.query.phone);
+    if (!phone) return res.status(400).json({ error: "Phone number is required" });
+    if (!INDIAN_MOBILE_PATTERN.test(phone)) {
+      return res.status(400).json({ error: "Enter a valid 10-digit mobile number" });
     }
 
     const [rows] = await db.query(
-      "SELECT user_id, name, email, phone, role FROM users WHERE email=? LIMIT 1",
-      [email],
+      "SELECT user_id, name, email, phone, role FROM users WHERE phone=? LIMIT 1",
+      [phone],
     );
     if (!rows.length) return res.json({ exists: false });
 
@@ -443,7 +494,7 @@ app.get("/api/customers/lookup", requireManager, async (req, res) => {
     if (user.role !== "guest") {
       return res
         .status(400)
-        .json({ error: "Use a guest/customer email address" });
+        .json({ error: "Use a guest/customer phone number" });
     }
 
     res.json({
@@ -533,6 +584,8 @@ async function generateAdvanceInvoicePdf(booking) {
     ),
   );
   const roomSubtotal = Number(booking.total_price || 0);
+  const discountAmount = Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
+  const discountedRoomAmount = Math.max(0, roomSubtotal - discountAmount);
   const gstAmount = Number(booking.gst_amount || 0);
   const totalAmount = Number(
     booking.total_amount || booking.final_total || roomSubtotal + gstAmount,
@@ -629,6 +682,9 @@ async function generateAdvanceInvoicePdf(booking) {
     y += 14;
     [
       ["Room Charges", roomSubtotal],
+      ...(discountAmount > 0
+        ? [["Discount", -discountAmount], ["Discounted Room Amount", discountedRoomAmount]]
+        : []),
       ["GST (18%)", gstAmount],
       ["Total Amount", totalAmount],
       ["Advance Paid", advancePaid],
@@ -729,6 +785,7 @@ async function sendAdvanceInvoiceEmail(booking) {
   const roomLabel = `${escapeHtml(booking.room_type)} - Room ${escapeHtml(
     booking.room_number || booking.room_id,
   )}`;
+  const discountAmount = Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
   const emailTermsHtml = INVOICE_TERMS.map(
     (term) =>
       `<li style="margin:0 0 6px;color:#6B7280;line-height:18px;">${escapeHtml(
@@ -764,6 +821,7 @@ async function sendAdvanceInvoiceEmail(booking) {
               <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Payment Mode</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;color:#0F1923;">${escapeHtml(
                 booking.payment_method || "-",
               )}</td></tr>
+              ${discountAmount > 0 ? `<tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Discount</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#C0392B;">-${formatInvoiceMoney(discountAmount)}</td></tr>` : ""}
               <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Advance Paid</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#2D9A6E;">${formatInvoiceMoney(
                 advancePaid,
               )}</td></tr>
@@ -992,6 +1050,8 @@ app.get("/api/rooms", async (req, res) => {
     if (check_in && check_out) {
       q += ` AND room_id NOT IN (SELECT room_id FROM bookings WHERE status NOT IN ('cancelled','pending') AND check_in_date<? AND check_out_date>?)`;
       p.push(check_out, check_in);
+      q += " AND room_id NOT IN (SELECT room_id FROM room_blocked_dates WHERE blocked_date>=? AND blocked_date<?)";
+      p.push(check_in, check_out);
     }
     const [rooms] = await db.query(q, p);
     res.json(rooms);
@@ -1017,12 +1077,34 @@ app.get("/api/rooms/:roomId/booked-dates", async (req, res) => {
       [roomId],
     );
 
-    res.json(rows);
+    const [blockedRows] = await db.query(
+      `SELECT
+        NULL AS booking_id,
+        blocked_date AS check_in_date,
+        DATE_ADD(blocked_date, INTERVAL 1 DAY) AS check_out_date
+       FROM room_blocked_dates
+       WHERE room_id = ?`,
+      [roomId],
+    );
+
+    res.json([...rows, ...blockedRows]);
   } catch (err) {
     console.error(err);
     res.status(500).json({
       error: err.message,
     });
+  }
+});
+
+app.get("/api/rooms/:roomId/blocked-dates", requireManager, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT DATE_FORMAT(blocked_date, '%Y-%m-%d') AS blocked_date FROM room_blocked_dates WHERE room_id=? ORDER BY blocked_date ASC",
+      [req.params.roomId],
+    );
+    res.json(rows.map((row) => row.blocked_date));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 app.get("/api/rooms/:id", async (req, res) => {
@@ -2362,6 +2444,8 @@ app.post(
         vehicle_type = "none",
         advance_amount,
         payment_mode,
+        discount_applied = false,
+        discount_amount = 0,
         pickup_location,
         dropoff_location,
       } = req.body;
@@ -2398,6 +2482,8 @@ app.post(
         check_out_date,
         advance_amount,
         guest_count,
+        discount_applied,
+        discount_amount,
       });
       const requestedGuests = Math.max(1, Number(guest_count) || 1);
       if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
@@ -2413,11 +2499,12 @@ app.post(
         `INSERT INTO bookings (
           user_id, room_id, check_in_date, check_out_date, guest_count,
           total_price, gst_amount, final_total, total_amount,
+          discount_applied, discount_amount,
           advance_amount, advance_paid, balance_paid, remaining_amount,
           payment_status, payment_id, advance_payment_id, advance_order_id,
           payment_method, booking_source, vehicle_type, vehicle_price,
           vehicle_status, pickup_location, dropoff_location, status
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
         [
           userId,
           room_id,
@@ -2428,6 +2515,8 @@ app.post(
           amounts.gstAmount,
           amounts.totalAmount,
           amounts.totalAmount,
+          amounts.discountApplied ? 1 : 0,
+          amounts.discountAmount,
           amounts.advanceAmount,
           amounts.advanceAmount,
           0,
@@ -2459,6 +2548,9 @@ app.post(
         message: "Booking confirmed with manual advance payment",
         booking_id: bookingId,
         totalAmount: amounts.totalAmount,
+        discountApplied: amounts.discountApplied,
+        discountAmount: amounts.discountAmount,
+        discountedRoomAmount: amounts.discountedRoomAmount,
         advanceAmount: amounts.advanceAmount,
         advancePaid: amounts.advanceAmount,
         remainingAmount: amounts.remainingAmount,
@@ -2484,6 +2576,11 @@ const PAYMENT_TRACKING_COLUMNS = [
   "balance_paid_at DATETIME DEFAULT NULL",
   "addon_payment_mode VARCHAR(40) DEFAULT NULL",
   "addon_paid_at DATETIME DEFAULT NULL",
+  "checkout_discount_applied TINYINT DEFAULT 0",
+  "checkout_discount_amount DECIMAL(10,2) DEFAULT 0",
+  "checkout_discount_reason VARCHAR(255) DEFAULT NULL",
+  "checkout_discount_at DATETIME DEFAULT NULL",
+  "checkout_discount_by INT DEFAULT NULL",
 ];
 
 let paymentColumnsChecked = false;
@@ -2512,6 +2609,12 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
     const booking = rows[0];
     const currentBalancePaid = Number(booking.balance_paid || 0);
     const advancePaid = Number(booking.advance_paid || 0);
+        const checkoutDiscountBase =
+      Number(booking.checkout_discount_applied ? booking.checkout_discount_amount : 0) || 0;
+    const checkoutDiscountImpact =
+      Math.round(checkoutDiscountBase * (1 + GST_RATE) * 100) / 100;
+
+  
 
     // total the guest owes for the room booking
     const roomWithGst =
@@ -2525,7 +2628,9 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
     const storedRemaining = Number(booking.remaining_amount || 0);
     const derivedRemaining = Math.max(
       0,
-      Math.round((totalAmount - advancePaid - currentBalancePaid) * 100) / 100,
+      Math.round(
+        (totalAmount - advancePaid - currentBalancePaid - checkoutDiscountImpact) * 100,
+      ) / 100,
     );
     const remaining = storedRemaining > 0 ? storedRemaining : derivedRemaining;
     const newBalancePaid = currentBalancePaid + remaining;
@@ -2579,7 +2684,103 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
     res.status(500).json({ error: err.message });
   }
 });
+app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res) => {
+  try {
+    await ensurePaymentColumns();
 
+    const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
+      req.params.id,
+    ]);
+    if (!rows.length) return res.status(404).json({ error: "Booking not found" });
+    const booking = rows[0];
+
+    if (booking.status === "cancelled") {
+      return res
+        .status(400)
+        .json({ error: "Cannot apply a checkout discount to a cancelled booking" });
+    }
+
+    const requestedDiscount =
+      Math.round(Number(req.body?.checkout_discount_amount || 0) * 100) / 100;
+    if (!Number.isFinite(requestedDiscount) || requestedDiscount < 0) {
+      return res.status(400).json({ error: "Enter a valid discount amount" });
+    }
+
+    // Pre-tax model: the discount reduces the room's taxable value (same
+    // base the original booking discount reduces), so it can never exceed
+    // that room amount. GST recalculates on the lower amount.
+    const roomSubtotal = Number(booking.total_price || 0);
+    const originalDiscount =
+      Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
+    const discountedRoomBase = Math.max(0, roomSubtotal - originalDiscount);
+
+    if (requestedDiscount > discountedRoomBase) {
+      return res
+        .status(400)
+        .json({ error: "Checkout discount cannot exceed the room amount" });
+    }
+
+    // total/advance/balance always read fresh — never from a previous
+    // checkout-discount write — so repeat calls never stack.
+    const roomWithGst = Math.round(discountedRoomBase * (1 + GST_RATE) * 100) / 100;
+    const totalAmount = Number(booking.total_amount || booking.final_total || roomWithGst);
+    const advancePaid = Number(booking.advance_paid || 0);
+    const balancePaid = Number(booking.balance_paid || 0);
+    const baseRemaining = Math.max(
+      0,
+      Math.round((totalAmount - advancePaid - balancePaid) * 100) / 100,
+    );
+
+    const discountGst = Math.round(requestedDiscount * GST_RATE * 100) / 100;
+    const discountTotalImpact = Math.round((requestedDiscount + discountGst) * 100) / 100;
+
+    const newRemaining = Math.max(
+      0,
+      Math.round((baseRemaining - discountTotalImpact) * 100) / 100,
+    );
+
+    const reason = req.body?.reason ? String(req.body.reason).slice(0, 255) : null;
+    const applied = requestedDiscount > 0;
+
+    await db.query(
+      `UPDATE bookings
+          SET checkout_discount_applied = ?,
+              checkout_discount_amount = ?,
+              checkout_discount_reason = ?,
+              checkout_discount_at = ?,
+              checkout_discount_by = ?,
+              remaining_amount = ?,
+              payment_status = ?
+        WHERE booking_id = ?`,
+      [
+        applied ? 1 : 0,
+        requestedDiscount,
+        applied ? reason : null,
+        applied ? new Date() : null,
+        applied ? req.user.user_id : null,
+        newRemaining,
+        newRemaining > 0 ? "PARTIALLY_PAID" : "PAID",
+        req.params.id,
+      ],
+    );
+
+    res.json({
+      message: applied ? "Checkout discount applied" : "Checkout discount removed",
+      checkout_discount_applied: applied,
+      checkout_discount_amount: requestedDiscount,
+      checkout_discount_gst: discountGst,
+      checkout_discount_total_impact: discountTotalImpact,
+      totalAmount,
+      advancePaid,
+      balancePaid,
+      baseRemaining,
+      remainingAmount: newRemaining,
+      paymentStatus: newRemaining > 0 ? "PARTIALLY_PAID" : "PAID",
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 // ── shared check-in detail persistence ───────────────────────────────────────
 // Creates the table on demand so a missed migration can never silently drop
 // the guest list, and returns what was actually written so the caller can
@@ -3134,6 +3335,48 @@ app.patch("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
       values,
     );
     res.json({ message: "Room updated" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/admin/rooms/:id/blocked-dates", requireAdmin, async (req, res) => {
+  try {
+    const dates = Array.isArray(req.body.dates) ? req.body.dates : [];
+    const validDates = [...new Set(dates)].filter((date) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(String(date)),
+    );
+    if (!validDates.length) {
+      return res.status(400).json({ error: "Select at least one valid date" });
+    }
+    await db.query(
+      `INSERT IGNORE INTO room_blocked_dates (room_id, blocked_date) VALUES ${validDates
+        .map(() => "(?, ?)")
+        .join(",")}`,
+      validDates.flatMap((date) => [req.params.id, date]),
+    );
+    res.json({ message: "Room dates blocked" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/admin/rooms/:id/blocked-dates", requireAdmin, async (req, res) => {
+  try {
+    const dates = Array.isArray(req.body.dates) ? req.body.dates : [];
+    const validDates = [...new Set(dates)].filter((date) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(String(date)),
+    );
+    if (!validDates.length) {
+      return res.status(400).json({ error: "Select at least one date" });
+    }
+    await db.query(
+      `DELETE FROM room_blocked_dates WHERE room_id=? AND blocked_date IN (${validDates
+        .map(() => "?")
+        .join(",")})`,
+      [req.params.id, ...validDates],
+    );
+    res.json({ message: "Room dates unblocked" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

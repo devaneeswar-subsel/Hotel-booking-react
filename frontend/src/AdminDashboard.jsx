@@ -27,6 +27,10 @@ function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
 }
+function getBookingCreatedTime(booking) {
+  const timestamp = new Date(booking.created_at || booking.createdAt || 0).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
 const apiFetch = (url, options = {}) =>
   fetch(`${API}${url}`, {
     ...options,
@@ -823,7 +827,11 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   if (!booking) return null;
 
   const basePrice = Number(booking.total_price);
-  const roomGst = Math.round(basePrice * GST_RATE * 100) / 100;
+  const discountAmount = Number(
+    booking.discount_applied ? booking.discount_amount : 0,
+  ) || 0;
+  const discountedRoomAmount = Math.max(0, basePrice - discountAmount);
+  const roomGst = Math.round(discountedRoomAmount * GST_RATE * 100) / 100;
   const alreadyPaid = Math.round((basePrice + roomGst) * 100) / 100;
   const addonTotal = Number(booking.addon_charges || 0);
   const addonGst = Math.round(addonTotal * GST_RATE * 100) / 100;
@@ -1212,6 +1220,18 @@ const bookingPaidLabel =
                   label: "Room Charges",
                   val: `Rs.${basePrice.toLocaleString()}`,
                 },
+                ...(discountAmount > 0
+                  ? [
+                      {
+                        label: "Discount",
+                        val: `- Rs.${discountAmount.toLocaleString()}`,
+                      },
+                      {
+                        label: "Discounted Room Amount",
+                        val: `Rs.${discountedRoomAmount.toLocaleString()}`,
+                      },
+                    ]
+                  : []),
                 {
                   label: "GST (18%)",
                   val: `Rs.${Math.round(roomGst).toLocaleString()}`,
@@ -2273,6 +2293,146 @@ function ResetPasswordModal({ user, onClose, showToast }) {
     </div>
   );
 }
+function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
+  const [blockedDates, setBlockedDates] = useState([]);
+  const [selectedDates, setSelectedDates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    apiFetch(`/api/rooms/${room.room_id}/blocked-dates`)
+      .then((res) => res.json().then((data) => ({ res, data })))
+      .then(({ res, data }) => {
+        if (!res.ok) throw new Error(data.error || "Unable to load blocked dates");
+        if (active) setBlockedDates(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        if (active) showToast(err.message, "error");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [room.room_id, showToast]);
+
+  const blockedDateSet = new Set(blockedDates);
+  const selectedDateKeys = selectedDates.map((date) => formatLocalDate(date));
+
+  function toggleDate(date) {
+    const dateKey = formatLocalDate(date);
+    setSelectedDates((current) =>
+      current.some((selectedDate) => formatLocalDate(selectedDate) === dateKey)
+        ? current.filter((selectedDate) => formatLocalDate(selectedDate) !== dateKey)
+        : [...current, date],
+    );
+  }
+
+  async function saveDates(action) {
+    if (!selectedDateKeys.length) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/admin/rooms/${room.room_id}/blocked-dates`, {
+        method: action === "block" ? "POST" : "DELETE",
+        body: JSON.stringify({ dates: selectedDateKeys }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Unable to update blocked dates");
+      showToast(
+        action === "block" ? "Selected dates blocked" : "Selected dates unblocked",
+        "success",
+      );
+      setSelectedDates([]);
+      const refreshed = await apiFetch(`/api/rooms/${room.room_id}/blocked-dates`);
+      const refreshedData = await refreshed.json();
+      if (refreshed.ok) setBlockedDates(Array.isArray(refreshedData) ? refreshedData : []);
+      onRefresh();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[800] flex items-center justify-center bg-navy/70 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-[460px] overflow-hidden rounded-2xl bg-white shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+        <div className="flex items-center justify-between bg-navy px-6 py-5">
+          <div>
+            <div className="font-display text-[1rem] font-semibold text-white">
+              Room {room.room_number || room.room_id} — Manage Room Availability
+            </div>
+            <div className="mt-0.5 text-[0.72rem] text-white/50">{room.room_type}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+          >
+            <XIcon size={13} color="#fff" />
+          </button>
+        </div>
+        <div className="p-6">
+          {loading ? (
+            <div className="py-10 text-center text-sm text-gray-400">Loading blocked dates...</div>
+          ) : (
+            <>
+              <DatePicker
+                inline
+                selected={selectedDates[selectedDates.length - 1] || null}
+                onChange={toggleDate}
+                dayClassName={(date) => {
+                  const dateKey = formatLocalDate(date);
+                  const classes = [];
+                  if (blockedDateSet.has(dateKey)) classes.push("vv-room-date-blocked");
+                  if (selectedDateKeys.includes(dateKey)) classes.push("vv-room-date-selected");
+                  return classes.join(" ") || undefined;
+                }}
+                calendarClassName="vv-calendar"
+              />
+              <div className="mt-4 rounded-lg bg-gray-50 p-3">
+                <div className="text-[0.65rem] font-bold uppercase tracking-[1px] text-gray-400">
+                  Currently blocked dates
+                </div>
+                <div className="mt-1 text-[0.82rem] text-gray-700">
+                  {blockedDates.length ? blockedDates.join(", ") : "No dates blocked"}
+                </div>
+              </div>
+              <div className="mt-2 text-[0.72rem] text-gray-400">
+                Selected: {selectedDateKeys.length ? selectedDateKeys.join(", ") : "None"}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2 border-t border-gray-200 px-6 py-4">
+          <button
+            onClick={() => saveDates("unblock")}
+            disabled={saving || loading || !selectedDates.length}
+            className="flex-1 rounded-lg border-[1.5px] border-emerald-600 px-3 py-2.5 text-[0.78rem] font-semibold text-emerald-600 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Unblock Selected Dates
+          </button>
+          <button
+            onClick={() => saveDates("block")}
+            disabled={saving || loading || !selectedDates.length}
+            className="flex-1 rounded-lg bg-navy px-3 py-2.5 text-[0.78rem] font-semibold text-gold transition hover:bg-navy/90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {saving ? "Saving..." : "Block Selected Dates"}
+          </button>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="w-full rounded-lg border-[1.5px] border-gray-200 px-3 py-2.5 text-[0.78rem] font-semibold text-gray-600 transition hover:bg-gray-50 disabled:opacity-40"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /*═════════════════════════════════════════════════════════
    MAIN ADMIN DASHBOARD
 ══════════════════════════════════════════════════════════════════════════════ */
@@ -2291,6 +2451,7 @@ export default function AdminDashboard({
   const [allRooms, setAllRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bookingRoom, setBookingRoom] = useState(null);
+  const [roomAvailabilityRoom, setRoomAvailabilityRoom] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [selectedBookingId, setSelectedBookingId] = useState(null);
@@ -2302,7 +2463,7 @@ export default function AdminDashboard({
   const [bookingPage, setBookingPage] = useState(1);
   const [userPage, setUserPage] = useState(1);
   const itemsPerPage = 10;
-    const [bookingFilter, setBookingFilter] = useState("week"); // week | month | custom | checkedin
+    const [bookingFilter, setBookingFilter] = useState("recent"); // recent | week | month | custom | checkedin
     const [customStart, setCustomStart] = useState("");
     const [customEnd, setCustomEnd] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -2543,15 +2704,26 @@ export default function AdminDashboard({
   const confirmed = bookings.filter((b) => b.status === "confirmed").length;
   const cancelled = bookings.filter((b) => b.status === "cancelled").length;
   const completed = bookings.filter((b) => b.status === "completed").length;
+    const recentCutoff = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    const recentBookings = bookings
+      .filter((booking) => getBookingCreatedTime(booking) >= recentCutoff)
+      .sort(
+        (a, b) =>
+          getBookingCreatedTime(b) - getBookingCreatedTime(a) ||
+          Number(b.booking_id || 0) - Number(a.booking_id || 0),
+      );
     const filterRange = getFilterRange(bookingFilter);
-    const dateAndStatusFiltered = bookings.filter((b) => {
+    const dateAndStatusFiltered =
+      bookingFilter === "recent"
+        ? recentBookings
+        : bookings.filter((b) => {
       if (bookingFilter === "checkedin") {
         return Boolean(b.actual_checkin) && !b.actual_checkout;
       }
       if (!filterRange) return true;
       const checkIn = new Date(b.check_in_date);
       return checkIn >= filterRange.start && checkIn <= filterRange.end;
-    });
+        });
     const filteredBookings = dateAndStatusFiltered.filter(
       (b) =>
         !searchTerm ||
@@ -3071,6 +3243,7 @@ export default function AdminDashboard({
               {/* Filter tabs */}
               <div className="flex flex-wrap items-center gap-2 mb-5">
                 {[
+                  { id: "recent", label: "Recent" },
                   { id: "week", label: "This Week" },
                   { id: "month", label: "This Month" },
                   { id: "custom", label: "Custom Date" },
@@ -3496,7 +3669,9 @@ export default function AdminDashboard({
                             </button>
                             <button
                               onClick={() =>
-                                toggleRoom(r.room_id, r.is_available)
+                                r.is_available
+                                  ? setRoomAvailabilityRoom(r)
+                                  : toggleRoom(r.room_id, r.is_available)
                               }
                               className={`px-2.5 py-1 rounded border-[1.5px] bg-none text-[0.72rem] font-semibold cursor-pointer transition-colors
                                 ${
@@ -3822,6 +3997,14 @@ export default function AdminDashboard({
       {showAddRoom && (
         <AddRoomModal
           onClose={() => setShowAddRoom(false)}
+          showToast={showToast}
+          onRefresh={fetchAll}
+        />
+      )}
+      {roomAvailabilityRoom && (
+        <RoomBlockedDatesModal
+          room={roomAvailabilityRoom}
+          onClose={() => setRoomAvailabilityRoom(null)}
           showToast={showToast}
           onRefresh={fetchAll}
         />

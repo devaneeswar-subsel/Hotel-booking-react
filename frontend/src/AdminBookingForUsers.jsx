@@ -69,6 +69,13 @@ function parseLocalDate(dateStr) {
   return new Date(year, month - 1, day);
 }
 
+function isPastDate(date) {
+  if (!date) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date < today;
+}
+
 function buildOccupiedNights(bookings = []) {
   const nights = new Set();
   bookings.forEach((booking) => {
@@ -119,9 +126,12 @@ export default function AdminBookingForUsers({
     dropoff_location: "",
     advance_amount: "",
     payment_mode: "Cash",
+    discount_applied: false,
+    discount_amount: "",
   });
   const [occupiedNights, setOccupiedNights] = useState(new Set());
   const [calendarLoading, setCalendarLoading] = useState(true);
+  const [allowPastDates, setAllowPastDates] = useState(false);
   const [customerLookup, setCustomerLookup] = useState({
     status: "idle",
     message: "",
@@ -156,8 +166,8 @@ export default function AdminBookingForUsers({
   }, [apiFetch, room.room_id, showToast]);
 
   useEffect(() => {
-    const email = form.customer_email.trim().toLowerCase();
-    if (!EMAIL_PATTERN.test(email)) {
+    const phone = normalizePhone(form.customer_phone);
+    if (!INDIAN_MOBILE_PATTERN.test(phone)) {
       setCustomerLookup({ status: "idle", message: "" });
       return undefined;
     }
@@ -171,7 +181,7 @@ export default function AdminBookingForUsers({
 
       try {
         const res = await apiFetch(
-          `/api/customers/lookup?email=${encodeURIComponent(email)}`,
+          `/api/customers/lookup?phone=${encodeURIComponent(phone)}`,
         );
         const data = await res.json();
         if (!active) return;
@@ -179,10 +189,11 @@ export default function AdminBookingForUsers({
 
         if (data.exists && data.user) {
           setForm((prev) => {
-            if (prev.customer_email.trim().toLowerCase() !== email) return prev;
+            if (normalizePhone(prev.customer_phone) !== phone) return prev;
             return {
               ...prev,
               customer_name: data.user.name || prev.customer_name,
+              customer_email: data.user.email || "",
               customer_phone: data.user.phone || prev.customer_phone,
             };
           });
@@ -193,7 +204,7 @@ export default function AdminBookingForUsers({
         } else {
           setCustomerLookup({
             status: "new",
-            message: "New customer email",
+            message: "New customer phone number",
           });
         }
       } catch (err) {
@@ -210,7 +221,7 @@ export default function AdminBookingForUsers({
       active = false;
       clearTimeout(timer);
     };
-  }, [apiFetch, form.customer_email]);
+  }, [apiFetch, form.customer_phone]);
 
   const checkInDate = parseLocalDate(form.check_in_date);
   const checkOutDate = parseLocalDate(form.check_out_date);
@@ -230,8 +241,12 @@ export default function AdminBookingForUsers({
 
   const totals = useMemo(() => {
     const roomSubtotal = nightlyRate * nights;
-    const gst = Math.round(roomSubtotal * GST_RATE * 100) / 100;
-    const fullAmount = Math.round((roomSubtotal + gst) * 100) / 100;
+    const discountAmount = form.discount_applied
+      ? Math.round(Number(form.discount_amount || 0) * 100) / 100
+      : 0;
+    const discountedRoomAmount = Math.max(0, roomSubtotal - discountAmount);
+    const gst = Math.round(discountedRoomAmount * GST_RATE * 100) / 100;
+    const fullAmount = Math.round((discountedRoomAmount + gst) * 100) / 100;
     const suggestedAdvanceAmount = Math.floor(fullAmount * ADVANCE_RATE);
     const manualAdvanceAmount =
       form.advance_amount === ""
@@ -242,13 +257,15 @@ export default function AdminBookingForUsers({
       Math.round(Math.max(0, fullAmount - advanceAmount) * 100) / 100;
     return {
       roomSubtotal,
+      discountAmount,
+      discountedRoomAmount,
       gst,
       fullAmount,
       suggestedAdvanceAmount,
       advanceAmount,
       remainingAmount,
     };
-  }, [form.advance_amount, nights, nightlyRate]);
+  }, [form.advance_amount, form.discount_amount, form.discount_applied, nights, nightlyRate]);
 
   function update(name, value) {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -280,6 +297,22 @@ export default function AdminBookingForUsers({
     update("check_out_date", date ? formatLocalDate(date) : "");
   }
 
+  function handleAllowPastDatesChange(event) {
+    const enabled = event.target.checked;
+    setAllowPastDates(enabled);
+    if (!enabled) {
+      setForm((prev) => ({
+        ...prev,
+        check_in_date: isPastDate(parseLocalDate(prev.check_in_date))
+          ? ""
+          : prev.check_in_date,
+        check_out_date: isPastDate(parseLocalDate(prev.check_out_date))
+          ? ""
+          : prev.check_out_date,
+      }));
+    }
+  }
+
   const customerLookupClass =
     customerLookup.status === "found"
       ? "text-[#2D9A6E]"
@@ -296,7 +329,7 @@ export default function AdminBookingForUsers({
       }
     }
     if (name === "customer_email") {
-      if (!text) return "Email address is required";
+      if (!text) return "";
       if (!EMAIL_PATTERN.test(text.toLowerCase())) {
         return "Enter a valid email address";
       }
@@ -352,6 +385,24 @@ export default function AdminBookingForUsers({
       showToast("Select Cash or Online payment mode", "error");
       return false;
     }
+    if (form.discount_applied) {
+      if (!Number.isFinite(totals.discountAmount) || totals.discountAmount < 0) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          discount_amount: "Enter a valid non-negative discount",
+        }));
+        showToast("Enter a valid non-negative discount", "error");
+        return false;
+      }
+      if (totals.discountAmount > totals.roomSubtotal) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          discount_amount: "Discount cannot exceed room subtotal",
+        }));
+        showToast("Discount cannot exceed room subtotal", "error");
+        return false;
+      }
+    }
     if (String(form.advance_amount).trim() === "") {
       setFieldErrors((prev) => ({
         ...prev,
@@ -384,7 +435,9 @@ export default function AdminBookingForUsers({
 
     setPaying(true);
     try {
-      const customerEmail = form.customer_email.trim().toLowerCase();
+      const customerEmail = String(form.customer_email ?? "")
+        .trim()
+        .toLowerCase();
       const customerPhone = normalizePhone(form.customer_phone);
       const payload = {
         room_id: room.room_id,
@@ -399,6 +452,8 @@ export default function AdminBookingForUsers({
         vehicle_type: form.vehicle_type,
         advance_amount: totals.advanceAmount,
         payment_mode: form.payment_mode,
+        discount_applied: form.discount_applied,
+        discount_amount: totals.discountAmount,
         pickup_location:
           form.vehicle_type === "none" ? "" : form.pickup_location,
         dropoff_location:
@@ -502,9 +557,15 @@ export default function AdminBookingForUsers({
                 <DatePicker
                   selected={checkInDate}
                   onChange={handleCheckInChange}
-                  minDate={new Date()}
+                  minDate={allowPastDates ? null : new Date()}
                   filterDate={(date) =>
+                    (allowPastDates || !isPastDate(date)) &&
                     !occupiedNights.has(date.toDateString())
+                  }
+                  dayClassName={(date) =>
+                    allowPastDates && isPastDate(date)
+                      ? "vv-past-date-selectable"
+                      : undefined
                   }
                   dateFormat="dd/MM/yyyy"
                   placeholderText="DD/MM/YYYY"
@@ -521,9 +582,17 @@ export default function AdminBookingForUsers({
                 <DatePicker
                   selected={checkOutDate}
                   onChange={handleCheckOutChange}
-                  minDate={checkInDate || new Date()}
+                  minDate={
+                    checkInDate || (allowPastDates ? null : new Date())
+                  }
                   filterDate={(date) =>
+                    (allowPastDates || !isPastDate(date)) &&
                     isStayAvailable(checkInDate, date, occupiedNights)
+                  }
+                  dayClassName={(date) =>
+                    allowPastDates && isPastDate(date)
+                      ? "vv-past-date-selectable"
+                      : undefined
                   }
                   dateFormat="dd/MM/yyyy"
                   placeholderText={
@@ -555,6 +624,19 @@ export default function AdminBookingForUsers({
                 </div>
               )}
             </div>
+            <label className="mt-3 flex items-center gap-2 text-[0.75rem] font-semibold text-[#495057]">
+              <input
+                type="checkbox"
+                checked={allowPastDates}
+                onChange={handleAllowPastDatesChange}
+                disabled={calendarLoading || paying}
+                className="h-4 w-4 accent-[#C9A84C]"
+              />
+              Allow past dates for this booking
+            </label>
+            <div className="mt-1 text-[0.7rem] text-[#868E96]">
+              Past dates stay blocked unless enabled. Occupied nights remain unavailable.
+            </div>
           </div>
 
           <div className="rounded-xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
@@ -569,10 +651,10 @@ export default function AdminBookingForUsers({
               ].map(([name, label, type]) => (
                 <div key={name}>
                   <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
-                    {label} *
+                    {label}{name === "customer_email" ? " (optional)" : " *"}
                   </label>
                   <input
-                    required
+                    required={name !== "customer_email"}
                     value={form[name]}
                     type={type}
                     inputMode={name === "customer_phone" ? "numeric" : undefined}
@@ -589,7 +671,9 @@ export default function AdminBookingForUsers({
                     placeholder={
                       name === "customer_phone"
                         ? "+91 98765 43210"
-                        : `${label} required`
+                        : name === "customer_email"
+                          ? "Email address (optional)"
+                          : `${label} required`
                     }
                     aria-invalid={fieldErrors[name] ? "true" : "false"}
                     className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${
@@ -603,7 +687,7 @@ export default function AdminBookingForUsers({
                       {fieldErrors[name]}
                     </div>
                   )}
-                  {name === "customer_email" &&
+                  {name === "customer_phone" &&
                     !fieldErrors[name] &&
                     customerLookup.message && (
                     <div
@@ -704,8 +788,6 @@ export default function AdminBookingForUsers({
               })`,
               money(totals.roomSubtotal),
             ],
-            ["GST (18%)", money(totals.gst)],
-            ["Full amount", money(totals.fullAmount)],
           ].map(([label, value], index) => (
             <div
               key={label}
@@ -717,6 +799,64 @@ export default function AdminBookingForUsers({
               <span className="font-bold text-[#0F1923]">{value}</span>
             </div>
           ))}
+          <label className="flex items-center gap-2 border-t border-[#E9ECEF] py-3 text-[0.82rem] font-semibold text-[#495057]">
+            <input
+              type="checkbox"
+              checked={form.discount_applied}
+              onChange={(e) => update("discount_applied", e.target.checked)}
+              disabled={paying || !nights}
+              className="h-4 w-4 accent-[#C9A84C]"
+            />
+            Apply Discount
+          </label>
+          {form.discount_applied && (
+            <div className="border-t border-[#E9ECEF] py-3">
+              <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+                Discount Amount
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={Math.max(0, totals.roomSubtotal)}
+                step="0.01"
+                value={form.discount_amount}
+                onChange={(e) => update("discount_amount", e.target.value)}
+                placeholder="Enter fixed discount"
+                aria-invalid={fieldErrors.discount_amount ? "true" : "false"}
+                disabled={paying || !nights}
+                className={`w-full rounded-md border px-3 py-2.5 text-sm font-semibold text-[#C0392B] outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+                  fieldErrors.discount_amount
+                    ? "border-[#C0392B] focus:border-[#C0392B]"
+                    : "border-[#E9ECEF] focus:border-[#C9A84C]"
+                }`}
+              />
+              {fieldErrors.discount_amount && (
+                <div className="mt-1 text-[0.72rem] font-semibold text-[#C0392B]">
+                  {fieldErrors.discount_amount}
+                </div>
+              )}
+            </div>
+          )}
+          {form.discount_applied && (
+            <>
+              <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+                <span className="text-[#868E96]">Discount</span>
+                <span className="font-bold text-[#C0392B]">- {money(totals.discountAmount)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+                <span className="text-[#868E96]">Discounted room amount</span>
+                <span className="font-bold text-[#0F1923]">{money(totals.discountedRoomAmount)}</span>
+              </div>
+            </>
+          )}
+          <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+            <span className="text-[#868E96]">GST (18%)</span>
+            <span className="font-bold text-[#0F1923]">{money(totals.gst)}</span>
+          </div>
+          <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+            <span className="text-[#868E96]">Full amount</span>
+            <span className="font-bold text-[#0F1923]">{money(totals.fullAmount)}</span>
+          </div>
           <div className="border-t border-[#E9ECEF] py-3">
             <div className="mb-2 text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
               Payment mode
