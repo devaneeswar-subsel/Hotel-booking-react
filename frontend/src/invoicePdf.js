@@ -96,14 +96,23 @@ export async function printInvoicePdf(
   const addons = b.addons || [];
   const isCancelled = b.status === "cancelled";
 
-  const ci = b.actual_checkin
-    ? new Date(b.actual_checkin).toLocaleString("en-IN")
-    : b.check_in_date?.slice(0, 10);
+// Booking dates — always use the dates selected during booking.
+// Do not replace them with actual check-in / check-out timestamps.
+const ci = b.check_in_date
+  ? new Date(b.check_in_date).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    })
+  : "—";
 
-  const co = b.actual_checkout
-    ? new Date(b.actual_checkout).toLocaleString("en-IN")
-    : b.check_out_date?.slice(0, 10);
-
+const co = b.check_out_date
+  ? new Date(b.check_out_date).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    })
+  : "—";
   const nights =
     b.check_in_date && b.check_out_date
       ? Math.max(
@@ -365,19 +374,19 @@ export async function printInvoicePdf(
     b.balance_payment_mode ||
     payLabel;
 
-  const fmtStamp = (d) =>
-    d
-      ? new Date(d).toLocaleString(
-          "en-IN",
-          {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          },
-        )
-      : "—";
+  // const fmtStamp = (d) =>
+    // d
+    //   ? new Date(d).toLocaleString(
+    //       "en-IN",
+    //       {
+    //         day: "2-digit",
+    //         month: "short",
+    //         year: "numeric",
+    //         hour: "2-digit",
+    //         minute: "2-digit",
+    //       },
+    //     )
+    //   : "—";
 
   const invNo =
     `INV-${formatBookingId(b)}`;
@@ -1077,61 +1086,45 @@ export async function printInvoicePdf(
     "—",
   );
 
-  // payment history
-  if (
-    advancePaid > 0 ||
-    balancePaid > 0
-  ) {
-    sectionRow(
-      "PAYMENT HISTORY",
+// payment history
+if (
+  advancePaid > 0 ||
+  balancePaid > 0
+) {
+  sectionRow(
+    "PAYMENT HISTORY",
+  );
+
+  if (advancePaid > 0) {
+    tableRow(
+      `Advance Payment`,
+      advanceMode,
+      money(advancePaid),
     );
-
-    if (advancePaid > 0) {
-      tableRow(
-        `Advance Payment — ${advanceMode}`,
-        fmtStamp(
-          b.advance_paid_at ||
-            b.created_at,
-        ),
-        money(
-          advancePaid,
-        ),
-      );
-    }
-
-    if (balancePaid > 0) {
-      tableRow(
-        `Balance Payment — ${balanceMode}`,
-        fmtStamp(
-          b.balance_paid_at,
-        ),
-        money(
-          balancePaid,
-        ),
-      );
-    }
   }
 
-  // add-ons
-  if (addons.length) {
-    sectionRow(
-      "ADD-ON CHARGES",
+  if (balancePaid > 0) {
+    tableRow(
+      `Balance Payment`,
+      balanceMode,
+      money(balancePaid),
     );
-
-    addons.forEach((a) => {
-      tableRow(
-        a.label,
-        a.created_at
-          ? new Date(
-              a.created_at,
-            ).toLocaleDateString(
-              "en-IN",
-            )
-          : "",
-        money(a.amount),
-      );
-    });
   }
+}
+// add-ons
+if (addons.length) {
+  sectionRow(
+    "ADD-ON CHARGES",
+  );
+
+  addons.forEach((a) => {
+    tableRow(
+      a.label,
+      "",
+      money(a.amount),
+    );
+  });
+}
 
   /* ── summary ─────────────────────────────────────────────────────────── */
 
