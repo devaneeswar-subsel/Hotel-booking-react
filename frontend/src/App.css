@@ -1718,6 +1718,39 @@ tbody tr:hover td {
   color: #9ca3af !important;
 }
 
+.react-datepicker__day.vv-past-date-selectable {
+  color: #b8872f !important;
+  font-weight: 600;
+}
+
+.react-datepicker__day.vv-past-date-selectable:hover {
+  background: #d4af37 !important;
+  color: white !important;
+}
+
+.react-datepicker__day.vv-room-date-blocked {
+  background: #fee2e2 !important;
+  color: #b91c1c !important;
+  font-weight: 700;
+  text-decoration: line-through;
+}
+
+.react-datepicker__day.vv-room-date-blocked:hover {
+  background: #fecaca !important;
+  color: #991b1b !important;
+}
+
+.react-datepicker__day.vv-room-date-selected {
+  background: #0f1923 !important;
+  color: white !important;
+  font-weight: 700;
+}
+
+.react-datepicker__day.vv-room-date-selected:hover {
+  background: #1d3557 !important;
+  color: white !important;
+}
+
 /* Navigation Arrows */
 .react-datepicker__navigation-icon::before {
   margin-top: 8px !important;
