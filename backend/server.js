@@ -523,7 +523,7 @@ function formatInvoiceMoney(value) {
 
 const INVOICE_TERMS = [
   "A valid government-issued photo ID must be presented at check-in.",
-  "Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
+  "Check-in and check-out are available 24 hours. The stay duration is counted as 24 hours from the actual check-in time.",
   "Early check-in and late check-out are subject to availability and may incur additional charges.",
   "Pets, outside food and beverages, alcohol, and smoking are not permitted on the hotel premises.",
   "Cancellations must be made at least 48 hours before the scheduled check-in time to be eligible for a refund, subject to the applicable booking rate and cancellation policy.",
@@ -3206,17 +3206,33 @@ app.get("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
 app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
   try {
     const [booking] = await db.query(
-      "SELECT status FROM bookings WHERE booking_id=?",
+      `SELECT status, actual_checkin, actual_checkout,
+              COALESCE(final_total, total_price, 0) AS revenue
+         FROM bookings WHERE booking_id=?`,
       [req.params.id],
     );
     if (!booking.length)
       return res.status(404).json({ error: "Booking not found" });
-    if (booking[0].status !== "cancelled")
-      return res
-        .status(400)
-        .json({ error: "Only cancelled bookings can be deleted" });
+
+    const bk = booking[0];
+
+    // a guest who is still in the room must be checked out first, otherwise
+    // the room silently frees up while it is actually occupied
+    if (bk.actual_checkin && !bk.actual_checkout) {
+      return res.status(400).json({
+        error: "This guest is still checked in. Record check-out before deleting.",
+      });
+    }
+
+    // revenue is a live SUM over the bookings table, so removing the row
+    // removes its contribution automatically
+    const removedRevenue =
+      bk.status === "cancelled" ? 0 : Number(bk.revenue || 0);
     await db.query("DELETE FROM bookings WHERE booking_id=?", [req.params.id]);
-    res.json({ message: "Booking deleted successfully" });
+    res.json({
+      message: "Booking deleted successfully",
+      removedRevenue,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

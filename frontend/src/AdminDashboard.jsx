@@ -2378,19 +2378,23 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
             <div className="py-10 text-center text-sm text-gray-400">Loading blocked dates...</div>
           ) : (
             <>
-              <DatePicker
-                inline
-                selected={selectedDates[selectedDates.length - 1] || null}
-                onChange={toggleDate}
-                dayClassName={(date) => {
-                  const dateKey = formatLocalDate(date);
-                  const classes = [];
-                  if (blockedDateSet.has(dateKey)) classes.push("vv-room-date-blocked");
-                  if (selectedDateKeys.includes(dateKey)) classes.push("vv-room-date-selected");
-                  return classes.join(" ") || undefined;
-                }}
-                calendarClassName="vv-calendar"
-              />
+              {/* react-datepicker renders inline as a plain block, so it needs
+                  an explicit flex wrapper to sit centred in the modal */}
+              <div className="flex justify-center">
+                <DatePicker
+                  inline
+                  selected={selectedDates[selectedDates.length - 1] || null}
+                  onChange={toggleDate}
+                  dayClassName={(date) => {
+                    const dateKey = formatLocalDate(date);
+                    const classes = [];
+                    if (blockedDateSet.has(dateKey)) classes.push("vv-room-date-blocked");
+                    if (selectedDateKeys.includes(dateKey)) classes.push("vv-room-date-selected");
+                    return classes.join(" ") || undefined;
+                  }}
+                  calendarClassName="vv-calendar"
+                />
+              </div>
               <div className="mt-4 rounded-lg bg-gray-50 p-3">
                 <div className="text-[0.65rem] font-bold uppercase tracking-[1px] text-gray-400">
                   Currently blocked dates
@@ -2546,9 +2550,16 @@ export default function AdminDashboard({
     }
   }
 
-  async function deleteBooking(id) {
-    if (!window.confirm("Permanently delete this cancelled booking record?"))
-      return;
+  async function deleteBooking(id, booking) {
+    const isCancelled = booking?.status === "cancelled";
+    const amount = Number(booking?.final_total || booking?.total_price || 0);
+    const warning = isCancelled
+      ? "Permanently delete this cancelled booking record?"
+      : `Permanently delete this booking?\n\nRs.${Math.round(
+          amount,
+        ).toLocaleString("en-IN")} will be removed from total revenue. This cannot be undone.`;
+
+    if (!window.confirm(warning)) return;
     try {
       const res = await apiFetch(`/api/admin/bookings/${id}`, {
         method: "DELETE",
@@ -2556,7 +2567,16 @@ export default function AdminDashboard({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setBookings((b) => b.filter((x) => x.booking_id !== id));
-      showToast("Booking deleted", "success");
+      // reload so the revenue and booking counts reflect the deletion
+      fetchAll();
+      showToast(
+        data.removedRevenue > 0
+          ? `Booking deleted — Rs.${Math.round(
+              data.removedRevenue,
+            ).toLocaleString("en-IN")} removed from revenue`
+          : "Booking deleted",
+        "success",
+      );
     } catch (err) {
       showToast(err.message, "error");
     }
@@ -3377,14 +3397,24 @@ export default function AdminDashboard({
                                 Cancel
                               </button>
                             )}
-                            {b.status === "cancelled" && (
-                              <button
-                                onClick={() => deleteBooking(b.booking_id)}
-                                className="px-2.5 py-1 border-[1.5px] border-gray-400 text-gray-400 bg-none rounded text-[0.72rem] font-semibold cursor-pointer hover:bg-gray-50 transition-colors"
-                              >
-                                🗑 Delete
-                              </button>
-                            )}
+                            <button
+                              onClick={() => deleteBooking(b.booking_id, b)}
+                              disabled={Boolean(
+                                b.actual_checkin && !b.actual_checkout,
+                              )}
+                              title={
+                                b.actual_checkin && !b.actual_checkout
+                                  ? "Record check-out before deleting"
+                                  : "Delete booking permanently"
+                              }
+                              className={`px-2.5 py-1 border-[1.5px] bg-none rounded text-[0.72rem] font-semibold transition-colors ${
+                                b.actual_checkin && !b.actual_checkout
+                                  ? "cursor-not-allowed border-gray-300 text-gray-400 opacity-60"
+                                  : "cursor-pointer border-red-600 text-red-600 hover:bg-red-600 hover:text-white"
+                              }`}
+                            >
+                              🗑 Delete
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -4222,12 +4252,12 @@ function AdminBookingForm({ room, adminUser, onClose, showToast, onSuccess }) {
       <div className="mb-4 flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
         <div className="flex items-center gap-1.5 text-gray-600">
           <span className="font-semibold text-navy">Check-in</span>
-          <span className="text-gray-500">from 1:00 PM</span>
+          <span className="text-gray-500">24 hours</span>
         </div>
         <div className="h-4 w-px bg-gray-200" />
         <div className="flex items-center gap-1.5 text-gray-600">
           <span className="font-semibold text-navy">Check-out</span>
-          <span className="text-gray-500">by 11:00 AM</span>
+          <span className="text-gray-500">24 hours</span>
         </div>
       </div>
 

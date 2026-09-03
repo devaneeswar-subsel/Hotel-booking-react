@@ -857,7 +857,7 @@ const grandTotalPdf = Math.round(
 
     const terms = [
       "1. A valid government-issued photo ID must be presented at check-in.",
-      "2. Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
+      "2. Check-in and check-out are available 24 hours. The stay duration is counted as 24 hours from the actual check-in time.",
       "3. Early check-in and late check-out are subject to availability and may incur additional charges.",
       "4. Pets, outside food and beverages, alcohol, and smoking are not permitted on the hotel premises.",
       "5. Cancellations must be made at least 48 hours before the scheduled check-in time to be eligible for a refund, subject to the applicable booking rate and cancellation policy.",
@@ -1711,12 +1711,12 @@ function ManagerBookingForm({
       <div className="mb-3.5 flex items-center justify-between rounded-md border border-[#E9ECEF] bg-[#F8F9FA] px-3 py-2 text-xs">
         <div className="flex items-center gap-1.5 text-[#495057]">
           <span className="font-semibold text-[#0F1923]">Check-in</span>
-          <span className="text-[#868E96]">from 1:00 PM</span>
+          <span className="text-[#868E96]">24 hours</span>
         </div>
         <div className="h-4 w-px bg-[#E9ECEF]" />
         <div className="flex items-center gap-1.5 text-[#495057]">
           <span className="font-semibold text-[#0F1923]">Check-out</span>
-          <span className="text-[#868E96]">by 11:00 AM</span>
+          <span className="text-[#868E96]">24 hours</span>
         </div>
       </div>
 

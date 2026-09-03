@@ -505,7 +505,7 @@ export default function CheckoutPage({ user, showToast }) {
 
     const terms = [
       "1. A valid government-issued photo ID must be presented at check-in.",
-      "2. Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
+      "2. Check-in and check-out are available 24 hours. The stay duration is counted as 24 hours from the actual check-in time.",
       "3. Early check-in and late check-out are subject to availability and may incur additional charges.",
       "4. Pets, outside food and beverages, alcohol, and smoking are not permitted on the hotel premises.",
       "5. Cancellations must be made at least 48 hours before the scheduled check-in time to be eligible for a refund, subject to the applicable booking rate and cancellation policy.",

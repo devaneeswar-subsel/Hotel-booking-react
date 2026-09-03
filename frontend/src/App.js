@@ -717,7 +717,7 @@ function BookingModal({ room, user, onClose, showToast }) {
     y += 7;
     const terms = [
       "1. Valid photo ID must be presented at check-in.",
-      "2. Check-in: 1:00 PM | Check-out: 11:00 AM.",
+      "2. Check-in and check-out are available 24 hours. The stay duration is counted as 24 hours from the actual check-in time.",
       "3. Early check-in/late check-out subject to availability.",
       "4. Pets, outside food, and smoking are not permitted.",
       "5. Cancellations must be made 24 hours prior to check-in for a refund.",
@@ -886,12 +886,12 @@ function BookingModal({ room, user, onClose, showToast }) {
             <div className="flex items-center justify-between rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-xs">
               <div className="flex items-center gap-1.5 text-gray-600">
                 <span className="font-semibold text-navy">Check-in</span>
-                <span className="text-gray-500">from 1:00 PM</span>
+                <span className="text-gray-500">24 hours</span>
               </div>
               <div className="h-4 w-px bg-gray-200" />
               <div className="flex items-center gap-1.5 text-gray-600">
                 <span className="font-semibold text-navy">Check-out</span>
-                <span className="text-gray-500">by 11:00 AM</span>
+                <span className="text-gray-500">24 hours</span>
               </div>
             </div>
 
@@ -2905,7 +2905,7 @@ export default function App() {
 
     const terms = [
       "1. A valid government-issued photo ID must be presented at check-in.",
-      "2. Check-in time: 1:00 PM | Check-out time: 11:00 AM.",
+      "2. Check-in and check-out are available 24 hours. The stay duration is counted as 24 hours from the actual check-in time.",
       "3. Early check-in and late check-out are subject to availability and may incur additional charges.",
       "4. Pets, outside food and beverages, alcohol, and smoking are not permitted on the hotel premises.",
       "5. Cancellations must be made at least 48 hours before the scheduled check-in time to be eligible for a refund, subject to the applicable booking rate and cancellation policy.",
