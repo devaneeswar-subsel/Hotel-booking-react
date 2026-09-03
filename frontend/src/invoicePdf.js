@@ -21,8 +21,8 @@ const W = 210;
 const H = 297;
 const L = 15;
 const R = W - 15;
-const FOOTER_TOP = 268;
-const BOTTOM = 258;
+const FOOTER_TOP = 277;
+const BOTTOM = 270;
 
 // palette
 const NAVY = [22, 42, 78];
@@ -478,22 +478,18 @@ const co = b.check_out_date
 
     ink(WHITE);
 
+    doc.setFontSize(7.5);
+
     doc.text(
-      "+91 93849 82510, +91 9003251115",
+      "+91 93849 82510  |  +91 90032 51115",
       L,
-      FOOTER_TOP + 11,
+      FOOTER_TOP + 8,
     );
 
     doc.text(
-      "vvgrandpark@gmail.com",
-      L + 45,
-      FOOTER_TOP + 11,
-    );
-
-    doc.text(
-      "vvgrandpark.com",
-      L + 105,
-      FOOTER_TOP + 11,
+      "vvgrandpark@gmail.com  |  vvgrandpark.com",
+      L,
+      FOOTER_TOP + 13,
     );
 
     doc.setFont(
@@ -530,7 +526,7 @@ const co = b.check_out_date
     continuation,
   ) {
     const top =
-      continuation ? 10 : 11;
+      continuation ? 6 : 7;
 
     if (logo) {
       try {
@@ -647,7 +643,7 @@ const co = b.check_out_date
     }
 
     const rule =
-      top + 25;
+      top + 22;
 
     stroke(GOLD, 0.7);
 
@@ -658,7 +654,7 @@ const co = b.check_out_date
       rule,
     );
 
-    return rule + 10;
+    return rule + 7;
   }
 
   function newPage() {
@@ -1117,10 +1113,29 @@ if (addons.length) {
 
   const SX = 100;
 
-  if (
-    y + 100 >
-    BOTTOM
-  ) {
+  /*
+   * The summary block runs from BOOKING PAYMENT down to the GRAND TOTAL box.
+   * Its height varies with which discount sections apply, so measure it
+   * instead of guessing — a fixed reserve pushed the grand total under the
+   * footer bar whenever both discounts were present.
+   *   heading 6.5 | row 6 | boxed row 10 | payment-mode line 9 | total box 24
+   */
+  const summaryHeight =
+    8 +
+    6.5 + // BOOKING PAYMENT heading
+    6 * 2 + // room charges + GST
+    (discountAmount > 0 ? 6 * 2 : 0) + // discount + total before discount
+    (appliedCheckoutDiscount > 0 ? 6.5 + 6 + 10 : 0) + // checkout section
+    (advancePaid > 0 ? 6 : 0) +
+    (balancePaid > 0 ? 6 : 0) +
+    10 + // amount already paid box
+    6.5 +
+    6 * 2 + // add-on heading + two rows
+    10 + // remaining box
+    9 + // payment mode line
+    24; // grand total box
+
+  if (y + summaryHeight > BOTTOM) {
     newPage();
   }
 
@@ -1245,30 +1260,28 @@ if (addons.length) {
     money(basePrice),
   );
 
-  // Original booking discount
+  // GST is charged on the full tariff
+  sumRow(
+    "GST (18%)",
+    money(roomGst),
+  );
+
+  // ...then the booking discount comes off the gross total
   if (
     discountAmount > 0
   ) {
+    sumRow(
+      "Total before discount",
+      money(grossRoomTotal),
+    );
+
     sumRow(
       "Booking Discount",
       `- ${money(
         discountAmount,
       )}`,
     );
-
-    sumRow(
-      "Discounted Room Amount",
-      money(
-        discountedRoomAmount,
-      ),
-    );
   }
-
-  // GST after booking discount
-  sumRow(
-    "GST (18%)",
-    money(roomGst),
-  );
 
   /* ─────────────────────────────────────────────────────────────────────
      CHECKOUT DISCOUNT
@@ -1422,6 +1435,11 @@ if (addons.length) {
   );
 
   y += 9;
+
+  // the box is 20mm tall — if it will not clear the footer, move it over
+  if (y + 22 > BOTTOM) {
+    newPage();
+  }
 
   /* ─────────────────────────────────────────────────────────────────────
      GRAND TOTAL
