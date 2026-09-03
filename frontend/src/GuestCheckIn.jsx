@@ -731,22 +731,19 @@ export default function GuestCheckIn({
     }
 
     /*
-     * Checkout discount is applied PRE-TAX against the room's taxable
-     * value (same base the original booking discount reduces) — GST
-     * recalculates on the lower amount. See "GST Adjustment" line below.
+     * Checkout discount comes off the outstanding balance directly. That
+     * balance already includes GST, so no tax is recalculated — a Rs.97
+     * discount reduces what the guest pays by exactly Rs.97.
      */
-    const safeDiscount = Math.min(
-      Math.max(0, requested),
-      discountedRoomCharges,
-    );
+    const safeDiscount = Math.min(Math.max(0, requested), roomRemaining);
 
-    if (requested > discountedRoomCharges) {
+    if (requested > roomRemaining) {
       toast(
-        `Checkout discount cannot exceed the room amount (${money(discountedRoomCharges)})`,
+        `Checkout discount cannot exceed the outstanding balance (${money(roomRemaining)})`,
         "error",
       );
       setCheckoutDiscountInput(
-        discountedRoomCharges > 0 ? String(discountedRoomCharges) : "",
+        roomRemaining > 0 ? String(roomRemaining) : "",
       );
       return;
     }
@@ -933,11 +930,6 @@ export default function GuestCheckIn({
         : 0,
     ) || 0;
 
-  const discountedRoomCharges = Math.max(
-    0,
-    roomCharges - discountAmount,
-  );
-
   const vehiclePrice =
     Number(b.vehicle_price || 0);
 
@@ -947,21 +939,22 @@ export default function GuestCheckIn({
   const extraServices =
     addonTotal + vehiclePrice;
 
+  // GST is charged on the FULL room tariff plus add-ons; the booking discount
+  // comes off the gross total afterwards, so it reduces the bill 1:1
   const taxes =
     Math.round(
-      (discountedRoomCharges +
-        addonTotal) *
-        GST_RATE *
-        100,
+      (roomCharges + addonTotal) * GST_RATE * 100,
     ) / 100;
 
-  const totalAmount =
+  const grossTotal =
     Math.round(
-      (discountedRoomCharges +
-        extraServices +
-        taxes) *
-        100,
+      (roomCharges + extraServices + taxes) * 100,
     ) / 100;
+
+  const totalAmount = Math.max(
+    0,
+    Math.round((grossTotal - discountAmount) * 100) / 100,
+  );
 
   const advancePaid =
     Number(b.advance_paid || 0);
@@ -973,13 +966,12 @@ export default function GuestCheckIn({
     b.payment_status || "",
   ).toUpperCase();
 
-  const roomTotalWithGst =
+  const roomTotalWithGst = Math.max(
+    0,
     Math.round(
-      (discountedRoomCharges +
-        discountedRoomCharges *
-          GST_RATE) *
-        100,
-    ) / 100;
+      (roomCharges * (1 + GST_RATE) - discountAmount) * 100,
+    ) / 100,
+  );
 
   const paymentTotal = Number(
     b.total_amount ||
@@ -1040,16 +1032,18 @@ export default function GuestCheckIn({
    * value — GST recalculates on the lower amount, so the guest's real
    * saving is the discount plus GST on that discount.
    */
+  // the outstanding balance already includes GST, so a checkout discount
+  // reduces it 1:1 — no GST adjustment. Adding 18% on top would credit
+  // Rs.114 for a Rs.97 discount.
   const appliedCheckoutDiscount = Math.min(
     Math.max(0, Number(checkoutDiscount) || 0),
-    discountedRoomCharges,
+    roomRemaining,
   );
 
-  const checkoutDiscountGst =
-    Math.round(appliedCheckoutDiscount * GST_RATE * 100) / 100;
+  const checkoutDiscountGst = 0;
 
   const checkoutDiscountTotalImpact =
-    Math.round((appliedCheckoutDiscount + checkoutDiscountGst) * 100) / 100;
+    Math.round(appliedCheckoutDiscount * 100) / 100;
 
   /*
    * FINAL ROOM BALANCE AFTER CHECKOUT DISCOUNT (GST-adjusted)
@@ -1981,24 +1975,6 @@ export default function GuestCheckIn({
                   )}
                 />
 
-                {discountAmount > 0 && (
-                  <>
-                    <Row
-                      label="Booking Discount"
-                      value={`- ${money(
-                        discountAmount,
-                      )}`}
-                    />
-
-                    <Row
-                      label="Discounted Room Amount"
-                      value={money(
-                        discountedRoomCharges,
-                      )}
-                    />
-                  </>
-                )}
-
                 <Row
                   label="Extra Services"
                   value={money(
@@ -2012,6 +1988,24 @@ export default function GuestCheckIn({
                     taxes,
                   )}
                 />
+
+                {discountAmount > 0 && (
+                  <>
+                    <Row
+                      label="Total before discount"
+                      value={money(
+                        grossTotal,
+                      )}
+                    />
+
+                    <Row
+                      label="Booking Discount"
+                      value={`- ${money(
+                        discountAmount,
+                      )}`}
+                    />
+                  </>
+                )}
 
                 <div className="mt-1 border-t border-gray-200 pt-1">
                   <Row
@@ -2057,12 +2051,6 @@ export default function GuestCheckIn({
                             )}`}
                           />
 
-                          <Row
-                            label="GST Adjustment (18%)"
-                            value={`- ${money(
-                              checkoutDiscountGst,
-                            )}`}
-                          />
                         </>
                       )}
 
@@ -2081,7 +2069,7 @@ export default function GuestCheckIn({
                       <input
                         type="number"
                         min="0"
-                        max={discountedRoomCharges}
+                        max={roomRemaining}
                         step="0.01"
                         value={
                           checkoutDiscountInput
@@ -2094,8 +2082,7 @@ export default function GuestCheckIn({
                         disabled={
                           discountSaving ||
                           isCancelled ||
-                          discountedRoomCharges <=
-                            0
+                          roomRemaining <= 0
                         }
                         placeholder="Discount amount ₹"
                         className={`${inputCls} flex-1`}
@@ -2385,12 +2372,6 @@ export default function GuestCheckIn({
                         )}`}
                       />
 
-                      <Row
-                        label="GST Adjustment"
-                        value={`- ${money(
-                          checkoutDiscountGst,
-                        )}`}
-                      />
                     </>
                   )}
 

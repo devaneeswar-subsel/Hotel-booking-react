@@ -244,9 +244,16 @@ export default function AdminBookingForUsers({
     const discountAmount = form.discount_applied
       ? Math.round(Number(form.discount_amount || 0) * 100) / 100
       : 0;
+    // GST is charged on the full room tariff; the discount is deducted from
+    // the gross total afterwards, so a Rs.400 discount reduces the bill by
+    // exactly Rs.400 rather than Rs.472
+    const gst = Math.round(roomSubtotal * GST_RATE * 100) / 100;
+    const grossTotal = Math.round((roomSubtotal + gst) * 100) / 100;
+    const fullAmount = Math.max(
+      0,
+      Math.round((grossTotal - discountAmount) * 100) / 100,
+    );
     const discountedRoomAmount = Math.max(0, roomSubtotal - discountAmount);
-    const gst = Math.round(discountedRoomAmount * GST_RATE * 100) / 100;
-    const fullAmount = Math.round((discountedRoomAmount + gst) * 100) / 100;
     const suggestedAdvanceAmount = Math.floor(fullAmount * ADVANCE_RATE);
     const manualAdvanceAmount =
       form.advance_amount === ""
@@ -259,6 +266,7 @@ export default function AdminBookingForUsers({
       roomSubtotal,
       discountAmount,
       discountedRoomAmount,
+      grossTotal,
       gst,
       fullAmount,
       suggestedAdvanceAmount,
@@ -394,10 +402,10 @@ export default function AdminBookingForUsers({
         showToast("Enter a valid non-negative discount", "error");
         return false;
       }
-      if (totals.discountAmount > totals.roomSubtotal) {
+      if (totals.discountAmount > totals.grossTotal) {
         setFieldErrors((prev) => ({
           ...prev,
-          discount_amount: "Discount cannot exceed room subtotal",
+          discount_amount: "Discount cannot exceed the total amount",
         }));
         showToast("Discount cannot exceed room subtotal", "error");
         return false;
@@ -837,22 +845,22 @@ export default function AdminBookingForUsers({
               )}
             </div>
           )}
-          {form.discount_applied && (
-            <>
-              <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
-                <span className="text-[#868E96]">Discount</span>
-                <span className="font-bold text-[#C0392B]">- {money(totals.discountAmount)}</span>
-              </div>
-              <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
-                <span className="text-[#868E96]">Discounted room amount</span>
-                <span className="font-bold text-[#0F1923]">{money(totals.discountedRoomAmount)}</span>
-              </div>
-            </>
-          )}
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
             <span className="text-[#868E96]">GST (18%)</span>
             <span className="font-bold text-[#0F1923]">{money(totals.gst)}</span>
           </div>
+          {form.discount_applied && (
+            <>
+              <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+                <span className="text-[#868E96]">Total before discount</span>
+                <span className="font-bold text-[#0F1923]">{money(totals.grossTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+                <span className="text-[#868E96]">Discount</span>
+                <span className="font-bold text-[#C0392B]">- {money(totals.discountAmount)}</span>
+              </div>
+            </>
+          )}
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
             <span className="text-[#868E96]">Full amount</span>
             <span className="font-bold text-[#0F1923]">{money(totals.fullAmount)}</span>

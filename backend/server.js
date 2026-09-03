@@ -394,14 +394,21 @@ async function calculateBookingAmounts({
     err.status = 400;
     throw err;
   }
-  if (discountAmount > roomSubtotal) {
+  if (discountAmount > Math.round(roomSubtotal * (1 + GST_RATE) * 100) / 100) {
     const err = new Error("Discount cannot exceed room subtotal");
     err.status = 400;
     throw err;
   }
+  // GST is charged on the full room tariff; the discount comes off the gross
+  // total afterwards. Deducting it before GST would silently shrink the tax
+  // too, so a Rs.400 discount would only reduce the bill by Rs.472.
+  const gstAmount = Math.round(roomSubtotal * GST_RATE * 100) / 100;
+  const grossTotal = Math.round((roomSubtotal + gstAmount) * 100) / 100;
+  const totalAmount = Math.max(
+    0,
+    Math.round((grossTotal - discountAmount) * 100) / 100,
+  );
   const discountedRoomAmount = Math.max(0, roomSubtotal - discountAmount);
-  const gstAmount = Math.round(discountedRoomAmount * GST_RATE * 100) / 100;
-  const totalAmount = Math.round((discountedRoomAmount + gstAmount) * 100) / 100;
   const advanceAmount = resolveAdvanceAmount(totalAmount, advance_amount);
   const remainingAmount =
     Math.round(Math.max(0, totalAmount - advanceAmount) * 100) / 100;
@@ -2611,8 +2618,10 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
     const advancePaid = Number(booking.advance_paid || 0);
         const checkoutDiscountBase =
       Number(booking.checkout_discount_applied ? booking.checkout_discount_amount : 0) || 0;
+    // the balance already includes GST, so the discount comes off it 1:1 —
+    // multiplying by 1.18 here would over-credit the guest
     const checkoutDiscountImpact =
-      Math.round(checkoutDiscountBase * (1 + GST_RATE) * 100) / 100;
+      Math.round(checkoutDiscountBase * 100) / 100;
 
   
 
@@ -2714,11 +2723,7 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
       Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
     const discountedRoomBase = Math.max(0, roomSubtotal - originalDiscount);
 
-    if (requestedDiscount > discountedRoomBase) {
-      return res
-        .status(400)
-        .json({ error: "Checkout discount cannot exceed the room amount" });
-    }
+
 
     // total/advance/balance always read fresh — never from a previous
     // checkout-discount write — so repeat calls never stack.
@@ -2731,8 +2736,16 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
       Math.round((totalAmount - advancePaid - balancePaid) * 100) / 100,
     );
 
-    const discountGst = Math.round(requestedDiscount * GST_RATE * 100) / 100;
-    const discountTotalImpact = Math.round((requestedDiscount + discountGst) * 100) / 100;
+    // the balance already includes GST, so the discount reduces it 1:1.
+    // Adding GST on top would credit Rs.114 for a Rs.97 discount.
+    if (requestedDiscount > baseRemaining) {
+      return res.status(400).json({
+        error: `Checkout discount cannot exceed the outstanding balance of Rs.${baseRemaining}`,
+      });
+    }
+
+    const discountGst = 0;
+    const discountTotalImpact = Math.round(requestedDiscount * 100) / 100;
 
     const newRemaining = Math.max(
       0,

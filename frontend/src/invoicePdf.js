@@ -1,4 +1,3 @@
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  invoicePdf.js — branded invoice generator
 //
@@ -201,19 +200,16 @@ const co = b.check_out_date
     basePrice - discountAmount,
   );
 
-  // GST after ORIGINAL booking discount
-  const roomGst =
-    Math.round(
-      discountedRoomAmount *
-        GST_RATE *
-        100,
-    ) / 100;
+  // GST is charged on the FULL room tariff; the booking discount is deducted
+  // from the gross total afterwards, so it reduces the bill 1:1
+  const roomGst = Math.round(basePrice * GST_RATE * 100) / 100;
 
-  const roomTotal =
-    Math.round(
-      (discountedRoomAmount + roomGst) *
-        100,
-    ) / 100;
+  const grossRoomTotal = Math.round((basePrice + roomGst) * 100) / 100;
+
+  const roomTotal = Math.max(
+    0,
+    Math.round((grossRoomTotal - discountAmount) * 100) / 100,
+  );
 
   // Payments already made
   const advancePaid = Number(
@@ -272,26 +268,17 @@ const co = b.check_out_date
       ? suppliedCheckoutDiscount
       : persistedCheckoutDiscount;
 
-  // Checkout discount is applied only against the
-  // already-discounted room amount.
+  // The outstanding balance already includes GST, so the checkout discount
+  // reduces it 1:1 — no tax is recalculated.
   const appliedCheckoutDiscount = Math.min(
     Math.max(0, rawCheckoutDiscount),
-    discountedRoomAmount,
+    roomRemaining,
   );
 
-  const checkoutDiscountGst =
-    Math.round(
-      appliedCheckoutDiscount *
-        GST_RATE *
-        100,
-    ) / 100;
+  const checkoutDiscountGst = 0;
 
   const checkoutDiscountImpact =
-    Math.round(
-      (appliedCheckoutDiscount +
-        checkoutDiscountGst) *
-        100,
-    ) / 100;
+    Math.round(appliedCheckoutDiscount * 100) / 100;
 
   // Final room balance after checkout discount
   const finalRoomRemaining = Math.max(
@@ -1302,13 +1289,6 @@ if (addons.length) {
       )}`,
     );
 
-    sumRow(
-      "GST Adjustment",
-      `- ${money(
-        checkoutDiscountGst,
-      )}`,
-    );
-
     sumBox(
       "Final Balance / Payable",
       money(
@@ -1584,4 +1564,3 @@ if (addons.length) {
     60000,
   );
 }
-
