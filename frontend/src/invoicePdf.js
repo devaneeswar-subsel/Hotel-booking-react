@@ -195,10 +195,10 @@ const co = b.check_out_date
     ) || 0,
   );
 
-  const discountedRoomAmount = Math.max(
-    0,
-    basePrice - discountAmount,
-  );
+  // const discountedRoomAmount = Math.max(
+  //   0,
+  //   basePrice - discountAmount,
+  // );
 
   // GST is charged on the FULL room tariff; the booking discount is deducted
   // from the gross total afterwards, so it reduces the bill 1:1
@@ -275,7 +275,7 @@ const co = b.check_out_date
     roomRemaining,
   );
 
-  const checkoutDiscountGst = 0;
+  // const checkoutDiscountGst = 0;
 
   const checkoutDiscountImpact =
     Math.round(appliedCheckoutDiscount * 100) / 100;
