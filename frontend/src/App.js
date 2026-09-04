@@ -9,6 +9,7 @@ import Gallery from "./Gallery";
 import Testimonials from "./Testimonials";
 import Footer from "./Footer";
 import LegalPolicy, { getLegalPolicyByPath } from "./LegalPolicy";
+import HotelInThiruvarur, { isHotelSeoPage } from "./HotelInThiruvarur";
 import RoomDetail from "./Roomdetail";
 import CheckoutPage from "./pages/CheckoutPage";
 import AdminDashboard from "./AdminDashboard";
@@ -2407,9 +2408,10 @@ const [visibleBookings, setVisibleBookings] = useState(5);
 
 export default function App() {
   const legalPolicy = getLegalPolicyByPath(window.location.pathname);
+  const isSeoLandingPage = isHotelSeoPage(window.location.pathname);
 
   const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(!legalPolicy);
+  const [authLoading, setAuthLoading] = useState(!legalPolicy && !isSeoLandingPage);
   const [bookingRoom, setBookingRoom] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [showBookings, setShowBookings] = useState(false);
@@ -3169,6 +3171,10 @@ export default function App() {
   // ------------------------------------------------------------
   // LEGAL POLICY
   // ------------------------------------------------------------
+  if (isSeoLandingPage) {
+    return <HotelInThiruvarur />;
+  }
+
   if (legalPolicy) {
     return (
       <LegalPolicy
