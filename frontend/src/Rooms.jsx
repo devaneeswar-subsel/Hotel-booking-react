@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import "./App.css";
 import { SearchIcon, UserIcon, ArrowRightIcon } from "./Icons";
 import { motion } from "framer-motion";
-
+import { Link } from "react-router-dom";
+import { getRoomSlug } from "./utils/roomSlug";
 const API = process.env.REACT_APP_API_URL;
 
 const FALLBACK = {
@@ -54,7 +55,6 @@ const FALLBACK_ROOMS = [
 export default function Rooms({
   user,
   onBookClick,
-  onCardClick,
   onAuthPrompt,
 }) {
   const [showAll, setShowAll] = useState(false);
@@ -346,10 +346,12 @@ export default function Rooms({
             </p>
           </div>
         ) : (
-          visibleRooms.map((room, index) => {
-            const roomName =
-              room.room_type ||
-              "Hotel Room";
+        visibleRooms.map((room, index) => {
+  const roomName =
+    room.room_type ||
+    "Hotel Room";
+
+  const roomSlug = getRoomSlug(roomName);
 
             const roomDescription =
               room.description ||
@@ -367,145 +369,149 @@ export default function Rooms({
               FALLBACK.Deluxe;
 
             return (
-              <motion.article
-                key={room.room_id}
-                className="room-card"
-                onClick={() =>
-                  onCardClick?.(room)
-                }
-                initial={{
-                  opacity: 0,
-                  y: 40,
-                }}
-                whileInView={{
-                  opacity: 1,
-                  y: 0,
-                }}
-                viewport={{
-                  once: true,
-                }}
-                transition={{
-                  duration: 0.6,
-                  delay: index * 0.1,
-                  type: "spring",
-                  stiffness: 80,
-                }}
-                itemScope
-                itemType="https://schema.org/HotelRoom"
-              >
-                <div className="room-card-img">
-                  <img
-                    src={roomImage}
-                    alt={`${roomName} at VV Grand Park Residency, Thiruvarur`}
-                    loading={
-                      index < 3
-                        ? "eager"
-                        : "lazy"
-                    }
-                    decoding="async"
-                    width="700"
-                    height="467"
-                    itemProp="image"
-                    onError={(e) => {
-                      e.currentTarget.src =
-                        FALLBACK.Deluxe;
-                    }}
-                  />
+            <motion.article
+  key={room.room_id}
+  className="room-card"
+  initial={{
+    opacity: 0,
+    y: 40,
+  }}
+  whileInView={{
+    opacity: 1,
+    y: 0,
+  }}
+  viewport={{
+    once: true,
+  }}
+  transition={{
+    duration: 0.6,
+    delay: index * 0.1,
+    type: "spring",
+    stiffness: 80,
+  }}
+  itemScope
+  itemType="https://schema.org/HotelRoom"
+>
+  <Link
+    to={`/rooms/${roomSlug}`}
+    className="block"
+    aria-label={`View ${roomName} details`}
+  >
+    <div className="room-card-img">
+      <img
+        src={roomImage}
+        alt={`${roomName} at VV Grand Park Residency, Thiruvarur`}
+        loading={
+          index < 3
+            ? "eager"
+            : "lazy"
+        }
+        decoding="async"
+        width="700"
+        height="467"
+        itemProp="image"
+        onError={(e) => {
+          e.currentTarget.src =
+            FALLBACK.Deluxe;
+        }}
+      />
 
-                  <div
-                    className="room-type-badge"
-                    itemProp="name"
-                  >
-                    {roomName}
-                  </div>
-                </div>
+      <div
+        className="room-type-badge"
+        itemProp="name"
+      >
+        {roomName}
+      </div>
+    </div>
 
-                <div className="room-card-body">
-                  <div
-                    className="font-body font-bold"
-                    itemProp="identifier"
-                  >
-                    Room{" "}
-                    {room.room_number ||
-                      `#${room.room_id}`}
-                  </div>
+    <div className="room-card-body">
+      <div
+        className="font-body font-bold"
+        itemProp="identifier"
+      >
+        Room{" "}
+        {room.room_number ||
+          `#${room.room_id}`}
+      </div>
 
-                  <p
-                    className="truncate"
-                    title={roomDescription}
-                    itemProp="description"
-                  >
-                    {roomDescription}
-                  </p>
+      <p
+        className="truncate"
+        title={roomDescription}
+        itemProp="description"
+      >
+        {roomDescription}
+      </p>
 
-                  <div className="room-card-footer">
-                    <div
-                      className="font-body"
-                      itemScope
-                      itemType="https://schema.org/Offer"
-                    >
-                      <meta
-                        itemProp="priceCurrency"
-                        content="INR"
-                      />
+      <div className="room-card-footer">
+        <div
+          className="font-body"
+          itemScope
+          itemType="https://schema.org/Offer"
+        >
+          <meta
+            itemProp="priceCurrency"
+            content="INR"
+          />
 
-                      <span
-                        itemProp="price"
-                      >
-                        ₹
-                        {roomPrice.toLocaleString()}
-                      </span>
+          <span itemProp="price">
+            ₹
+            {roomPrice.toLocaleString()}
+          </span>
 
-                      <span>
-                        {" "}
-                        /night
-                      </span>
-                    </div>
+          <span>
+            {" "}
+            /night
+          </span>
+        </div>
 
-                    <div className="font-body room-capacity">
-                      <UserIcon
-                        size={13}
-                        color="var(--gray-400)"
-                        aria-hidden="true"
-                      />
+        <div className="font-body room-capacity">
+          <UserIcon
+            size={13}
+            color="var(--gray-400)"
+            aria-hidden="true"
+          />
 
-                      <span>
-                        {roomCapacity} Adults +
-                        1 Child (Below 5 Years)
-                      </span>
-                    </div>
-                  </div>
+          <span>
+            {roomCapacity} Adults +
+            1 Child (Below 5 Years)
+          </span>
+        </div>
+      </div>
+    </div>
+  </Link>
 
-                  <button
-                    className="book-btn"
-                    onClick={(e) =>
-                      handleBook(e, room)
-                    }
-                    disabled={isAdmin}
-                    title={
-                      isAdmin
-                        ? "Admin cannot book from user room cards"
-                        : ""
-                    }
-                    aria-label={
-                      isAdmin
-                        ? `Booking disabled for ${roomName}`
-                        : `Book ${roomName} at VV Grand Park Residency`
-                    }
-                  >
-                    {isAdmin
-                      ? "Admin Booking Disabled"
-                      : "Book Now"}
+  {/* Booking button must stay outside Link */}
+  <div className="px-4 pb-4">
+    <button
+      className="book-btn"
+      onClick={(e) =>
+        handleBook(e, room)
+      }
+      disabled={isAdmin}
+      title={
+        isAdmin
+          ? "Admin cannot book from user room cards"
+          : ""
+      }
+      aria-label={
+        isAdmin
+          ? `Booking disabled for ${roomName}`
+          : `Book ${roomName} at VV Grand Park Residency`
+      }
+    >
+      {isAdmin
+        ? "Admin Booking Disabled"
+        : "Book Now"}
 
-                    {!isAdmin && (
-                      <ArrowRightIcon
-                        size={15}
-                        color="#fff"
-                      />
-                    )}
-                  </button>
-                </div>
-              </motion.article>
+      {!isAdmin && (
+        <ArrowRightIcon
+          size={15}
+          color="#fff"
+        />
+      )}
+    </button>
+  </div>
+</motion.article>
             );
           })
         )}

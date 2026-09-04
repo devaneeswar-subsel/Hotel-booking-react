@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+} from "react-router-dom";
+
+import RoomPage from "./pages/RoomPage";
 import "./App.css";
 import Hero from "./Hero";
 import Rooms from "./Rooms";
@@ -2406,15 +2413,21 @@ const [visibleBookings, setVisibleBookings] = useState(5);
   );
 }
 
-export default function App() {
-  const legalPolicy = getLegalPolicyByPath(window.location.pathname);
-  const isSeoLandingPage = isHotelSeoPage(window.location.pathname);
+function AppContent() {
+  const legalPolicy = getLegalPolicyByPath(
+    window.location.pathname
+  );
+
+  const isSeoLandingPage =
+    isHotelSeoPage(window.location.pathname);
 
   const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(!legalPolicy && !isSeoLandingPage);
+  const [authLoading, setAuthLoading] = useState(
+    !legalPolicy && !isSeoLandingPage
+  );
   const [bookingRoom, setBookingRoom] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
-  const [showBookings, setShowBookings] = useState(false);
+  // const [showBookings, setShowBookings] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showManager, setShowManager] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState(null);
@@ -2472,7 +2485,9 @@ export default function App() {
       )
     );
 
-    const roomCharges = Number(booking.total_price || 0);
+    const roomCharges = Number(
+      booking.total_price || 0
+    );
 
     const gst = Number(
       booking.gst_amount ||
@@ -2491,15 +2506,21 @@ export default function App() {
       user?.name ||
       "Guest";
 
-    const fileGuest = guestName.replace(/\s+/g, "_");
+    const fileGuest = guestName.replace(
+      /\s+/g,
+      "_"
+    );
 
     const displayDate = (value) =>
       value
-        ? new Date(value).toLocaleDateString("en-IN", {
-            day: "numeric",
-            month: "long",
-            year: "numeric",
-          })
+        ? new Date(value).toLocaleDateString(
+            "en-IN",
+            {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }
+          )
         : "-";
 
     const { jsPDF } = await import("jspdf");
@@ -2509,7 +2530,12 @@ export default function App() {
       format: "a4",
     });
 
-    const textTop = (text, x, y, options = {}) => {
+    const textTop = (
+      text,
+      x,
+      y,
+      options = {}
+    ) => {
       doc.text(
         text,
         x,
@@ -2551,7 +2577,9 @@ export default function App() {
       "INVOICE",
       545,
       30,
-      { align: "right" }
+      {
+        align: "right",
+      }
     );
 
     doc.setTextColor("#8B9298");
@@ -2562,20 +2590,27 @@ export default function App() {
       invNo,
       545,
       56,
-      { align: "right" }
+      {
+        align: "right",
+      }
     );
 
     doc.setFontSize(9);
 
     textTop(
-      new Date().toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      }),
+      new Date().toLocaleDateString(
+        "en-IN",
+        {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        }
+      ),
       545,
       72,
-      { align: "right" }
+      {
+        align: "right",
+      }
     );
 
     // ------------------------------------------------------------
@@ -2625,7 +2660,10 @@ export default function App() {
       162
     );
 
-    if (booking.phone || user?.phone) {
+    if (
+      booking.phone ||
+      user?.phone
+    ) {
       textTop(
         booking.phone ||
           user?.phone,
@@ -2707,7 +2745,9 @@ export default function App() {
       "AMOUNT",
       472.5,
       tableTop + 8,
-      { align: "center" }
+      {
+        align: "center",
+      }
     );
 
     // ------------------------------------------------------------
@@ -2754,44 +2794,51 @@ export default function App() {
 
     let y = tableTop + 30;
 
-    tableRows.forEach((row, index) => {
-      if (index % 2 === 0) {
-        doc.setFillColor("#F8F9FA");
+    tableRows.forEach(
+      (row, index) => {
+        if (index % 2 === 0) {
+          doc.setFillColor("#F8F9FA");
 
-        doc.rect(
-          50,
-          y - 5,
-          495,
-          22,
-          "F"
+          doc.rect(
+            50,
+            y - 5,
+            495,
+            22,
+            "F"
+          );
+        }
+
+        doc.setTextColor("#0F1923");
+        doc.setFont(
+          "helvetica",
+          "normal"
         );
+        doc.setFontSize(9);
+
+        textTop(
+          row[0],
+          60,
+          y
+        );
+
+        textTop(
+          row[1],
+          280,
+          y
+        );
+
+        textTop(
+          row[2],
+          472.5,
+          y,
+          {
+            align: "center",
+          }
+        );
+
+        y += 22;
       }
-
-      doc.setTextColor("#0F1923");
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-
-      textTop(
-        row[0],
-        60,
-        y
-      );
-
-      textTop(
-        row[1],
-        280,
-        y
-      );
-
-      textTop(
-        row[2],
-        472.5,
-        y,
-        { align: "center" }
-      );
-
-      y += 22;
-    });
+    );
 
     // ------------------------------------------------------------
     // TOTAL SECTION
@@ -2817,31 +2864,43 @@ export default function App() {
       ],
       [
         "GST (18%)",
-        `Rs.${Math.round(gst).toLocaleString()}`,
+        `Rs.${Math.round(
+          gst
+        ).toLocaleString()}`,
       ],
-    ].forEach(([label, value]) => {
-      doc.setTextColor("#868E96");
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
+    ].forEach(
+      ([label, value]) => {
+        doc.setTextColor("#868E96");
+        doc.setFont(
+          "helvetica",
+          "normal"
+        );
+        doc.setFontSize(10);
 
-      textTop(
-        label,
-        350,
-        y
-      );
+        textTop(
+          label,
+          350,
+          y
+        );
 
-      doc.setTextColor("#0F1923");
-      doc.setFont("helvetica", "bold");
+        doc.setTextColor("#0F1923");
+        doc.setFont(
+          "helvetica",
+          "bold"
+        );
 
-      textTop(
-        value,
-        472.5,
-        y,
-        { align: "center" }
-      );
+        textTop(
+          value,
+          472.5,
+          y,
+          {
+            align: "center",
+          }
+        );
 
-      y += 20;
-    });
+        y += 20;
+      }
+    );
 
     y += 5;
 
@@ -2859,7 +2918,10 @@ export default function App() {
     );
 
     doc.setTextColor("#C9A84C");
-    doc.setFont("helvetica", "bold");
+    doc.setFont(
+      "helvetica",
+      "bold"
+    );
     doc.setFontSize(11);
 
     textTop(
@@ -2872,10 +2934,14 @@ export default function App() {
     doc.setFontSize(14);
 
     textTop(
-      `Rs.${Math.round(total).toLocaleString()}`,
+      `Rs.${Math.round(
+        total
+      ).toLocaleString()}`,
       472.5,
       y + 10,
-      { align: "center" }
+      {
+        align: "center",
+      }
     );
 
     // ------------------------------------------------------------
@@ -2884,7 +2950,10 @@ export default function App() {
     y += 60;
 
     doc.setTextColor("#333333");
-    doc.setFont("helvetica", "bold");
+    doc.setFont(
+      "helvetica",
+      "bold"
+    );
     doc.setFontSize(8);
 
     textTop(
@@ -2929,7 +2998,10 @@ export default function App() {
     ];
 
     doc.setTextColor("#666666");
-    doc.setFont("helvetica", "normal");
+    doc.setFont(
+      "helvetica",
+      "normal"
+    );
     doc.setFontSize(6.2);
 
     const termColumnWidth = 245;
@@ -2953,7 +3025,8 @@ export default function App() {
             textTop(
               line,
               x,
-              termY + index * 7,
+              termY +
+                index * 7,
               {
                 maxWidth:
                   termColumnWidth,
@@ -2972,18 +3045,19 @@ export default function App() {
       return termY;
     };
 
-    const termsEndY = Math.max(
-      drawTermsColumn(
-        terms.slice(0, 10),
-        50,
-        y
-      ),
-      drawTermsColumn(
-        terms.slice(10),
-        300,
-        y
-      )
-    );
+    const termsEndY =
+      Math.max(
+        drawTermsColumn(
+          terms.slice(0, 10),
+          50,
+          y
+        ),
+        drawTermsColumn(
+          terms.slice(10),
+          300,
+          y
+        )
+      );
 
     const footerY = Math.max(
       775,
@@ -3006,7 +3080,10 @@ export default function App() {
     const footerCenter = 297.5;
 
     doc.setTextColor("#868E96");
-    doc.setFont("helvetica", "italic");
+    doc.setFont(
+      "helvetica",
+      "italic"
+    );
     doc.setFontSize(9);
 
     textTop(
@@ -3019,7 +3096,10 @@ export default function App() {
       }
     );
 
-    doc.setFont("helvetica", "normal");
+    doc.setFont(
+      "helvetica",
+      "normal"
+    );
     doc.setFontSize(8);
 
     textTop(
@@ -3059,9 +3139,10 @@ export default function App() {
       return;
     }
 
-    const sectionId = decodeURIComponent(
-      window.location.hash.slice(1)
-    );
+    const sectionId =
+      decodeURIComponent(
+        window.location.hash.slice(1)
+      );
 
     const timeout = setTimeout(() => {
       document
@@ -3071,7 +3152,8 @@ export default function App() {
         });
     }, 100);
 
-    return () => clearTimeout(timeout);
+    return () =>
+      clearTimeout(timeout);
   }, [authLoading, legalPolicy]);
 
   // ------------------------------------------------------------
@@ -3085,7 +3167,6 @@ export default function App() {
       "success"
     );
 
-    // Always reset dashboard states first
     setShowAdmin(false);
     setShowManager(false);
 
@@ -3105,7 +3186,6 @@ export default function App() {
         window.location.pathname
       );
 
-      // Clear UI overlays when browser navigation occurs
       setSelectedRoom(null);
       setBookingRoom(null);
       setShowAuth(false);
@@ -3136,7 +3216,7 @@ export default function App() {
     ).catch(() => {});
 
     setUser(null);
-    setShowBookings(false);
+    // setShowBookings(false);
     setShowAdmin(false);
     setShowManager(false);
     setSelectedRoom(null);
@@ -3218,7 +3298,9 @@ export default function App() {
   // ------------------------------------------------------------
   // CHECKOUT
   // ------------------------------------------------------------
-  if (currentPath === "/checkout") {
+  if (
+    currentPath === "/checkout"
+  ) {
     return (
       <CheckoutPage
         user={user}
@@ -3233,21 +3315,29 @@ export default function App() {
   if (selectedRoom) {
     return (
       <>
-        <RoomDetail
-          room={selectedRoom}
-          user={user}
-          onBack={() =>
-            setSelectedRoom(null)
-          }
-          onBook={(room) => {
-            setSelectedRoom(null);
-            setBookingRoom(room);
-          }}
-          onAuthPrompt={() => {
-            setSelectedRoom(null);
-            setShowAuth(true);
-          }}
-        />
+<RoomDetail
+  room={selectedRoom}
+  user={user}
+  onBack={() => {
+    setSelectedRoom(null);
+  }}
+  onBook={(room) => {
+    setSelectedRoom(null);
+    setBookingRoom(room);
+  }}
+  onAuthPrompt={() => {
+    // IMPORTANT:
+    // Do NOT setSelectedRoom(null)
+    setShowAuth(true);
+  }}
+  onAuthClick={() => {
+    // IMPORTANT:
+    // Do NOT setSelectedRoom(null)
+    setShowAuth(true);
+  }}
+  onMyBookings={goToMyBookings}
+  onLogout={handleLogout}
+/>
 
         {bookingRoom && user && (
           <BookingModal
@@ -3350,9 +3440,9 @@ export default function App() {
       <>
         <MyBookings
           user={user}
-          onClose={() =>
-            setShowBookings(false)
-          }
+          // onClose={() =>
+          //   setShowBookings(false)
+          // }
           showToast={showToast}
           onAuthClick={() =>
             setShowAuth(true)
@@ -3435,9 +3525,6 @@ export default function App() {
         }
         onBookClick={(room) =>
           setBookingRoom(room)
-        }
-        onCardClick={(room) =>
-          setSelectedRoom(room)
         }
         onAuthPrompt={() =>
           setShowAuth(true)
@@ -3541,3 +3628,30 @@ export default function App() {
     </div>
   );
 }
+
+// ============================================================
+// APP ROUTER
+// ============================================================
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+
+        {/* SEO-friendly individual room pages */}
+        <Route
+          path="/rooms/:slug"
+          element={<RoomPage />}
+        />
+
+        {/* Existing application routes */}
+        <Route
+          path="*"
+          element={<AppContent />}
+        />
+
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
