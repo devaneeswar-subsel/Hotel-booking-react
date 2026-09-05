@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import RoomSearchBar from "./RoomSearchBar";
 import "./App.css";
 import { SearchIcon, UserIcon, ArrowRightIcon } from "./Icons";
 import { motion } from "framer-motion";
@@ -61,11 +62,17 @@ export default function Rooms({
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [filters, setFilters] = useState({
+  const [searchError, setSearchError] = useState("");
+  // retained so the initial unfiltered fetch keeps working
+  const [filters] = useState({
     type: "",
     minPrice: "",
     maxPrice: "",
   });
+
+  // criteria from the search bar; null until the guest searches
+  const [search, setSearch] = useState(null);
+  const [searching, setSearching] = useState(false);
 
   const isAdmin = user?.role === "admin";
 
@@ -112,13 +119,43 @@ export default function Rooms({
     }
   }
 
+  // Look up rooms free for the chosen dates. The backend already excludes
+  // rooms that are booked or blocked in that range, so we only add the
+  // guest-capacity maths on top.
+  async function handleSearch(criteria) {
+    setSearching(true);
+    setSearchError("");
+    setShowAll(false);
+
+    try {
+      const p = new URLSearchParams();
+      p.set("check_in", criteria.check_in);
+      p.set("check_out", criteria.check_out);
+      if (criteria.type) p.set("type", criteria.type);
+
+      const res = await fetch(`${API}/api/rooms?${p.toString()}`);
+      if (!res.ok) throw new Error("Server error");
+
+      const data = await res.json();
+      setRooms(Array.isArray(data) ? data : []);
+      setSearch(criteria);
+    } catch {
+      setRooms([]);
+      setSearchError("Could not check availability. Please try again.");
+    } finally {
+      setSearching(false);
+    }
+  }
+
   function handleBook(e, room) {
     e.stopPropagation();
 
     if (isAdmin) return;
 
+    // signed-out visitors go straight to guest checkout instead of a
+    // login wall — the room is passed so the modal knows what to book
     if (!user) {
-      onAuthPrompt();
+      onAuthPrompt(room, search);
       return;
     }
 
@@ -138,9 +175,62 @@ export default function Rooms({
 
   const INITIAL_COUNT = 9;
 
+  /*
+   * Capacity maths. A Deluxe room sleeps 2, a Suite sleeps 4 (whatever the
+   * room's own `capacity` column says). A party larger than one room's
+   * capacity needs several rooms of that type, so we work out how many are
+   * required and only offer a type when that many are actually free.
+   */
+  const totalGuests = search
+    ? Math.max(1, Number(search.adults || 0) + Number(search.children || 0))
+    : 0;
+
+  // Treat a missing/zero capacity as 2 rather than 1. With 1, a party of 4
+  // would "need" 4 rooms and every search would come back empty.
+  const capacityOf = (room) => {
+    const cap = Number(room.capacity);
+    return Number.isFinite(cap) && cap > 0 ? cap : 2;
+  };
+
+  const roomsNeededFor = (room) =>
+    Math.ceil(totalGuests / capacityOf(room));
+
+  // group the free rooms by type so we can compare stock against demand
+  const availabilityByType = {};
+  if (search) {
+    rooms.forEach((room) => {
+      const key = room.room_type || "Room";
+      if (!availabilityByType[key]) {
+        availabilityByType[key] = {
+          type: key,
+          capacity: capacityOf(room),
+          needed: roomsNeededFor(room),
+          rooms: [],
+        };
+      }
+      availabilityByType[key].rooms.push(room);
+    });
+  }
+
+  const availabilityGroups = Object.values(availabilityByType);
+
+  // a type only works if enough of its rooms are free for the whole party
+  const usableGroups = availabilityGroups.filter(
+    (g) => g.rooms.length >= g.needed,
+  );
+
+  /*
+   * Offer exactly the number of rooms the party needs, not every free room
+   * of that type. 4 guests in a Suite that sleeps 4 is one room; 6 guests
+   * needs two. Anything beyond `needed` is still free, just not required.
+   */
+  const searchResultRooms = search
+    ? usableGroups.flatMap((g) => g.rooms.slice(0, g.needed))
+    : rooms;
+
   const visibleRooms = showAll
-    ? rooms
-    : rooms.slice(0, INITIAL_COUNT);
+    ? searchResultRooms
+    : searchResultRooms.slice(0, INITIAL_COUNT);
 
   return (
     <section
@@ -171,102 +261,112 @@ export default function Rooms({
         convenient access to nearby temples and local attractions.
       </motion.p>
 
-      {/* Filters */}
-      <div
-        className="rooms-filter-bar"
-        aria-label="Filter hotel rooms"
-      >
-        <label className="sr-only" htmlFor="room-type-filter">
-          Select room type
-        </label>
+      {/* Availability search */}
+      <RoomSearchBar onSearch={handleSearch} searching={searching} />
 
-        <select
-          id="room-type-filter"
-          className="filter-select"
-          value={filters.type}
-          onChange={(e) =>
-            setFilters({
-              ...filters,
-              type: e.target.value,
-            })
-          }
-        >
-          <option value="">All Room Types</option>
-          <option>Deluxe Room</option>
-          <option>Suite Room</option>
-          <option>Suite with Balcony</option>
-        </select>
+      {/* What the search found */}
+      {search && !searching && (
+        <div className="mx-auto mb-8 max-w-6xl">
+          {usableGroups.length > 0 ? (
+            <div className="rounded-xl border border-[#E9ECEF] bg-white px-5 py-4">
+              <p className="m-0 text-[0.86rem] font-semibold text-[#0F1923]">
+                {searchResultRooms.length} room
+                {searchResultRooms.length === 1 ? "" : "s"} available for{" "}
+                {totalGuests} guest{totalGuests === 1 ? "" : "s"} from{" "}
+                {search.check_in} to {search.check_out}
+              </p>
 
-        <label className="sr-only" htmlFor="minimum-room-price">
-          Minimum room price
-        </label>
+              {/* tell the guest when one room will not hold the whole party */}
+              {usableGroups.some((g) => g.needed > 1) && (
+                <ul className="mt-2 list-none space-y-1 p-0">
+                  {usableGroups
+                    .filter((g) => g.needed > 1)
+                    .map((g) => (
+                      <li
+                        key={g.type}
+                        className="text-[0.8rem] text-[#8A6A22]"
+                      >
+                        <strong>{g.type}</strong> sleeps {g.capacity} guest
+                        {g.capacity === 1 ? "" : "s"} — you will need{" "}
+                        <strong>{g.needed} rooms</strong> for {totalGuests}{" "}
+                        guests. {g.rooms.length} available on these dates.
+                      </li>
+                    ))}
+                </ul>
+              )}
 
-        <input
-          id="minimum-room-price"
-          className="filter-input"
-          type="number"
-          min="0"
-          placeholder="Min price ₹"
-          aria-label="Minimum room price"
-          value={filters.minPrice}
-          onChange={(e) =>
-            setFilters({
-              ...filters,
-              minPrice: e.target.value,
-            })
-          }
-        />
+              {/* types that exist but cannot host this party */}
+              {availabilityGroups
+                .filter((g) => g.rooms.length < g.needed)
+                .map((g) => (
+                  <p
+                    key={g.type}
+                    className="mt-1.5 text-[0.8rem] text-[#8A95A3]"
+                  >
+                    {g.type}: needs {g.needed} rooms for {totalGuests} guests,
+                    only {g.rooms.length} free on these dates.
+                  </p>
+                ))}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-[#E9ECEF] bg-white px-6 py-12 text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#F0F3F7]">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A95A3" strokeWidth="1.8">
+                  <path d="M2 17v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5M2 17h20M2 17v3M22 17v3M6 10V7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v3" />
+                </svg>
+              </div>
+              <h3 className="m-0 text-[1.05rem] font-bold text-[#0F1923]">
+                No Rooms Available
+              </h3>
+              <p className="mx-auto mt-1.5 max-w-md text-[0.85rem] text-[#8A95A3]">
+                {availabilityGroups.length === 0
+                  ? `No rooms are free from ${search.check_in} to ${search.check_out}${
+                      search.type ? ` in ${search.type}` : ""
+                    }. Please try different dates.`
+                  : `We have rooms free on these dates, but not enough of one type to host ${totalGuests} guests together.`}
+              </p>
 
-        <label className="sr-only" htmlFor="maximum-room-price">
-          Maximum room price
-        </label>
+              {/* per-type breakdown so the guest can see what would work */}
+              {availabilityGroups.length > 0 && (
+                <ul className="mx-auto mt-4 max-w-sm list-none space-y-1.5 p-0 text-left">
+                  {availabilityGroups.map((g) => (
+                    <li
+                      key={g.type}
+                      className="flex items-center justify-between rounded-lg bg-[#F7F8FA] px-3 py-2 text-[0.78rem]"
+                    >
+                      <span className="font-semibold text-[#0F1923]">
+                        {g.type}
+                      </span>
+                      <span className="text-[#8A95A3]">
+                        sleeps {g.capacity} · need {g.needed} · {g.rooms.length}{" "}
+                        free
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
-        <input
-          id="maximum-room-price"
-          className="filter-input"
-          type="number"
-          min="0"
-          placeholder="Max price ₹"
-          aria-label="Maximum room price"
-          value={filters.maxPrice}
-          onChange={(e) =>
-            setFilters({
-              ...filters,
-              maxPrice: e.target.value,
-            })
-          }
-        />
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch(null);
+                  setRooms([]);
+                  fetchRooms();
+                }}
+                className="mt-5 rounded-lg border border-[#D9DEE5] bg-white px-5 py-2.5 text-[0.82rem] font-bold text-[#0F1923]"
+              >
+                Show all rooms
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
-        <button
-          className="btn btn-primary"
-          onClick={() => fetchRooms(filters)}
-          aria-label="Search available hotel rooms"
-        >
-          <SearchIcon size={15} color="#fff" />
-          Search
-        </button>
-
-        {(filters.type ||
-          filters.minPrice ||
-          filters.maxPrice) && (
-          <button
-            className="btn btn-outline"
-            onClick={() => {
-              const cleared = {
-                type: "",
-                minPrice: "",
-                maxPrice: "",
-              };
-
-              setFilters(cleared);
-              fetchRooms(cleared);
-            }}
-            aria-label="Clear room filters"
-          >
-            Clear
-          </button>
-        )}
-      </div>
+      {searchError && (
+        <p className="mx-auto mb-6 max-w-6xl text-center text-[0.85rem] text-[#C0392B]">
+          {searchError}
+        </p>
+      )}
 
       {/* Error */}
       {error && (

@@ -160,12 +160,62 @@ async function runMigrations() {
       );
     } catch (e) {}
 
-    // client renamed this room type
+    /*
+     * One-time room data correction (room types, occupancy and tariff).
+     *
+     * The client's inventory is 17 Deluxe (sleeps 2), 2 Suite Room and
+     * 1 Suite with Balcony (both sleep 4). Older rows used names like
+     * "Standard" and "Luxury" with the wrong capacity, which made the
+     * availability search reject valid parties.
+     *
+     * Guarded by a marker row in a settings table so it runs ONCE and never
+     * overwrites a price an admin later edits in the dashboard.
+     */
     try {
       await db.query(
-        "UPDATE rooms SET room_type='Deluxe Room' WHERE room_type='Standard AC Room'",
+        `CREATE TABLE IF NOT EXISTS app_settings (
+           setting_key VARCHAR(60) PRIMARY KEY,
+           setting_value VARCHAR(255) DEFAULT NULL,
+           applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+         )`,
       );
-    } catch (e) {}
+
+      const [done] = await db.query(
+        "SELECT setting_key FROM app_settings WHERE setting_key='room_types_normalised_v1'",
+      );
+
+      if (!done.length) {
+        await db.query(
+          `UPDATE rooms
+              SET room_type='Deluxe Room', capacity=2,
+                  price_per_night=2000, price_double=2300
+            WHERE room_type IN ('Standard','Standard AC Room','Deluxe','Deluxe Room')`,
+        );
+        await db.query(
+          `UPDATE rooms
+              SET room_type='Suite Room', capacity=4,
+                  price_per_night=4500, price_double=4500
+            WHERE room_type IN ('Suite','Suite Room')`,
+        );
+        await db.query(
+          `UPDATE rooms
+              SET room_type='Suite with Balcony', capacity=4,
+                  price_per_night=4500, price_double=4500
+            WHERE room_type IN ('Luxury','Suite with Balcony','Suite With Balcony')`,
+        );
+
+        await db.query(
+          "INSERT INTO app_settings (setting_key, setting_value) VALUES ('room_types_normalised_v1','done')",
+        );
+
+        const [summary] = await db.query(
+          "SELECT room_type, COUNT(*) AS rooms, capacity FROM rooms GROUP BY room_type, capacity",
+        );
+        console.log("✅ Room types normalised:", summary);
+      }
+    } catch (e) {
+      console.error("Room normalisation skipped:", e.message);
+    }
     await db.query(
       `CREATE TABLE IF NOT EXISTS booking_addons (addon_id INT AUTO_INCREMENT PRIMARY KEY, booking_id INT NOT NULL, label VARCHAR(100) NOT NULL, amount DECIMAL(10,2) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE)`,
     );
@@ -1040,7 +1090,7 @@ app.get("/api/rooms", async (req, res) => {
   try {
     const { type, min_price, max_price, check_in, check_out } = req.query;
     let q =
-      "SELECT room_id, room_number, room_type, price_per_night, price_double, capacity, description, image_url, is_available, created_at FROM rooms WHERE is_available=1";
+      "SELECT room_id, room_number, room_type, price_per_night, price_double, capacity, description, image_url, image2, image3, image4, image5, is_available, created_at FROM rooms WHERE is_available=1";
     const p = [];
     if (type) {
       q += " AND room_type=?";
@@ -1190,6 +1240,216 @@ app.get("/api/reviews/user/:user_id", requireAuth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 //  PAYMENT
 // ══════════════════════════════════════════════════════════════════════════════
+/* ─────────────────────────────────────────────────────────────────────────────
+   GUEST CHECKOUT (no account required)
+
+   Lets a walk-up visitor book without registering. They give name, email and
+   phone; we find-or-create a guest account behind the scenes and put the
+   booking through the normal Razorpay flow.
+
+   These two routes are deliberately public, so both are rate limited by IP.
+   A booking only becomes 'confirmed' once Razorpay has verified the payment,
+   so an unpaid attempt never holds a room.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+const guestOrderAttempts = new Map();
+const GUEST_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const GUEST_MAX_ORDERS = 8; // per IP per window
+
+function guestRateLimit(req, res, next) {
+  const ip =
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.socket?.remoteAddress ||
+    "unknown";
+  const now = Date.now();
+  const hits = (guestOrderAttempts.get(ip) || []).filter(
+    (t) => now - t < GUEST_WINDOW_MS,
+  );
+
+  if (hits.length >= GUEST_MAX_ORDERS) {
+    return res.status(429).json({
+      error: "Too many booking attempts. Please try again in a few minutes.",
+    });
+  }
+
+  hits.push(now);
+  guestOrderAttempts.set(ip, hits);
+
+  // keep the map from growing without bound
+  if (guestOrderAttempts.size > 5000) {
+    for (const [key, times] of guestOrderAttempts) {
+      if (!times.some((t) => now - t < GUEST_WINDOW_MS))
+        guestOrderAttempts.delete(key);
+    }
+  }
+  next();
+}
+
+app.post("/api/payment/guest/create-order", guestRateLimit, async (req, res) => {
+  try {
+    const {
+      room_id,
+      check_in_date,
+      check_out_date,
+      guest_count,
+      customer,
+    } = req.body;
+
+    if (!room_id || !check_in_date || !check_out_date) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // validates name/email/phone and reuses an existing guest account when the
+    // email is already known, so repeat visitors keep one booking history
+    const userId = await findOrCreateGuestUser(customer || {});
+
+    const amounts = await calculateBookingAmounts({
+      room_id,
+      check_in_date,
+      check_out_date,
+      advance_amount: null,
+      guest_count,
+    });
+
+    const requestedGuests = Math.max(1, Number(guest_count) || 1);
+    if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
+      return res.status(400).json({
+        error: `This room allows up to ${amounts.room.capacity} guests`,
+      });
+    }
+
+    const [result] = await db.query(
+      `INSERT INTO bookings
+        (user_id, room_id, check_in_date, check_out_date, guest_count,
+         total_price, gst_amount, final_total, total_amount,
+         payment_method, booking_source, vehicle_type, vehicle_price, status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')`,
+      [
+        userId,
+        room_id,
+        check_in_date,
+        check_out_date,
+        requestedGuests,
+        amounts.roomSubtotal,
+        amounts.gstAmount,
+        amounts.totalAmount,
+        amounts.totalAmount,
+        "Razorpay",
+        "GUEST_CHECKOUT",
+        "none",
+        0,
+      ],
+    );
+
+    const bookingId = result.insertId;
+
+    const order = await razorpay.orders.create({
+      amount: Math.round(amounts.totalAmount * 100),
+      currency: "INR",
+      receipt: `guest_${bookingId}`,
+      notes: { booking_id: String(bookingId), source: "guest_checkout" },
+    });
+
+    res.status(201).json({
+      booking_id: bookingId,
+      user_id: userId,
+      nights: amounts.nights,
+      room_subtotal: amounts.roomSubtotal,
+      gst_amount: amounts.gstAmount,
+      total_price: amounts.totalAmount,
+      razorpay_order_id: order.id,
+      razorpay_key: process.env.RAZORPAY_KEY_ID,
+      room_name: `${amounts.room.room_type} — Room ${
+        amounts.room.room_number || room_id
+      }`,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/api/payment/guest/verify", guestRateLimit, async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      booking_id,
+    } = req.body;
+
+    if (
+      !razorpay_order_id ||
+      !razorpay_payment_id ||
+      !razorpay_signature ||
+      !booking_id
+    ) {
+      return res.status(400).json({ error: "Missing payment details" });
+    }
+
+    const expected = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+
+    if (expected !== razorpay_signature) {
+      await db.query(
+        "UPDATE bookings SET status='cancelled' WHERE booking_id=? AND status='pending'",
+        [booking_id],
+      );
+      return res.status(400).json({ error: "Payment verification failed." });
+    }
+
+    // the order must be the one we created for this booking
+    const order = await razorpay.orders.fetch(razorpay_order_id);
+    if (String(order?.notes?.booking_id || "") !== String(booking_id)) {
+      return res
+        .status(400)
+        .json({ error: "Payment does not match this booking" });
+    }
+
+    const [rows] = await db.query(
+      "SELECT status FROM bookings WHERE booking_id=?",
+      [booking_id],
+    );
+    if (!rows.length)
+      return res.status(404).json({ error: "Booking not found" });
+
+    if (rows[0].status === "confirmed") {
+      return res.json({ success: true, message: "Already confirmed" });
+    }
+
+    await db.query(
+      `UPDATE bookings
+          SET status='confirmed',
+              payment_id=?,
+              payment_status='PAID',
+              advance_paid=total_amount,
+              remaining_amount=0,
+              advance_payment_mode='Razorpay',
+              advance_paid_at=NOW()
+        WHERE booking_id=?`,
+      [razorpay_payment_id, booking_id],
+    );
+
+    const booking = await loadBookingForInvoice(booking_id);
+
+    // confirmation email in the background — never block the response
+    if (booking) {
+      sendAdvanceInvoiceEmail(booking).catch((e) =>
+        console.error("Guest booking invoice email error:", e.message),
+      );
+    }
+
+    res.json({
+      success: true,
+      message: "Payment verified. Booking confirmed!",
+      booking,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/payment/create-order", requireAuth, async (req, res) => {
   try {
     const {

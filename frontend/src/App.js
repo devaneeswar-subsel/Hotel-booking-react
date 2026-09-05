@@ -17,6 +17,7 @@ import Testimonials from "./Testimonials";
 import Footer from "./Footer";
 import LegalPolicy, { getLegalPolicyByPath } from "./LegalPolicy";
 import HotelInThiruvarur, { isHotelSeoPage } from "./HotelInThiruvarur";
+import GuestBookingModal from "./GuestBookingModal";
 import RoomDetail from "./Roomdetail";
 import CheckoutPage from "./pages/CheckoutPage";
 import AdminDashboard from "./AdminDashboard";
@@ -2426,6 +2427,9 @@ function AppContent() {
     !legalPolicy && !isSeoLandingPage
   );
   const [bookingRoom, setBookingRoom] = useState(null);
+  // room a signed-out visitor is booking as a guest
+  const [guestBookingRoom, setGuestBookingRoom] = useState(null);
+  const [guestBookingPrefill, setGuestBookingPrefill] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   // const [showBookings, setShowBookings] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -3526,9 +3530,11 @@ function AppContent() {
         onBookClick={(room) =>
           setBookingRoom(room)
         }
-        onAuthPrompt={() =>
-          setShowAuth(true)
-        }
+        onAuthPrompt={(room, search) => {
+          if (!room) return setShowAuth(true);
+          setGuestBookingPrefill(search || null);
+          setGuestBookingRoom(room);
+        }}
       />
 
       <CalendarSection
@@ -3562,6 +3568,32 @@ function AppContent() {
             setShowAuth(false)
           }
           onLogin={handleLogin}
+        />
+      )}
+
+      {/* GUEST BOOKING — no account required */}
+      {guestBookingRoom && (
+        <GuestBookingModal
+          room={guestBookingRoom}
+          prefill={guestBookingPrefill}
+          onSignInInstead={() => {
+            setGuestBookingRoom(null);
+            setShowAuth(true);
+          }}
+          onClose={() => setGuestBookingRoom(null)}
+          showToast={showToast}
+          onSuccess={(booking) => {
+            setGuestBookingRoom(null);
+            try {
+              sessionStorage.setItem(
+                "vvgrandpark_booking_success",
+                JSON.stringify(booking || {}),
+              );
+            } catch {}
+            window.location.assign(
+              `/booking-success/${booking?.booking_id || ""}`,
+            );
+          }}
         />
       )}
 
@@ -3654,4 +3686,3 @@ export default function App() {
     </BrowserRouter>
   );
 }
-
