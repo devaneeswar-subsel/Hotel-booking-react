@@ -228,9 +228,31 @@ export default function Rooms({
     ? usableGroups.flatMap((g) => g.rooms.slice(0, g.needed))
     : rooms;
 
+  /*
+   * Before the guest searches we show a showcase: one representative card per
+   * room type, so they can see what is offered and at what price. Those cards
+   * carry no room number and no Book button — a specific room can only be
+   * booked once we know the dates are actually free.
+   */
+  const showcaseRooms = [];
+  if (!search) {
+    const seen = new Set();
+    rooms.forEach((room) => {
+      const key = room.room_type || "Room";
+      if (!seen.has(key)) {
+        seen.add(key);
+        showcaseRooms.push(room);
+      }
+    });
+  }
+
+  const isShowcase = !search;
+
+  const listedRooms = isShowcase ? showcaseRooms : searchResultRooms;
+
   const visibleRooms = showAll
-    ? searchResultRooms
-    : searchResultRooms.slice(0, INITIAL_COUNT);
+    ? listedRooms
+    : listedRooms.slice(0, INITIAL_COUNT);
 
   return (
     <section
@@ -366,6 +388,19 @@ export default function Rooms({
         <p className="mx-auto mb-6 max-w-6xl text-center text-[0.85rem] text-[#C0392B]">
           {searchError}
         </p>
+      )}
+
+      {/* showcase heading — these cards are for enquiry, not booking */}
+      {isShowcase && !loading && listedRooms.length > 0 && (
+        <div className="mx-auto mb-6 max-w-6xl text-center">
+          <h3 className="m-0 font-display text-lg font-bold text-[#0F1923]">
+            Our Room Types
+          </h3>
+          <p className="mx-auto mt-1 max-w-xl text-[0.84rem] text-[#8A95A3]">
+            Enter your dates and number of guests above to see which rooms
+            are available and book online.
+          </p>
+        </div>
       )}
 
       {/* Error */}
@@ -529,9 +564,9 @@ export default function Rooms({
         className="font-body font-bold"
         itemProp="identifier"
       >
-        Room{" "}
-        {room.room_number ||
-          `#${room.room_id}`}
+        {isShowcase
+          ? roomName
+          : `Room ${room.room_number || `#${room.room_id}`}`}
       </div>
 
       <p
@@ -582,6 +617,11 @@ export default function Rooms({
 
   {/* Booking button must stay outside Link */}
   <div className="px-4 pb-4">
+    {isShowcase ? (
+      <p className="m-0 text-center text-[0.78rem] text-[#8A95A3]">
+        Search your dates above to check availability
+      </p>
+    ) : (
     <button
       className="book-btn"
       onClick={(e) =>
@@ -610,6 +650,7 @@ export default function Rooms({
         />
       )}
     </button>
+    )}
   </div>
 </motion.article>
             );
@@ -619,7 +660,7 @@ export default function Rooms({
 
       {/* Show More / Show Less */}
       {!loading &&
-        rooms.length > INITIAL_COUNT && (
+        listedRooms.length > INITIAL_COUNT && (
           <div className="flex justify-center mt-8">
             <button
               className="btn btn-outline"

@@ -31,6 +31,7 @@ const AUTOPLAY_MS = 4000;
 
 export default function Gallery() {
   const [slides, setSlides] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const touchStartX = useRef(null);
@@ -45,8 +46,18 @@ export default function Gallery() {
         if (!res.ok) throw new Error("rooms unavailable");
         const rooms = await res.json();
 
-        const collected = [];
+        /*
+         * Group every photo under its room type — Deluxe Room, Suite Room,
+         * Suite with Balcony. Room numbers are deliberately left out: the
+         * gallery sells the category, not a specific room.
+         */
+        const byType = new Map();
+        const seenSrc = new Set();
+
         (Array.isArray(rooms) ? rooms : []).forEach((room) => {
+          const type = room.room_type || "Our Rooms";
+          if (!byType.has(type)) byType.set(type, []);
+
           [
             room.image_url,
             room.image2,
@@ -54,18 +65,32 @@ export default function Gallery() {
             room.image4,
             room.image5,
           ].forEach((src) => {
-            if (src && String(src).trim()) {
-              collected.push({
-                src,
-                label: room.room_number
-                  ? `${room.room_type} — Room ${room.room_number}`
-                  : room.room_type || "Our Rooms",
-              });
+            const clean = src && String(src).trim();
+            // the same photo can be reused across rooms of a type
+            if (clean && !seenSrc.has(clean)) {
+              seenSrc.add(clean);
+              byType.get(type).push({ src: clean, label: type });
             }
           });
         });
 
-        if (!cancelled) setSlides(collected.length ? collected : FALLBACK);
+        // keep the categories in a sensible order rather than DB order
+        const ORDER = ["Deluxe Room", "Suite Room", "Suite with Balcony"];
+        const ordered = [
+          ...ORDER.filter((t) => byType.has(t)),
+          ...[...byType.keys()].filter((t) => !ORDER.includes(t)),
+        ];
+
+        const collected = ordered.flatMap((t) => byType.get(t) || []);
+
+        if (!cancelled) {
+          setSlides(collected.length ? collected : FALLBACK);
+          setGroups(
+            ordered
+              .map((t) => ({ type: t, count: (byType.get(t) || []).length }))
+              .filter((g) => g.count > 0),
+          );
+        }
       } catch {
         if (!cancelled) setSlides(FALLBACK);
       }
@@ -129,6 +154,32 @@ export default function Gallery() {
       >
         Our <em className="text-amber-500">Rooms</em>
       </motion.h2>
+
+      {/* jump to a room type */}
+      {groups.length > 1 && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {groups.map((g) => {
+            // index of this type's first photo in the flat slide list
+            const start = slides.findIndex((sl) => sl.label === g.type);
+            const active = slides[index]?.label === g.type;
+            return (
+              <button
+                key={g.type}
+                type="button"
+                onClick={() => start >= 0 && setIndex(start)}
+                className={`rounded-full border px-4 py-1.5 text-[0.78rem] font-semibold transition ${
+                  active
+                    ? "border-amber-400 bg-amber-400 text-slate-900"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-amber-300"
+                }`}
+              >
+                {g.type}
+                <span className="ml-1.5 opacity-60">{g.count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div
         className="relative overflow-hidden rounded-2xl bg-slate-900"
