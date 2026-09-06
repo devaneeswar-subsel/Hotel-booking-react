@@ -888,7 +888,7 @@ export default function GuestCheckIn({
 
   if (loading) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 top-16 z-[90] flex items-center justify-center bg-[#F5F6F8] md:left-[220px]">
+      <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[#F5F6F8] md:left-[220px]">
         <div className="rounded-2xl border border-gray-200 bg-white px-10 py-8 text-sm text-gray-400">
           Loading booking details...
         </div>
@@ -1197,12 +1197,12 @@ export default function GuestCheckIn({
   ];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 top-16 z-[90] overflow-y-auto bg-[#F5F6F8] md:left-[220px]">
+    <div className="fixed inset-0 z-[120] overflow-y-auto overscroll-contain bg-[#F5F6F8] md:left-[220px]">
       <div className="mx-auto max-w-[1500px] px-4 py-3 md:px-6">
 
         {/* ── page heading ─────────────────────────────────────────────── */}
 
-        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
+        <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white/95 px-3 py-2 backdrop-blur">
           <button
             onClick={onClose}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white text-navy transition hover:bg-gray-50"

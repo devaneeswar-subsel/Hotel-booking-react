@@ -19,6 +19,7 @@ import VehicleCustomers from "./Components/VehicleCustomers";
 import AdminBookingForUsers from "./AdminBookingForUsers";
 import { getPaginationItems } from "./pagination";
 import GuestCheckIn from "./GuestCheckIn";
+import BookingCalendar from "./BookingCalendar";
 import { printInvoicePdf } from "./invoicePdf";
 
 const API = process.env.REACT_APP_API_URL;
@@ -2299,6 +2300,17 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // why the room is being held
+  const [reason, setReason] = useState("maintenance");
+  const [note, setNote] = useState("");
+  const [bulk, setBulk] = useState({
+    guest_name: "",
+    phone: "",
+    email: "",
+    guest_count: 1,
+    total_amount: "",
+  });
+
   useEffect(() => {
     let active = true;
     apiFetch(`/api/rooms/${room.room_id}/blocked-dates`)
@@ -2318,7 +2330,15 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
     };
   }, [room.room_id, showToast]);
 
-  const blockedDateSet = new Set(blockedDates);
+  // the API returns { blocked_date, block_reason, block_note, booking_id }
+  const blockedDateSet = new Set(
+    blockedDates.map((b) => (typeof b === "string" ? b : b.blocked_date)),
+  );
+  const reasonByDate = new Map(
+    blockedDates
+      .filter((b) => typeof b !== "string")
+      .map((b) => [b.blocked_date, b]),
+  );
   const selectedDateKeys = selectedDates.map((date) => formatLocalDate(date));
 
   function toggleDate(date) {
@@ -2334,16 +2354,41 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
     if (!selectedDateKeys.length) return;
     setSaving(true);
     try {
+      const payload =
+        action === "block"
+          ? {
+              dates: selectedDateKeys,
+              reason,
+              note: note.trim() || null,
+              ...(reason === "bulk"
+                ? {
+                    guest_name: bulk.guest_name.trim(),
+                    phone: bulk.phone.trim() || null,
+                    email: bulk.email.trim() || null,
+                    guest_count: Number(bulk.guest_count) || 1,
+                    total_amount: bulk.total_amount,
+                  }
+                : {}),
+            }
+          : { dates: selectedDateKeys };
+
       const res = await apiFetch(`/api/admin/rooms/${room.room_id}/blocked-dates`, {
         method: action === "block" ? "POST" : "DELETE",
-        body: JSON.stringify({ dates: selectedDateKeys }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Unable to update blocked dates");
-      showToast(
-        action === "block" ? "Selected dates blocked" : "Selected dates unblocked",
-        "success",
-      );
+      showToast(data.message || "Dates updated", "success");
+      if (action === "block") {
+        setNote("");
+        setBulk({
+          guest_name: "",
+          phone: "",
+          email: "",
+          guest_count: 1,
+          total_amount: "",
+        });
+      }
       setSelectedDates([]);
       const refreshed = await apiFetch(`/api/rooms/${room.room_id}/blocked-dates`);
       const refreshedData = await refreshed.json();
@@ -2358,7 +2403,7 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
 
   return (
     <div className="fixed inset-0 z-[800] flex items-center justify-center bg-navy/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-[460px] overflow-hidden rounded-2xl bg-white shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+      <div className="max-h-[92vh] w-full max-w-[900px] overflow-y-auto rounded-2xl bg-white shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
         <div className="flex items-center justify-between bg-navy px-6 py-5">
           <div>
             <div className="font-display text-[1rem] font-semibold text-white">
@@ -2378,8 +2423,9 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
             <div className="py-10 text-center text-sm text-gray-400">Loading blocked dates...</div>
           ) : (
             <>
-              {/* react-datepicker renders inline as a plain block, so it needs
-                  an explicit flex wrapper to sit centred in the modal */}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-[340px_1fr]">
+              {/* ── left: pick the dates ── */}
+              <div>
               <div className="flex justify-center">
                 <DatePicker
                   inline
@@ -2395,16 +2441,211 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
                   calendarClassName="vv-calendar"
                 />
               </div>
-              <div className="mt-4 rounded-lg bg-gray-50 p-3">
-                <div className="text-[0.65rem] font-bold uppercase tracking-[1px] text-gray-400">
-                  Currently blocked dates
+              <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-[0.72rem] text-gray-500">
+                <span className="font-semibold text-gray-600">Selected:</span>{" "}
+                {selectedDateKeys.length
+                  ? `${selectedDateKeys.length} night${
+                      selectedDateKeys.length === 1 ? "" : "s"
+                    } — ${selectedDateKeys.join(", ")}`
+                  : "None"}
+              </div>
+              </div>
+
+              {/* ── right: why, and who for ── */}
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-[0.68rem] font-semibold text-gray-500">
+                    Reason for blocking
+                  </label>
+                  <select
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-[0.82rem] text-navy outline-none transition focus:border-navy focus:ring-2 focus:ring-navy/10"
+                  >
+                    <option value="maintenance">Maintenance</option>
+                    <option value="cleaning">Room Cleaning</option>
+                    <option value="service">Service</option>
+                    <option value="bulk">Bulk Booking</option>
+                    <option value="other">Other</option>
+                  </select>
                 </div>
-                <div className="mt-1 text-[0.82rem] text-gray-700">
-                  {blockedDates.length ? blockedDates.join(", ") : "No dates blocked"}
+
+                {reason === "bulk" ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                    <div className="mb-3 flex items-start gap-2">
+                      <span className="mt-[2px] text-amber-500">●</span>
+                      <p className="m-0 text-[0.74rem] leading-relaxed text-amber-800">
+                        A confirmed booking will be created for these nights and
+                        listed in the Bookings tab, marked{" "}
+                        <strong>Bulk Booking</strong>.
+                      </p>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <label className="mb-1 block text-[0.68rem] font-semibold text-gray-500">
+                          Guest or company name{" "}
+                          <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          value={bulk.guest_name}
+                          onChange={(e) =>
+                            setBulk({ ...bulk, guest_name: e.target.value })
+                          }
+                          placeholder="e.g. Aathi / Sunrise Textiles"
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-[0.82rem] text-navy outline-none transition focus:border-navy focus:ring-2 focus:ring-navy/10"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-[0.68rem] font-semibold text-gray-500">Phone number</label>
+                          <input
+                            value={bulk.phone}
+                            onChange={(e) =>
+                              setBulk({ ...bulk, phone: e.target.value })
+                            }
+                            placeholder="10-digit mobile"
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-[0.82rem] text-navy outline-none transition focus:border-navy focus:ring-2 focus:ring-navy/10"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[0.68rem] font-semibold text-gray-500">Number of guests</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={bulk.guest_count}
+                            onChange={(e) =>
+                              setBulk({ ...bulk, guest_count: e.target.value })
+                            }
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-[0.82rem] text-navy outline-none transition focus:border-navy focus:ring-2 focus:ring-navy/10"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[0.68rem] font-semibold text-gray-500">Email address</label>
+                        <input
+                          type="email"
+                          value={bulk.email}
+                          onChange={(e) =>
+                            setBulk({ ...bulk, email: e.target.value })
+                          }
+                          placeholder="Optional — used to send the invoice"
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-[0.82rem] text-navy outline-none transition focus:border-navy focus:ring-2 focus:ring-navy/10"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[0.68rem] font-semibold text-gray-500">
+                          Agreed room amount (before GST)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={bulk.total_amount}
+                          onChange={(e) =>
+                            setBulk({ ...bulk, total_amount: e.target.value })
+                          }
+                          placeholder="Leave blank to use the room tariff"
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-[0.82rem] text-navy outline-none transition focus:border-navy focus:ring-2 focus:ring-navy/10"
+                        />
+                        <p className="mt-1 text-[0.68rem] text-amber-700">
+                          18% GST is added on top. Leave blank to charge the
+                          normal tariff for the selected nights.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="mb-1 block text-[0.68rem] font-semibold text-gray-500">Note (optional)</label>
+                    <input
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="e.g. AC repair, deep cleaning"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-[0.82rem] text-navy outline-none transition focus:border-navy focus:ring-2 focus:ring-navy/10"
+                    />
+                  </div>
+                )}
+
+                {/* what will actually be created */}
+                {reason === "bulk" && selectedDateKeys.length > 0 && (
+                  <div className="rounded-xl border border-navy/15 bg-navy/[0.03] p-3">
+                    <div className="mb-2 text-[0.65rem] font-bold uppercase tracking-[1px] text-gray-400">
+                      Booking summary
+                    </div>
+                    {[
+                      ["Guest", bulk.guest_name.trim() || "—"],
+                      ["Room", `${room.room_type} · ${room.room_number || room.room_id}`],
+                      ["Nights", selectedDateKeys.length],
+                      ["Check-in", selectedDateKeys.slice().sort()[0]],
+                      [
+                        "Check-out",
+                        (() => {
+                          const last = new Date(
+                            selectedDateKeys.slice().sort().pop(),
+                          );
+                          last.setDate(last.getDate() + 1);
+                          return formatLocalDate(last);
+                        })(),
+                      ],
+                      ["Guests", bulk.guest_count || 1],
+                      [
+                        "Room amount",
+                        bulk.total_amount
+                          ? `Rs.${Number(bulk.total_amount).toLocaleString("en-IN")}`
+                          : "Room tariff",
+                      ],
+                    ].map(([label, value]) => (
+                      <div
+                        key={label}
+                        className="flex justify-between border-t border-gray-100 py-1 text-[0.76rem] first:border-t-0"
+                      >
+                        <span className="text-gray-400">{label}</span>
+                        <span className="font-semibold text-navy">{value}</span>
+                      </div>
+                    ))}
+                    <p className="mt-2 text-[0.68rem] text-gray-500">
+                      18% GST is added. Payment stays pending until collected
+                      at check-in.
+                    </p>
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-gray-200 p-3">
+                  <div className="text-[0.65rem] font-bold uppercase tracking-[1px] text-gray-400">
+                    Currently blocked dates
+                  </div>
+                  {blockedDates.length ? (
+                    <ul className="mt-2 max-h-[150px] list-none space-y-1 overflow-y-auto p-0">
+                      {blockedDates.map((b) => {
+                        const date =
+                          typeof b === "string" ? b : b.blocked_date;
+                        const info = reasonByDate.get(date);
+                        return (
+                          <li
+                            key={date}
+                            className="flex items-center justify-between gap-2 rounded bg-gray-50 px-2 py-1 text-[0.76rem]"
+                          >
+                            <span className="font-semibold text-gray-700">
+                              {date}
+                            </span>
+                            <span className="text-[0.7rem] text-gray-500">
+                              {info?.block_reason || "Blocked"}
+                              {info?.block_note ? ` · ${info.block_note}` : ""}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <div className="mt-1 text-[0.8rem] text-gray-500">
+                      No dates blocked
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="mt-2 text-[0.72rem] text-gray-400">
-                Selected: {selectedDateKeys.length ? selectedDateKeys.join(", ") : "None"}
               </div>
             </>
           )}
@@ -2418,11 +2659,34 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
             Unblock Selected Dates
           </button>
           <button
-            onClick={() => saveDates("block")}
-            disabled={saving || loading || !selectedDates.length}
+            onClick={() => {
+              if (reason === "bulk") {
+                const nights = selectedDateKeys.length;
+                const ok = window.confirm(
+                  `Create a bulk booking for ${bulk.guest_name.trim()}?\n\n` +
+                    `Room ${room.room_number || room.room_id} · ${nights} night${
+                      nights === 1 ? "" : "s"
+                    }\n\n` +
+                    `This will appear in the Bookings tab marked as Bulk Booking, ` +
+                    `and the room will be unavailable on those dates.`,
+                );
+                if (!ok) return;
+              }
+              saveDates("block");
+            }}
+            disabled={
+              saving ||
+              loading ||
+              !selectedDates.length ||
+              (reason === "bulk" && !bulk.guest_name.trim())
+            }
             className="flex-1 rounded-lg bg-navy px-3 py-2.5 text-[0.78rem] font-semibold text-gold transition hover:bg-navy/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {saving ? "Saving..." : "Block Selected Dates"}
+            {saving
+              ? "Saving..."
+              : reason === "bulk"
+                ? "Confirm Bulk Booking"
+                : "Block Selected Dates"}
           </button>
           <button
             onClick={onClose}
@@ -2471,6 +2735,8 @@ export default function AdminDashboard({
     const [customStart, setCustomStart] = useState("");
     const [customEnd, setCustomEnd] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  // Overview panel: "recent" table or "calendar" view
+  const [overviewView, setOverviewView] = useState("recent");
 
   async function handleAdminLogout() {
     if (!window.confirm("Log out of the admin portal?")) return;
@@ -2790,6 +3056,15 @@ export default function AdminDashboard({
 
   // ── Status badge helper ──────────────────────────────────────────────────
   function StatusBadge({ status, booking }) {
+    // rooms held for a group show as a bulk booking, not a normal stay
+    if (booking?.booking_source === "BULK_BOOKING" && status !== "cancelled") {
+      return (
+        <span className="inline-block rounded bg-amber-50 px-2.5 py-0.5 text-[0.62rem] font-bold uppercase text-amber-700">
+          bulk booking
+        </span>
+      );
+    }
+
     // "confirmed" becomes "checked in" / "checked out" once the stay starts
     let label = status;
     if (booking && booking.status !== "cancelled") {
@@ -3127,17 +3402,49 @@ export default function AdminDashboard({
 
               {/* Recent bookings */}
               <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                   <div className="font-display text-[1rem] font-semibold text-navy">
-                    Recent Bookings
+                    {overviewView === "recent"
+                      ? "Recent Bookings"
+                      : "Booking Calendar"}
                   </div>
-                  <button
-                    onClick={() => setTab("bookings")}
-                    className="flex items-center gap-1 bg-none border-none text-gold text-[0.78rem] font-semibold cursor-pointer"
-                  >
-                    View all <ArrowRightIcon size={12} color="#C9A84C" />
-                  </button>
+
+                  <div className="flex items-center gap-3">
+                    {overviewView === "recent" && (
+                      <button
+                        onClick={() => setTab("bookings")}
+                        className="flex items-center gap-1 bg-none border-none text-gold text-[0.78rem] font-semibold cursor-pointer"
+                      >
+                        View all <ArrowRightIcon size={12} color="#C9A84C" />
+                      </button>
+                    )}
+
+                    <div className="relative">
+                      <select
+                        value={overviewView}
+                        onChange={(e) => setOverviewView(e.target.value)}
+                        className="cursor-pointer appearance-none rounded-lg border-[1.5px] border-gold bg-white py-2 pl-9 pr-8 text-[0.82rem] font-semibold text-navy outline-none"
+                      >
+                        <option value="recent">Recent Bookings</option>
+                        <option value="calendar">Booking Calendar</option>
+                      </select>
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
+                        <CalendarIcon size={14} color="#C9A84C" />
+                      </span>
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[0.7rem] text-navy">
+                        ▾
+                      </span>
+                    </div>
+                  </div>
                 </div>
+
+                {overviewView === "calendar" && (
+                  <BookingCalendar
+                    bookings={bookings}
+                    onSelectBooking={(id) => setSelectedBookingId(id)}
+                  />
+                )}
+                {overviewView === "recent" && (
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse min-w-[600px]">
                     <thead>
@@ -3199,6 +3506,7 @@ export default function AdminDashboard({
                     </tbody>
                   </table>
                 </div>
+                )}
               </div>
             </>
           )}

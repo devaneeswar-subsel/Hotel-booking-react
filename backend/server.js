@@ -227,6 +227,17 @@ async function runMigrations() {
           FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
         )`,
       );
+
+    // why a room is held: maintenance, cleaning, or a bulk booking
+    for (const col of [
+      "block_reason VARCHAR(40) DEFAULT NULL",
+      "block_note VARCHAR(255) DEFAULT NULL",
+      "booking_id INT DEFAULT NULL",
+    ]) {
+      try {
+        await db.query(`ALTER TABLE room_blocked_dates ADD COLUMN ${col}`);
+      } catch (e) {}
+    }
     try {
       await db.query(
         "ALTER TABLE booking_addons ADD COLUMN paid TINYINT DEFAULT 0",
@@ -1156,10 +1167,12 @@ app.get("/api/rooms/:roomId/booked-dates", async (req, res) => {
 app.get("/api/rooms/:roomId/blocked-dates", requireManager, async (req, res) => {
   try {
     const [rows] = await db.query(
-      "SELECT DATE_FORMAT(blocked_date, '%Y-%m-%d') AS blocked_date FROM room_blocked_dates WHERE room_id=? ORDER BY blocked_date ASC",
+      `SELECT DATE_FORMAT(blocked_date, '%Y-%m-%d') AS blocked_date,
+             block_reason, block_note, booking_id
+        FROM room_blocked_dates WHERE room_id=? ORDER BY blocked_date ASC`,
       [req.params.roomId],
     );
-    res.json(rows.map((row) => row.blocked_date));
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3629,24 +3642,155 @@ app.patch("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
   }
 });
 
+const BLOCK_REASONS = {
+  maintenance: "Maintenance",
+  cleaning: "Room Cleaning",
+  service: "Service",
+  bulk: "Bulk Booking",
+  other: "Other",
+};
+
 app.post("/api/admin/rooms/:id/blocked-dates", requireAdmin, async (req, res) => {
   try {
+    const roomId = req.params.id;
     const dates = Array.isArray(req.body.dates) ? req.body.dates : [];
-    const validDates = [...new Set(dates)].filter((date) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(String(date)),
-    );
+    const validDates = [...new Set(dates)]
+      .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date)))
+      .sort();
+
     if (!validDates.length) {
       return res.status(400).json({ error: "Select at least one valid date" });
     }
+
+    const reasonKey = String(req.body.reason || "maintenance").toLowerCase();
+    if (!BLOCK_REASONS[reasonKey]) {
+      return res.status(400).json({ error: "Select a valid block reason" });
+    }
+    const reasonLabel = BLOCK_REASONS[reasonKey];
+    const note = req.body.note ? String(req.body.note).slice(0, 255) : null;
+
+    let bookingId = null;
+
+    /*
+     * A bulk booking is a real stay, not just a maintenance hold, so it gets
+     * a booking row and shows up in the Bookings tab like any other. The
+     * guest name is required; the rest is optional because these are usually
+     * taken over the phone.
+     */
+    if (reasonKey === "bulk") {
+      const guestName = String(req.body.guest_name || "").trim();
+      if (!guestName) {
+        return res
+          .status(400)
+          .json({ error: "Guest or company name is required for a bulk booking" });
+      }
+
+      const [roomRows] = await db.query(
+        "SELECT * FROM rooms WHERE room_id=?",
+        [roomId],
+      );
+      if (!roomRows.length)
+        return res.status(404).json({ error: "Room not found" });
+      const room = roomRows[0];
+
+      // the block covers each night; check-out is the morning after the last
+      const checkIn = validDates[0];
+      const lastNight = new Date(validDates[validDates.length - 1]);
+      lastNight.setDate(lastNight.getDate() + 1);
+      const checkOut = `${lastNight.getFullYear()}-${String(
+        lastNight.getMonth() + 1,
+      ).padStart(2, "0")}-${String(lastNight.getDate()).padStart(2, "0")}`;
+
+      const nights = validDates.length;
+      const guests = Math.max(1, Number(req.body.guest_count) || 1);
+      const nightlyRate = resolveNightlyRate(room, guests);
+      const roomSubtotal =
+        req.body.total_amount !== undefined && req.body.total_amount !== ""
+          ? Math.max(0, Number(req.body.total_amount))
+          : nightlyRate * nights;
+      const gstAmount = Math.round(roomSubtotal * GST_RATE * 100) / 100;
+      const totalAmount = Math.round((roomSubtotal + gstAmount) * 100) / 100;
+
+      // reuse an account when the email is known, otherwise make a placeholder
+      let userId;
+      if (req.body.email) {
+        userId = await findOrCreateGuestUser({
+          name: guestName,
+          email: req.body.email,
+          phone: req.body.phone,
+        });
+      } else {
+        const placeholderEmail = `bulk-${Date.now()}@vvgrandpark.local`;
+        const hashed = await bcrypt.hash(
+          crypto.randomBytes(12).toString("hex"),
+          12,
+        );
+        const [u] = await db.query(
+          "INSERT INTO users (name,email,password,phone,role) VALUES (?,?,?,?,'guest')",
+          [guestName, placeholderEmail, hashed, req.body.phone || null],
+        );
+        userId = u.insertId;
+      }
+
+      const [result] = await db.query(
+        `INSERT INTO bookings
+          (user_id, room_id, check_in_date, check_out_date, guest_count,
+           total_price, gst_amount, final_total, total_amount,
+           advance_paid, balance_paid, remaining_amount, payment_status,
+           payment_method, booking_source, vehicle_type, vehicle_price,
+           notes, status)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'confirmed')`,
+        [
+          userId,
+          roomId,
+          checkIn,
+          checkOut,
+          guests,
+          roomSubtotal,
+          gstAmount,
+          totalAmount,
+          totalAmount,
+          0,
+          0,
+          totalAmount,
+          "PENDING",
+          "Bulk Booking",
+          "BULK_BOOKING",
+          "none",
+          0,
+          note || `Bulk booking — ${guestName}`,
+        ],
+      );
+      bookingId = result.insertId;
+    }
+
     await db.query(
-      `INSERT IGNORE INTO room_blocked_dates (room_id, blocked_date) VALUES ${validDates
-        .map(() => "(?, ?)")
-        .join(",")}`,
-      validDates.flatMap((date) => [req.params.id, date]),
+      `INSERT INTO room_blocked_dates
+         (room_id, blocked_date, block_reason, block_note, booking_id)
+       VALUES ${validDates.map(() => "(?,?,?,?,?)").join(",")}
+       ON DUPLICATE KEY UPDATE
+         block_reason = VALUES(block_reason),
+         block_note   = VALUES(block_note),
+         booking_id   = VALUES(booking_id)`,
+      validDates.flatMap((date) => [
+        roomId,
+        date,
+        reasonLabel,
+        note,
+        bookingId,
+      ]),
     );
-    res.json({ message: "Room dates blocked" });
+
+    res.json({
+      message:
+        reasonKey === "bulk"
+          ? "Bulk booking created and dates blocked"
+          : `Room dates blocked — ${reasonLabel}`,
+      reason: reasonLabel,
+      booking_id: bookingId,
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -3659,13 +3803,38 @@ app.delete("/api/admin/rooms/:id/blocked-dates", requireAdmin, async (req, res) 
     if (!validDates.length) {
       return res.status(400).json({ error: "Select at least one date" });
     }
+    // collect any bulk bookings tied to these dates before deleting the holds
+    const [linked] = await db.query(
+      `SELECT DISTINCT booking_id FROM room_blocked_dates
+        WHERE room_id=? AND booking_id IS NOT NULL
+          AND blocked_date IN (${validDates.map(() => "?").join(",")})`,
+      [req.params.id, ...validDates],
+    );
+
     await db.query(
       `DELETE FROM room_blocked_dates WHERE room_id=? AND blocked_date IN (${validDates
         .map(() => "?")
         .join(",")})`,
       [req.params.id, ...validDates],
     );
-    res.json({ message: "Room dates unblocked" });
+
+    // a bulk booking with no remaining blocked nights is no longer a stay
+    let removedBookings = 0;
+    for (const row of linked) {
+      const [[stillHeld]] = await db.query(
+        "SELECT COUNT(*) AS n FROM room_blocked_dates WHERE booking_id=?",
+        [row.booking_id],
+      );
+      if (Number(stillHeld?.n || 0) === 0) {
+        await db.query(
+          "DELETE FROM bookings WHERE booking_id=? AND booking_source='BULK_BOOKING'",
+          [row.booking_id],
+        );
+        removedBookings += 1;
+      }
+    }
+
+    res.json({ message: "Room dates unblocked", removedBookings });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
