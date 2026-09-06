@@ -1427,30 +1427,37 @@ const bookingPaidLabel =
 // STEP 3: Paste EVERYTHING below this comment block in its place.
 // ═══════════════════════════════════════════════════════════════════
 
+/**
+ * Uploads an image file to Cloudinary via the backend `/api/upload` endpoint
+ * and returns the short secure_url.
+ *
+ * NOTE: the base64 string here is ONLY used as the transport format to send
+ * the file to the backend. It is never stored in the database — the DB only
+ * ever receives the short https://res.cloudinary.com/... URL. Storing base64
+ * directly is what caused the MySQL "Data too long for column 'image_url'"
+ * error (VARCHAR column vs ~100,000 character data URL).
+ */
 async function uploadToCloudinary(file) {
-  return new Promise((resolve, reject) => {
+  const base64 = await new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const MAX = 800;
-        let w = img.width,
-          h = img.height;
-        if (w > MAX) {
-          h = (h * MAX) / w;
-          w = MAX;
-        }
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.7));
-      };
-      img.src = e.target.result;
-    };
-
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = () => reject(new Error("Could not read the selected file"));
     reader.readAsDataURL(file);
   });
+
+  const res = await apiFetch("/api/upload", {
+    method: "POST",
+    body: JSON.stringify({ image: base64 }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Upload failed. Please try again.");
+  }
+
+  const data = await res.json();
+  if (!data.url) throw new Error("Upload succeeded but no URL was returned");
+  return data.url;
 }
 
 /* ── single image upload slot ── */
@@ -1458,13 +1465,23 @@ function ImageSlot({ index, value, onChange, isMain }) {
   const [mode, setMode] = useState("idle");
   const [urlInput, setUrlInput] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const fileRef = useRef();
 
   async function handleFile(file) {
     if (!file || !file.type.startsWith("image/")) return;
-    const url = await uploadToCloudinary(file);
-    onChange(url);
-    setMode("idle");
+    setUploadError("");
+    setUploading(true);
+    try {
+      const url = await uploadToCloudinary(file);
+      onChange(url);
+      setMode("idle");
+    } catch (err) {
+      setUploadError(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
   }
 
   function applyUrl() {
@@ -1509,6 +1526,27 @@ function ImageSlot({ index, value, onChange, isMain }) {
           await handleFile(e.dataTransfer.files[0]);
         }}
       >
+        {/* UPLOADING OVERLAY */}
+        {uploading && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-white/85">
+            <svg
+              className="animate-spin"
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#C9A84C"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+            >
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+            <div className="text-[0.65rem] font-semibold text-gray-500">
+              Uploading…
+            </div>
+          </div>
+        )}
+
         {/* PREVIEW */}
         {value && (
           <>
@@ -1641,6 +1679,13 @@ function ImageSlot({ index, value, onChange, isMain }) {
         )}
       </div>
 
+      {/* Upload error */}
+      {uploadError && (
+        <div className="text-[0.6rem] font-semibold text-red-600 leading-tight">
+          {uploadError}
+        </div>
+      )}
+
       {/* Hidden file input */}
       <input
         ref={fileRef}
@@ -1685,6 +1730,17 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
   }
 
   async function save() {
+    // Safety net: never send a raw base64 data URL to the database. The
+    // image_url column is a VARCHAR, so a data URL would trigger the MySQL
+    // "Data too long for column 'image_url'" error.
+    const badSlot = images.findIndex((img) => img && img.startsWith("data:"));
+    if (badSlot !== -1) {
+      return showToast(
+        `Photo ${badSlot + 1} was not uploaded properly. Please remove it and upload again.`,
+        "error",
+      );
+    }
+
     setLoading(true);
     const payload = {
       ...form,
@@ -1694,16 +1750,21 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
       image4: images[3],
       image5: images[4],
     };
-    const res = await apiFetch(`/api/admin/rooms/${room.room_id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (!res.ok) return showToast(data.error, "error");
-    showToast("Room updated!", "success");
-    onRefresh();
-    onClose();
+    try {
+      const res = await apiFetch(`/api/admin/rooms/${room.room_id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return showToast(data.error || "Update failed", "error");
+      showToast("Room updated!", "success");
+      onRefresh();
+      onClose();
+    } catch (err) {
+      showToast(err.message || "Network error", "error");
+    } finally {
+      setLoading(false);
+    }
   }
 
   const inputCls =
@@ -1764,8 +1825,8 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
             </div>
 
             <div className="mt-2 text-[0.62rem] text-gray-400 leading-relaxed">
-              JPG, PNG, WebP supported. Files are converted to base64 and stored
-              securely.
+              JPG, PNG, WebP supported. Files are uploaded to secure cloud
+              storage and only the image link is saved.
             </div>
           </div>
 
