@@ -38,6 +38,10 @@ app.use(
 );
 
 app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
+// cookieParser MUST run before any authenticated route is registered,
+// otherwise req.cookies is undefined and requireAuth rejects valid sessions.
+app.use(cookieParser());
 
 // ─── CLOUDINARY ───────────────────────────────────────────────────────────────
 const cloudinary = require("cloudinary").v2;
@@ -47,24 +51,39 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-app.post("/api/upload", async (req, res) => {
+// Admin-only: an open upload endpoint lets anyone on the internet push files
+// into our Cloudinary account and burn the plan's quota.
+app.post("/api/upload", requireAdmin, async (req, res, next) => {
   try {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: "No image provided" });
+    if (!process.env.CLOUDINARY_API_SECRET) {
+      return res.status(500).json({
+        error:
+          "Image uploads are not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.",
+      });
+    }
     const result = await cloudinary.uploader.upload(image, {
       folder: "vvgrandpark/rooms",
       transformation: [{ width: 1200, crop: "limit" }, { quality: "auto" }],
     });
     res.json({ url: result.secure_url });
   } catch (err) {
+    // Cloudinary errors are safe and useful to surface (bad key, bad file)
     res.status(500).json({ error: err.message });
   }
 });
 
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
-app.use(cookieParser());
-
 // ─── JWT ─────────────────────────────────────────────────────────────────────
+// A random fallback secret means every restart invalidates all sessions, so
+// staff get logged out constantly and never know why. Warn loudly instead of
+// failing silently.
+if (!process.env.JWT_SECRET) {
+  console.warn(
+    "⚠  JWT_SECRET is not set. A random secret is being used, so every " +
+      "restart will log all users out. Add JWT_SECRET to your .env file.",
+  );
+}
 const JWT_SECRET =
   process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
 const JWT_EXPIRES = "7d";
@@ -143,11 +162,22 @@ async function runMigrations() {
       "checkout_discount_reason VARCHAR(255) DEFAULT NULL",
       "checkout_discount_at DATETIME DEFAULT NULL",
       "checkout_discount_by INT DEFAULT NULL",
+      // ── GST breakdown, computed once by the backend ──
+      // taxable_amount is the room value AFTER any discount. GST is charged on
+      // this, never on the full tariff. Storing it means the invoice and the
+      // dashboard read the same number instead of each recomputing it.
+      "taxable_amount DECIMAL(10,2) DEFAULT NULL",
     ];
     for (const col of cols) {
       try {
         await db.query(`ALTER TABLE bookings ADD COLUMN ${col}`);
-      } catch (e) {}
+      } catch (e) {
+        // "column already exists" is the normal case on every restart after
+        // the first. Anything else is a real problem and must not be silent.
+        if (e.code !== "ER_DUP_FIELDNAME") {
+          console.error(`Migration failed for column [${col}]:`, e.message);
+        }
+      }
     }
 
     // ── occupancy pricing ──
@@ -372,9 +402,93 @@ function requireManager(req, res, next) {
   });
 }
 
+// True when the caller is staff, or is acting on their own record. Guest
+// endpoints that take a :user_id or a booking id must call this, otherwise
+// changing the number in the URL exposes another guest's data.
+function isStaff(req) {
+  return req.user?.role === "admin" || req.user?.role === "manager";
+}
+
+function ownsOrStaff(req, ownerUserId) {
+  if (isStaff(req)) return true;
+  return Number(ownerUserId) === Number(req.user?.user_id);
+}
+
+// ─── LOGIN RATE LIMIT ────────────────────────────────────────────────────────
+// Without this, an admin password can be brute forced at network speed.
+const loginAttempts = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 10;
+
+function loginRateLimit(req, res, next) {
+  const ip =
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.socket?.remoteAddress ||
+    "unknown";
+  const now = Date.now();
+  const hits = (loginAttempts.get(ip) || []).filter(
+    (t) => now - t < LOGIN_WINDOW_MS,
+  );
+
+  if (hits.length >= LOGIN_MAX_ATTEMPTS) {
+    return res.status(429).json({
+      error: "Too many login attempts. Please try again in 15 minutes.",
+    });
+  }
+
+  hits.push(now);
+  loginAttempts.set(ip, hits);
+
+  if (loginAttempts.size > 5000) {
+    for (const [key, times] of loginAttempts) {
+      if (!times.some((t) => now - t < LOGIN_WINDOW_MS))
+        loginAttempts.delete(key);
+    }
+  }
+  next();
+}
+
+// Clear an IP's failed attempts once it authenticates successfully, so a
+// legitimate user who mistyped a few times is not locked out afterwards.
+function clearLoginAttempts(req) {
+  const ip =
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.socket?.remoteAddress ||
+    "unknown";
+  loginAttempts.delete(ip);
+}
+
 // Nightly rate for a room at a given occupancy.
 // Rooms with price_double set charge that rate from 2 adults upward; rooms
 // without it charge price_per_night at every occupancy, exactly as before.
+// The room's taxable value: the tariff minus every discount applied to it.
+// GST is charged on THIS, never on the raw tariff. Every place that
+// recalculates a bill (add-ons, checkout, vehicle charges) must start here,
+// otherwise adding a charge silently cancels the guest's discount.
+function roomTaxableValue(booking) {
+  if (booking.taxable_amount != null) return Number(booking.taxable_amount);
+  const tariff = Number(booking.total_price || 0);
+  const bookingDiscount =
+    Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
+  const checkoutDiscount =
+    Number(
+      booking.checkout_discount_applied ? booking.checkout_discount_amount : 0,
+    ) || 0;
+  return Math.max(0, Math.round((tariff - bookingDiscount - checkoutDiscount) * 100) / 100);
+}
+
+// True when a date string is before today. Compared date-only in local time so
+// a booking made at 11pm for "today" is still accepted.
+function isPastDate(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return target < today;
+}
+
 function resolveNightlyRate(room, guestCount) {
   const single = Number(room.price_per_night || 0);
   const double = Number(room.price_double || 0);
@@ -391,6 +505,10 @@ async function calculateBookingAmounts({
   guest_count,
   discount_applied = false,
   discount_amount = 0,
+  // Staff need to enter walk-ins and late paperwork for stays that have
+  // already begun, so the past-date guard is skipped for them. Public guest
+  // checkout always leaves this false.
+  allowPastDates = false,
 }) {
   const [roomRows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
     room_id,
@@ -413,6 +531,12 @@ async function calculateBookingAmounts({
   );
   if (nights <= 0) {
     const err = new Error("Invalid dates");
+    err.status = 400;
+    throw err;
+  }
+
+  if (!allowPastDates && isPastDate(check_in_date)) {
+    const err = new Error("Check-in date cannot be in the past");
     err.status = 400;
     throw err;
   }
@@ -455,21 +579,26 @@ async function calculateBookingAmounts({
     err.status = 400;
     throw err;
   }
-  if (discountAmount > Math.round(roomSubtotal * (1 + GST_RATE) * 100) / 100) {
-    const err = new Error("Discount cannot exceed room subtotal");
+  if (discountAmount > roomSubtotal) {
+    const err = new Error("Discount cannot exceed the room tariff");
     err.status = 400;
     throw err;
   }
-  // GST is charged on the full room tariff; the discount comes off the gross
-  // total afterwards. Deducting it before GST would silently shrink the tax
-  // too, so a Rs.400 discount would only reduce the bill by Rs.472.
-  const gstAmount = Math.round(roomSubtotal * GST_RATE * 100) / 100;
-  const grossTotal = Math.round((roomSubtotal + gstAmount) * 100) / 100;
+  // PRE-TAX DISCOUNT MODEL
+  // The discount reduces the room's taxable value first, then GST is charged
+  // on the reduced amount. Example: Rs.3000 tariff with a Rs.500 discount
+  //   taxable = 3000 - 500 = 2500
+  //   GST     = 2500 x 18% = 450
+  //   total   = 2500 + 450 = 2950
+  // This is how a discount is shown on a GST invoice: the tax follows the
+  // discounted value, it is not charged on the full tariff.
+  const taxableAmount = Math.round((roomSubtotal - discountAmount) * 100) / 100;
+  const gstAmount = Math.round(taxableAmount * GST_RATE * 100) / 100;
   const totalAmount = Math.max(
     0,
-    Math.round((grossTotal - discountAmount) * 100) / 100,
+    Math.round((taxableAmount + gstAmount) * 100) / 100,
   );
-  const discountedRoomAmount = Math.max(0, roomSubtotal - discountAmount);
+  const discountedRoomAmount = taxableAmount;
   const advanceAmount = resolveAdvanceAmount(totalAmount, advance_amount);
   const remainingAmount =
     Math.round(Math.max(0, totalAmount - advanceAmount) * 100) / 100;
@@ -482,6 +611,7 @@ async function calculateBookingAmounts({
     discountApplied: Boolean(discount_applied),
     discountAmount,
     discountedRoomAmount,
+    taxableAmount,
     gstAmount,
     totalAmount,
     advanceAmount,
@@ -653,7 +783,12 @@ async function generateAdvanceInvoicePdf(booking) {
   );
   const roomSubtotal = Number(booking.total_price || 0);
   const discountAmount = Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
-  const discountedRoomAmount = Math.max(0, roomSubtotal - discountAmount);
+  // Prefer the stored taxable value; fall back for rows written before the
+  // taxable_amount column existed.
+  const discountedRoomAmount =
+    booking.taxable_amount != null
+      ? Number(booking.taxable_amount)
+      : Math.max(0, roomSubtotal - discountAmount);
   const gstAmount = Number(booking.gst_amount || 0);
   const totalAmount = Number(
     booking.total_amount || booking.final_total || roomSubtotal + gstAmount,
@@ -750,8 +885,10 @@ async function generateAdvanceInvoicePdf(booking) {
     y += 14;
     [
       ["Room Charges", roomSubtotal],
+      // Pre-tax discount: the discount comes off the tariff first, then GST is
+      // charged on the reduced (taxable) value.
       ...(discountAmount > 0
-        ? [["Discount", -discountAmount], ["Discounted Room Amount", discountedRoomAmount]]
+        ? [["Discount", -discountAmount], ["Taxable Value", discountedRoomAmount]]
         : []),
       ["GST (18%)", gstAmount],
       ["Total Amount", totalAmount],
@@ -967,7 +1104,7 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", loginRateLimit, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password)
@@ -995,6 +1132,7 @@ app.post("/api/auth/login", async (req, res) => {
     if (!passwordValid)
       return res.status(401).json({ error: "Invalid credentials" });
     const { password: _, ...safeUser } = user;
+    clearLoginAttempts(req);
     setAuthCookie(res, safeUser);
     res.json({ message: "Login successful", user: safeUser });
   } catch (err) {
@@ -1205,8 +1343,11 @@ app.get("/api/reviews", async (req, res) => {
 
 app.post("/api/reviews", requireAuth, async (req, res) => {
   try {
-    const { user_id, booking_id, room_id, rating, review_text } = req.body;
-    if (!user_id || !booking_id || !room_id || !rating || !review_text)
+    // user_id comes from the verified token, never from the body — otherwise
+    // a logged-in guest can post a review in another guest's name.
+    const user_id = req.user.user_id;
+    const { booking_id, room_id, rating, review_text } = req.body;
+    if (!booking_id || !room_id || !rating || !review_text)
       return res.status(400).json({ error: "All fields required" });
     if (rating < 1 || rating > 5)
       return res.status(400).json({ error: "Rating must be 1-5" });
@@ -1238,8 +1379,13 @@ app.post("/api/reviews", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/reviews/user/:user_id", requireAuth, async (req, res) => {
+app.get("/api/reviews/user/:user_id", requireAuth, async (req, res, next) => {
   try {
+    if (!ownsOrStaff(req, req.params.user_id)) {
+      return res
+        .status(403)
+        .json({ error: "You can only view your own reviews" });
+    }
     const [rows] = await db.query(
       "SELECT review_id, booking_id FROM reviews WHERE user_id=?",
       [req.params.user_id],
@@ -1334,9 +1480,9 @@ app.post("/api/payment/guest/create-order", guestRateLimit, async (req, res) => 
     const [result] = await db.query(
       `INSERT INTO bookings
         (user_id, room_id, check_in_date, check_out_date, guest_count,
-         total_price, gst_amount, final_total, total_amount,
+         total_price, taxable_amount, gst_amount, final_total, total_amount,
          payment_method, booking_source, vehicle_type, vehicle_price, status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')`,
       [
         userId,
         room_id,
@@ -1344,6 +1490,7 @@ app.post("/api/payment/guest/create-order", guestRateLimit, async (req, res) => 
         check_out_date,
         requestedGuests,
         amounts.roomSubtotal,
+        amounts.taxableAmount,
         amounts.gstAmount,
         amounts.totalAmount,
         amounts.totalAmount,
@@ -1504,13 +1651,14 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
     const gst_amount = Math.round(room_subtotal * GST_RATE * 100) / 100;
     const total_price = Math.round((room_subtotal + gst_amount) * 100) / 100;
     const [result] = await db.query(
-      `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,gst_amount,final_total,vehicle_type,vehicle_price,status) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending')`,
+      `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,taxable_amount,gst_amount,final_total,vehicle_type,vehicle_price,status) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'pending')`,
       [
         user_id,
         room_id,
         check_in_date,
         check_out_date,
         guest_count || 1,
+        room_subtotal,
         room_subtotal,
         gst_amount,
         total_price,
@@ -2380,8 +2528,13 @@ app.post("/api/payment/failed", async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 //  BOOKINGS
 // ══════════════════════════════════════════════════════════════════════════════
-app.get("/api/bookings/user/:user_id", requireAuth, async (req, res) => {
+app.get("/api/bookings/user/:user_id", requireAuth, async (req, res, next) => {
   try {
+    if (!ownsOrStaff(req, req.params.user_id)) {
+      return res
+        .status(403)
+        .json({ error: "You can only view your own bookings" });
+    }
     const [rows] = await db.query(
       `SELECT b.*, r.room_type, r.price_per_night, r.image_url FROM bookings b JOIN rooms r ON b.room_id=r.room_id WHERE b.user_id=? AND b.status != 'pending' ORDER BY b.created_at DESC`,
       [req.params.user_id],
@@ -2475,10 +2628,15 @@ app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/bookings", requireAuth, async (req, res) => {
+app.post("/api/bookings", requireAuth, async (req, res, next) => {
   try {
-    const { user_id, room_id, check_in_date, check_out_date, guest_count } =
-      req.body;
+    // Staff may book on behalf of a guest; a guest may only book for themself.
+    // Taking user_id straight from the body would let any logged-in user
+    // create bookings in someone else's name.
+    const user_id = isStaff(req)
+      ? req.body.user_id || req.user.user_id
+      : req.user.user_id;
+    const { room_id, check_in_date, check_out_date, guest_count } = req.body;
     if (!user_id || !room_id || !check_in_date || !check_out_date)
       return res.status(400).json({ error: "Missing required fields" });
     const [roomRows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
@@ -2487,48 +2645,100 @@ app.post("/api/bookings", requireAuth, async (req, res) => {
     if (!roomRows.length)
       return res.status(404).json({ error: "Room not found" });
     const room = roomRows[0];
+
+    // Every other booking route enforces this; without it here a party of 10
+    // could be booked into a room that sleeps 2.
+    const requestedGuests = Math.max(1, Number(guest_count) || 1);
+    if (requestedGuests > Number(room.capacity || requestedGuests)) {
+      return res.status(400).json({
+        error: `This room allows up to ${room.capacity} guests`,
+      });
+    }
+
     const nights = Math.ceil(
       (new Date(check_out_date) - new Date(check_in_date)) / 86400000,
     );
     if (nights <= 0) return res.status(400).json({ error: "Invalid dates" });
-    const [conflicts] = await db.query(
-      `SELECT booking_id
-       FROM bookings
-       WHERE room_id = ?
-         AND status NOT IN ('cancelled','pending')
-         AND check_in_date < ?
-         AND check_out_date > ?
-       LIMIT 1`,
-      [room_id, check_out_date, check_in_date],
-    );
-    if (conflicts.length) {
-      return res.status(409).json({
-        error: "Selected dates are already booked for this room",
-      });
+
+    // Guests cannot book a date that has already gone — that is always a typo
+    // or a stale browser tab. Staff CAN, because walk-ins and late paperwork
+    // are entered after the stay has already started.
+    if (!isStaff(req) && isPastDate(check_in_date)) {
+      return res
+        .status(400)
+        .json({ error: "Check-in date cannot be in the past" });
     }
+
     const base_price = nights * resolveNightlyRate(room, guest_count);
     const gst_amount = Math.round(base_price * GST_RATE * 100) / 100;
     const total_price = Math.round((base_price + gst_amount) * 100) / 100;
-    const [result] = await db.query(
-      `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,gst_amount,final_total,status) VALUES (?,?,?,?,?,?,?,?,'confirmed')`,
-      [
-        user_id,
-        room_id,
-        check_in_date,
-        check_out_date,
-        guest_count || 1,
-        base_price,
-        gst_amount,
+
+    // The availability check and the insert must be one atomic unit. Without
+    // the transaction two guests hitting Book at the same moment both pass
+    // the check and both get the room. The row lock makes the second request
+    // wait until the first has committed, so it sees the new booking.
+    const conn = await db.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [conflicts] = await conn.query(
+        `SELECT booking_id
+         FROM bookings
+         WHERE room_id = ?
+           AND status NOT IN ('cancelled','pending')
+           AND check_in_date < ?
+           AND check_out_date > ?
+         LIMIT 1
+         FOR UPDATE`,
+        [room_id, check_out_date, check_in_date],
+      );
+      if (conflicts.length) {
+        await conn.rollback();
+        return res.status(409).json({
+          error: "Selected dates are already booked for this room",
+        });
+      }
+
+      const [blocked] = await conn.query(
+        `SELECT blocked_date FROM room_blocked_dates
+          WHERE room_id = ? AND blocked_date >= ? AND blocked_date < ? LIMIT 1`,
+        [room_id, check_in_date, check_out_date],
+      );
+      if (blocked.length) {
+        await conn.rollback();
+        return res
+          .status(400)
+          .json({ error: "Room is blocked for one or more selected dates" });
+      }
+
+      const [result] = await conn.query(
+        `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,taxable_amount,gst_amount,final_total,total_amount,status) VALUES (?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        [
+          user_id,
+          room_id,
+          check_in_date,
+          check_out_date,
+          guest_count || 1,
+          base_price,
+          base_price,
+          gst_amount,
+          total_price,
+          total_price,
+        ],
+      );
+      await conn.commit();
+      res.status(201).json({
+        message: "Booking confirmed",
+        booking_id: result.insertId,
         total_price,
-      ],
-    );
-    res.status(201).json({
-      message: "Booking confirmed",
-      booking_id: result.insertId,
-      total_price,
-    });
+      });
+    } catch (txErr) {
+      await conn.rollback();
+      throw txErr;
+    } finally {
+      conn.release();
+    }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
@@ -2544,6 +2754,8 @@ app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) =
       check_out_date,
       advance_amount,
       guest_count: req.body.guest_count,
+      // staff route — walk-ins and late paperwork need past check-in dates
+      allowPastDates: true,
     });
     const requestedGuests = Math.max(1, Number(req.body.guest_count) || 1);
     if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
@@ -2624,6 +2836,8 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
       check_out_date,
       advance_amount,
       guest_count,
+      // staff route — walk-ins and late paperwork need past check-in dates
+      allowPastDates: true,
     });
     const requestedGuests = Math.max(1, Number(guest_count) || 1);
     if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
@@ -2654,12 +2868,12 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
     const [result] = await db.query(
       `INSERT INTO bookings (
         user_id, room_id, check_in_date, check_out_date, guest_count,
-        total_price, gst_amount, final_total, total_amount,
+        total_price, taxable_amount, gst_amount, final_total, total_amount,
         advance_amount, advance_paid, balance_paid, remaining_amount,
         payment_status, payment_id, advance_payment_id, advance_order_id,
         payment_method, booking_source, vehicle_type, vehicle_price,
         vehicle_status, pickup_location, dropoff_location, status
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
       [
         userId,
         room_id,
@@ -2667,6 +2881,7 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
         check_out_date,
         requestedGuests,
         amounts.roomSubtotal,
+        amounts.taxableAmount,
         amounts.gstAmount,
         amounts.totalAmount,
         amounts.totalAmount,
@@ -2764,6 +2979,8 @@ app.post(
         guest_count,
         discount_applied,
         discount_amount,
+        // staff route — walk-ins and late paperwork need past check-in dates
+        allowPastDates: true,
       });
       const requestedGuests = Math.max(1, Number(guest_count) || 1);
       if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
@@ -2778,13 +2995,13 @@ app.post(
       const [result] = await db.query(
         `INSERT INTO bookings (
           user_id, room_id, check_in_date, check_out_date, guest_count,
-          total_price, gst_amount, final_total, total_amount,
+          total_price, taxable_amount, gst_amount, final_total, total_amount,
           discount_applied, discount_amount,
           advance_amount, advance_paid, balance_paid, remaining_amount,
           payment_status, payment_id, advance_payment_id, advance_order_id,
           payment_method, booking_source, vehicle_type, vehicle_price,
           vehicle_status, pickup_location, dropoff_location, status
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
         [
           userId,
           room_id,
@@ -2792,6 +3009,7 @@ app.post(
           check_out_date,
           requestedGuests,
           amounts.roomSubtotal,
+          amounts.taxableAmount,
           amounts.gstAmount,
           amounts.totalAmount,
           amounts.totalAmount,
@@ -2889,29 +3107,44 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
     const booking = rows[0];
     const currentBalancePaid = Number(booking.balance_paid || 0);
     const advancePaid = Number(booking.advance_paid || 0);
-        const checkoutDiscountBase =
+
+    // PRE-TAX DISCOUNT MODEL: a checkout discount removes both the discounted
+    // amount and the GST that was charged on it, so its effect on the balance
+    // is discount x 1.18.
+    const checkoutDiscountBase =
       Number(booking.checkout_discount_applied ? booking.checkout_discount_amount : 0) || 0;
-    // the balance already includes GST, so the discount comes off it 1:1 —
-    // multiplying by 1.18 here would over-credit the guest
     const checkoutDiscountImpact =
-      Math.round(checkoutDiscountBase * 100) / 100;
+      Math.round(checkoutDiscountBase * (1 + GST_RATE) * 100) / 100;
 
-  
-
-    // total the guest owes for the room booking
+    // What the guest owes for the room, derived only as a fallback for old
+    // rows that never stored total_amount.
+    const bookingDiscount =
+      Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
+    const taxableFallback = Math.max(
+      0,
+      Number(booking.total_price || 0) -
+        bookingDiscount +
+        Number(booking.addon_charges || 0),
+    );
     const roomWithGst =
-      Math.round(Number(booking.total_price || 0) * (1 + GST_RATE) * 100) / 100;
+      Math.round(taxableFallback * (1 + GST_RATE) * 100) / 100;
     const totalAmount = Number(
       booking.total_amount || booking.final_total || roomWithGst,
     );
 
     // trust the stored column, but fall back to the derived figure when it is
-    // stale (e.g. advance-only bookings that never wrote remaining_amount)
+    // stale (e.g. advance-only bookings that never wrote remaining_amount).
+    // total_amount is written by the checkout-discount route and already has
+    // the discount applied, so it must not be subtracted a second time here.
     const storedRemaining = Number(booking.remaining_amount || 0);
+    const discountAlreadyInTotal = Number(booking.total_amount || 0) > 0;
     const derivedRemaining = Math.max(
       0,
       Math.round(
-        (totalAmount - advancePaid - currentBalancePaid - checkoutDiscountImpact) * 100,
+        (totalAmount -
+          advancePaid -
+          currentBalancePaid -
+          (discountAlreadyInTotal ? 0 : checkoutDiscountImpact)) * 100,
       ) / 100,
     );
     const remaining = storedRemaining > 0 ? storedRemaining : derivedRemaining;
@@ -2966,7 +3199,7 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
     res.status(500).json({ error: err.message });
   }
 });
-app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res) => {
+app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res, next) => {
   try {
     await ensurePaymentColumns();
 
@@ -2988,41 +3221,60 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
       return res.status(400).json({ error: "Enter a valid discount amount" });
     }
 
-    // Pre-tax model: the discount reduces the room's taxable value (same
-    // base the original booking discount reduces), so it can never exceed
-    // that room amount. GST recalculates on the lower amount.
+    // PRE-TAX DISCOUNT MODEL (same as the booking-time discount).
+    // The checkout discount reduces the room's taxable value, then GST is
+    // recalculated on the lower amount. A Rs.500 discount therefore reduces
+    // what the guest owes by Rs.500 x 1.18 = Rs.590, because the Rs.90 of GST
+    // that was charged on that Rs.500 is no longer due.
     const roomSubtotal = Number(booking.total_price || 0);
     const originalDiscount =
       Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
     const discountedRoomBase = Math.max(0, roomSubtotal - originalDiscount);
 
+    // add-on charges are taxed too and are never touched by a room discount
+    const addonCharges = Number(booking.addon_charges || 0);
 
-
-    // total/advance/balance always read fresh — never from a previous
-    // checkout-discount write — so repeat calls never stack.
-    const roomWithGst = Math.round(discountedRoomBase * (1 + GST_RATE) * 100) / 100;
-    const totalAmount = Number(booking.total_amount || booking.final_total || roomWithGst);
-    const advancePaid = Number(booking.advance_paid || 0);
-    const balancePaid = Number(booking.balance_paid || 0);
-    const baseRemaining = Math.max(
-      0,
-      Math.round((totalAmount - advancePaid - balancePaid) * 100) / 100,
-    );
-
-    // the balance already includes GST, so the discount reduces it 1:1.
-    // Adding GST on top would credit Rs.114 for a Rs.97 discount.
-    if (requestedDiscount > baseRemaining) {
+    // The discount can only wipe out the room's remaining taxable value.
+    if (requestedDiscount > discountedRoomBase) {
       return res.status(400).json({
-        error: `Checkout discount cannot exceed the outstanding balance of Rs.${baseRemaining}`,
+        error: `Checkout discount cannot exceed the room amount of Rs.${discountedRoomBase}`,
       });
     }
 
-    const discountGst = 0;
-    const discountTotalImpact = Math.round(requestedDiscount * 100) / 100;
+    const advancePaid = Number(booking.advance_paid || 0);
+    const balancePaid = Number(booking.balance_paid || 0);
+
+    // Recompute the whole bill from the original figures every time, so a
+    // repeat call replaces the previous checkout discount instead of stacking.
+    const newTaxable =
+      Math.round((discountedRoomBase - requestedDiscount + addonCharges) * 100) /
+      100;
+    const newGst = Math.round(newTaxable * GST_RATE * 100) / 100;
+    const newTotal = Math.round((newTaxable + newGst) * 100) / 100;
+
+    // what the bill was before this discount, for the response/audit trail
+    const baseTaxable =
+      Math.round((discountedRoomBase + addonCharges) * 100) / 100;
+    const baseTotal =
+      Math.round(baseTaxable * (1 + GST_RATE) * 100) / 100;
+    const baseRemaining = Math.max(
+      0,
+      Math.round((baseTotal - advancePaid - balancePaid) * 100) / 100,
+    );
+
+    const discountGst = Math.round(requestedDiscount * GST_RATE * 100) / 100;
+    const discountTotalImpact =
+      Math.round((requestedDiscount + discountGst) * 100) / 100;
+
+    if (discountTotalImpact > baseRemaining) {
+      return res.status(400).json({
+        error: `Discount of Rs.${requestedDiscount} (Rs.${discountTotalImpact} with GST) exceeds the outstanding balance of Rs.${baseRemaining}`,
+      });
+    }
 
     const newRemaining = Math.max(
       0,
-      Math.round((baseRemaining - discountTotalImpact) * 100) / 100,
+      Math.round((newTotal - advancePaid - balancePaid) * 100) / 100,
     );
 
     const reason = req.body?.reason ? String(req.body.reason).slice(0, 255) : null;
@@ -3035,6 +3287,10 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
               checkout_discount_reason = ?,
               checkout_discount_at = ?,
               checkout_discount_by = ?,
+              taxable_amount = ?,
+              gst_amount = ?,
+              final_total = ?,
+              total_amount = ?,
               remaining_amount = ?,
               payment_status = ?
         WHERE booking_id = ?`,
@@ -3044,6 +3300,10 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
         applied ? reason : null,
         applied ? new Date() : null,
         applied ? req.user.user_id : null,
+        newTaxable,
+        newGst,
+        newTotal,
+        newTotal,
         newRemaining,
         newRemaining > 0 ? "PARTIALLY_PAID" : "PAID",
         req.params.id,
@@ -3056,7 +3316,9 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
       checkout_discount_amount: requestedDiscount,
       checkout_discount_gst: discountGst,
       checkout_discount_total_impact: discountTotalImpact,
-      totalAmount,
+      taxableAmount: newTaxable,
+      gstAmount: newGst,
+      totalAmount: newTotal,
       advancePaid,
       balancePaid,
       baseRemaining,
@@ -3064,7 +3326,7 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
       paymentStatus: newRemaining > 0 ? "PARTIALLY_PAID" : "PAID",
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 // ── shared check-in detail persistence ───────────────────────────────────────
@@ -3218,7 +3480,7 @@ app.patch("/api/bookings/:id/checkout", requireAdmin, async (req, res) => {
       [req.params.id],
     );
     const addonTotal = Number(addons[0]?.total || 0);
-    const subtotal = Number(booking.total_price) + addonTotal;
+    const subtotal = roomTaxableValue(booking) + addonTotal;
     const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
     const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
     await db.query(
@@ -3241,8 +3503,18 @@ app.patch("/api/bookings/:id/checkout", requireAdmin, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 //  ADD-ONS
 // ══════════════════════════════════════════════════════════════════════════════
-app.get("/api/bookings/:id/addons", requireAuth, async (req, res) => {
+app.get("/api/bookings/:id/addons", requireAuth, async (req, res, next) => {
   try {
+    const [[owner]] = await db.query(
+      "SELECT user_id FROM bookings WHERE booking_id=?",
+      [req.params.id],
+    );
+    if (!owner) return res.status(404).json({ error: "Booking not found" });
+    if (!ownsOrStaff(req, owner.user_id)) {
+      return res
+        .status(403)
+        .json({ error: "You can only view add-ons on your own booking" });
+    }
     const [rows] = await db.query(
       "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at DESC",
       [req.params.id],
@@ -3281,7 +3553,7 @@ app.post("/api/bookings/:id/addons", requireAdmin, async (req, res) => {
       [req.params.id],
     );
     const booking = bookingRows[0];
-    const subtotal = Number(booking.total_price) + addonTotal;
+    const subtotal = roomTaxableValue(booking) + addonTotal;
     const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
     const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
     await db.query(
@@ -3327,7 +3599,7 @@ app.delete(
         [req.params.id],
       );
       const booking = bookingRows[0];
-      const subtotal = Number(booking.total_price) + addonTotal;
+      const subtotal = roomTaxableValue(booking) + addonTotal;
       const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
       const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
       await db.query(
@@ -3735,17 +4007,18 @@ app.post("/api/admin/rooms/:id/blocked-dates", requireAdmin, async (req, res) =>
       const [result] = await db.query(
         `INSERT INTO bookings
           (user_id, room_id, check_in_date, check_out_date, guest_count,
-           total_price, gst_amount, final_total, total_amount,
+           total_price, taxable_amount, gst_amount, final_total, total_amount,
            advance_paid, balance_paid, remaining_amount, payment_status,
            payment_method, booking_source, vehicle_type, vehicle_price,
            notes, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'confirmed')`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'confirmed')`,
         [
           userId,
           roomId,
           checkIn,
           checkOut,
           guests,
+          roomSubtotal,
           roomSubtotal,
           gstAmount,
           totalAmount,
@@ -3840,17 +4113,34 @@ app.delete("/api/admin/rooms/:id/blocked-dates", requireAdmin, async (req, res) 
   }
 });
 
-app.delete("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
+app.delete("/api/admin/rooms/:id", requireAdmin, async (req, res, next) => {
   try {
-    await db.query("DELETE FROM rooms WHERE room_id=?", [req.params.id]);
+    // Never delete a room that still has live bookings — depending on the
+    // foreign key those bookings would either vanish or the delete would fail
+    // with a raw SQL error. Tell the admin what is blocking it instead.
+    const [[active]] = await db.query(
+      `SELECT COUNT(*) AS n FROM bookings
+        WHERE room_id = ? AND status NOT IN ('cancelled')`,
+      [req.params.id],
+    );
+    if (Number(active?.n || 0) > 0) {
+      return res.status(409).json({
+        error: `This room has ${active.n} booking(s). Mark it unavailable instead of deleting it.`,
+      });
+    }
+    const [result] = await db.query("DELETE FROM rooms WHERE room_id=?", [
+      req.params.id,
+    ]);
+    if (!result.affectedRows)
+      return res.status(404).json({ error: "Room not found" });
     res.json({ message: "Room deleted" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
 // ─── MANAGER ROUTES ───────────────────────────────────────────────────────────
-app.post("/api/manager/login", async (req, res) => {
+app.post("/api/manager/login", loginRateLimit, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password)
@@ -3880,6 +4170,7 @@ app.post("/api/manager/login", async (req, res) => {
     if (!passwordValid)
       return res.status(401).json({ error: "Invalid credentials" });
     const { password: _, ...safeUser } = user;
+    clearLoginAttempts(req);
     setAuthCookie(res, safeUser);
     res.json({ message: "Login successful", user: safeUser });
   } catch (err) {
@@ -3994,7 +4285,7 @@ app.patch(
         [req.params.id],
       );
       const addonTotal = Number(addons[0]?.total || 0);
-      const subtotal = Number(booking.total_price) + addonTotal;
+      const subtotal = roomTaxableValue(booking) + addonTotal;
       const gstAmount = Math.round(subtotal * 0.18 * 100) / 100;
       const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
       await db.query(
@@ -4044,7 +4335,7 @@ app.post(
         [req.params.id],
       );
       const booking = bookingRows[0];
-      const subtotal = Number(booking.total_price) + addonTotal;
+      const subtotal = roomTaxableValue(booking) + addonTotal;
       const gstAmount = Math.round(subtotal * 0.18 * 100) / 100;
       const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
       await db.query(
@@ -4083,7 +4374,7 @@ app.delete(
         [req.params.id],
       );
       const booking = bookingRows[0];
-      const subtotal = Number(booking.total_price) + addonTotal;
+      const subtotal = roomTaxableValue(booking) + addonTotal;
       const gstAmount = Math.round(subtotal * 0.18 * 100) / 100;
       const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
       await db.query(
@@ -4156,6 +4447,25 @@ app.post("/api/admin/create-manager", requireAdmin, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── ERROR HANDLER ───────────────────────────────────────────────────────────
+// Anything passed to next(err) lands here. Raw SQL messages name our tables
+// and columns, which is a free map of the schema for anyone probing the API,
+// so in production the client gets a generic message and the detail goes to
+// the server log only.
+app.use((err, req, res, _next) => {
+  const status = err.status || 500;
+  console.error(`[${req.method} ${req.originalUrl}]`, err.message);
+  if (status < 500) {
+    return res.status(status).json({ error: err.message });
+  }
+  res.status(500).json({
+    error:
+      process.env.NODE_ENV === "production"
+        ? "Something went wrong. Please try again."
+        : err.message,
+  });
 });
 
 // ─── START ────────────────────────────────────────────────────────────────────

@@ -542,14 +542,32 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
           )
         : 1;
   const basePrice = Number(b.total_price || 0);
-  
 
+// PRE-TAX DISCOUNT MODEL — this block previously ignored discounts entirely,
+// so a manager's invoice showed a different total from the admin's for the
+// same booking. GST must be charged on the DISCOUNTED room value.
+const bookingDiscountPdf =
+  Number(b.discount_applied ? b.discount_amount : 0) || 0;
+
+const checkoutDiscountPdf =
+  Number(b.checkout_discount_applied ? b.checkout_discount_amount : 0) || 0;
+
+const totalDiscountPdf = Math.min(
+  Math.round((bookingDiscountPdf + checkoutDiscountPdf) * 100) / 100,
+  basePrice,
+);
+
+// Prefer the value the backend stored; fall back for older rows.
+const taxableRoomPdf =
+  b.taxable_amount != null
+    ? Number(b.taxable_amount)
+    : Math.max(0, Math.round((basePrice - totalDiscountPdf) * 100) / 100);
 
 const roomGstPdf =
-  Math.round(basePrice * GST_RATE * 100) / 100;
+  Math.round(taxableRoomPdf * GST_RATE * 100) / 100;
 
 const roomTotalPdf =
-  Math.round((basePrice + roomGstPdf) * 100) / 100;
+  Math.round((taxableRoomPdf + roomGstPdf) * 100) / 100;
 
 const advancePaidPdf = Number(b.advance_paid || 0);
 const balancePaidPdf = Number(b.balance_paid || 0);
@@ -748,6 +766,19 @@ const grandTotalPdf = Math.round(
     y += 6;
     [
       { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
+      // Pre-tax discount: tariff -> discount -> taxable value -> GST.
+      ...(totalDiscountPdf > 0
+        ? [
+            {
+              label: "Discount",
+              val: `- Rs.${totalDiscountPdf.toLocaleString()}`,
+            },
+            {
+              label: "Taxable Value",
+              val: `Rs.${taxableRoomPdf.toLocaleString()}`,
+            },
+          ]
+        : []),
       {
         label: "GST (18%)",
         val: `Rs.${Math.round(roomGstPdf).toLocaleString()}`,
@@ -968,8 +999,19 @@ setTimeout(() => {
   if (!booking) return null;
 
   const basePrice = Number(booking.total_price);
-  const roomGst = Math.round(basePrice * GST_RATE * 100) / 100;
-  const alreadyPaid = Math.round((basePrice + roomGst) * 100) / 100;
+  // PRE-TAX DISCOUNT MODEL — GST follows the discounted room value.
+  const discountAmount =
+    Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
+  const checkoutDiscountAmt =
+    Number(
+      booking.checkout_discount_applied ? booking.checkout_discount_amount : 0,
+    ) || 0;
+  const discountedRoomAmount = Math.max(
+    0,
+    Math.round((basePrice - discountAmount - checkoutDiscountAmt) * 100) / 100,
+  );
+  const roomGst = Math.round(discountedRoomAmount * GST_RATE * 100) / 100;
+  const alreadyPaid = Math.round((discountedRoomAmount + roomGst) * 100) / 100;
   const addonTotal = Number(booking.addon_charges || 0);
   const addonGst = Math.round(addonTotal * GST_RATE * 100) / 100;
   const remainingAmount = Math.round((addonTotal + addonGst) * 100) / 100;
@@ -1357,6 +1399,20 @@ const bookingPaidLabel =
                   label: "Room Charges",
                   val: `Rs.${basePrice.toLocaleString()}`,
                 },
+                // Pre-tax discount: shown before GST, which is charged on the
+                // discounted (taxable) value.
+                ...(discountAmount + checkoutDiscountAmt > 0
+                  ? [
+                      {
+                        label: "Discount",
+                        val: `- Rs.${(discountAmount + checkoutDiscountAmt).toLocaleString()}`,
+                      },
+                      {
+                        label: "Taxable Value",
+                        val: `Rs.${discountedRoomAmount.toLocaleString()}`,
+                      },
+                    ]
+                  : []),
                 {
                   label: "GST (18%)",
                   val: `Rs.${Math.round(roomGst).toLocaleString()}`,
@@ -1596,7 +1652,13 @@ function ManagerBookingForm({
         )
       : 0;
 
-  const basePrice = room.price_per_night * nights;
+  // Must use the double-occupancy rate when it applies, otherwise this preview
+  // quotes the single rate while the backend charges the double rate.
+  const nightly =
+    Number(form.guest_count) >= 2 && Number(room.price_double || 0) > 0
+      ? Number(room.price_double)
+      : Number(room.price_per_night || 0);
+  const basePrice = nightly * nights;
   const gst = Math.round(basePrice * GST_RATE * 100) / 100;
   const total = basePrice + gst;
 

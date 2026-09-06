@@ -341,7 +341,10 @@ export default function CheckoutPage({ user, showToast }) {
       ),
     );
     const roomCharges = Number(booking.total_price || 0);
-    const gst = Number(booking.gst_amount || Math.round(roomCharges * GST_RATE));
+    // Round to paise, matching every other screen.
+    const gst = Number(
+      booking.gst_amount || Math.round(roomCharges * GST_RATE * 100) / 100,
+    );
     const total = Number(booking.final_total || roomCharges + gst);
     const invNo = `INV-${formatBookingId(booking)}`;
     const guestName = booking.guest_name || user.name || "Guest";
