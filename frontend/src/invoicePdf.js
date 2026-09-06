@@ -195,20 +195,21 @@ const co = b.check_out_date
     ) || 0,
   );
 
-  // const discountedRoomAmount = Math.max(
-  //   0,
-  //   basePrice - discountAmount,
-  // );
+  // PRE-TAX DISCOUNT MODEL
+  // The discount reduces the room's taxable value, then GST is charged on the
+  // reduced amount:  3000 - 500 = 2500 -> GST 450 -> total 2950.
+  // This is how a discount must appear on a GST invoice.
+  const discountedRoomAmount = Math.max(
+    0,
+    Math.round((basePrice - discountAmount) * 100) / 100,
+  );
 
-  // GST is charged on the FULL room tariff; the booking discount is deducted
-  // from the gross total afterwards, so it reduces the bill 1:1
-  const roomGst = Math.round(basePrice * GST_RATE * 100) / 100;
-
-  const grossRoomTotal = Math.round((basePrice + roomGst) * 100) / 100;
+  const roomGst =
+    Math.round(discountedRoomAmount * GST_RATE * 100) / 100;
 
   const roomTotal = Math.max(
     0,
-    Math.round((grossRoomTotal - discountAmount) * 100) / 100,
+    Math.round((discountedRoomAmount + roomGst) * 100) / 100,
   );
 
   // Payments already made
@@ -268,17 +269,24 @@ const co = b.check_out_date
       ? suppliedCheckoutDiscount
       : persistedCheckoutDiscount;
 
-  // The outstanding balance already includes GST, so the checkout discount
-  // reduces it 1:1 — no tax is recalculated.
+  // Pre-tax model: the discount reduces the taxable value, so the GST charged
+  // on it is refunded too. Total impact = discount x 1.18. Cap the discount so
+  // that combined figure can never exceed what is still owed.
+  const maxCheckoutDiscount =
+    Math.round((roomRemaining / (1 + GST_RATE)) * 100) / 100;
+
   const appliedCheckoutDiscount = Math.min(
     Math.max(0, rawCheckoutDiscount),
-    roomRemaining,
+    maxCheckoutDiscount,
   );
 
-  // const checkoutDiscountGst = 0;
+  const checkoutDiscountGst =
+    Math.round(appliedCheckoutDiscount * GST_RATE * 100) / 100;
 
   const checkoutDiscountImpact =
-    Math.round(appliedCheckoutDiscount * 100) / 100;
+    Math.round(
+      (appliedCheckoutDiscount + checkoutDiscountGst) * 100,
+    ) / 100;
 
   // Final room balance after checkout discount
   const finalRoomRemaining = Math.max(
@@ -1260,28 +1268,29 @@ if (addons.length) {
     money(basePrice),
   );
 
-  // GST is charged on the full tariff
-  sumRow(
-    "GST (18%)",
-    money(roomGst),
-  );
-
-  // ...then the booking discount comes off the gross total
+  // The discount comes off the tariff FIRST, so the taxable value is shown
+  // before GST — this is the order a GST invoice must follow.
   if (
     discountAmount > 0
   ) {
-    sumRow(
-      "Total before discount",
-      money(grossRoomTotal),
-    );
-
     sumRow(
       "Booking Discount",
       `- ${money(
         discountAmount,
       )}`,
     );
+
+    sumRow(
+      "Taxable Value",
+      money(discountedRoomAmount),
+    );
   }
+
+  // GST is charged on the discounted (taxable) value
+  sumRow(
+    "GST (18%)",
+    money(roomGst),
+  );
 
   /* ─────────────────────────────────────────────────────────────────────
      CHECKOUT DISCOUNT

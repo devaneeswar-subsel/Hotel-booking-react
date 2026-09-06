@@ -939,22 +939,27 @@ export default function GuestCheckIn({
   const extraServices =
     addonTotal + vehiclePrice;
 
-  // GST is charged on the FULL room tariff plus add-ons; the booking discount
-  // comes off the gross total afterwards, so it reduces the bill 1:1
+  /*
+   * PRE-TAX DISCOUNT MODEL
+   * The discount reduces the room's taxable value first, then GST is charged
+   * on the reduced amount:  3000 - 500 = 2500 -> GST 450 -> total 2950.
+   */
+  const taxableRoom = Math.max(
+    0,
+    Math.round((roomCharges - discountAmount) * 100) / 100,
+  );
+
   const taxes =
     Math.round(
-      (roomCharges + addonTotal) * GST_RATE * 100,
-    ) / 100;
-
-  const grossTotal =
-    Math.round(
-      (roomCharges + extraServices + taxes) * 100,
+      (taxableRoom + addonTotal) * GST_RATE * 100,
     ) / 100;
 
   const totalAmount = Math.max(
     0,
-    Math.round((grossTotal - discountAmount) * 100) / 100,
+    Math.round((taxableRoom + extraServices + taxes) * 100) / 100,
   );
+
+  const grossTotal = totalAmount;
 
   const advancePaid =
     Number(b.advance_paid || 0);
@@ -968,9 +973,7 @@ export default function GuestCheckIn({
 
   const roomTotalWithGst = Math.max(
     0,
-    Math.round(
-      (roomCharges * (1 + GST_RATE) - discountAmount) * 100,
-    ) / 100,
+    Math.round(taxableRoom * (1 + GST_RATE) * 100) / 100,
   );
 
   const paymentTotal = Number(
@@ -1032,18 +1035,24 @@ export default function GuestCheckIn({
    * value — GST recalculates on the lower amount, so the guest's real
    * saving is the discount plus GST on that discount.
    */
-  // the outstanding balance already includes GST, so a checkout discount
-  // reduces it 1:1 — no GST adjustment. Adding 18% on top would credit
-  // Rs.114 for a Rs.97 discount.
+  // The discount comes off the taxable value, so the guest also stops paying
+  // the GST that was charged on it. Total saving = discount x 1.18.
+  // Cap it so the discount plus its GST can never exceed what is still owed.
+  const maxCheckoutDiscount =
+    Math.round((roomRemaining / (1 + GST_RATE)) * 100) / 100;
+
   const appliedCheckoutDiscount = Math.min(
     Math.max(0, Number(checkoutDiscount) || 0),
-    roomRemaining,
+    maxCheckoutDiscount,
   );
 
-  const checkoutDiscountGst = 0;
+  const checkoutDiscountGst =
+    Math.round(appliedCheckoutDiscount * GST_RATE * 100) / 100;
 
   const checkoutDiscountTotalImpact =
-    Math.round(appliedCheckoutDiscount * 100) / 100;
+    Math.round(
+      (appliedCheckoutDiscount + checkoutDiscountGst) * 100,
+    ) / 100;
 
   /*
    * FINAL ROOM BALANCE AFTER CHECKOUT DISCOUNT (GST-adjusted)
