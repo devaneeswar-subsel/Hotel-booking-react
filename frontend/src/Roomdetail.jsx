@@ -434,6 +434,11 @@ export default function RoomDetail({
   onBack,
   onBook,
   onMyBookings,
+  // The standalone /rooms/:slug page is reached from the home page showcase
+  // cards, where no dates have been chosen yet — so there is nothing to book.
+  // That page passes false and gets an "about the hotel" panel instead of a
+  // Book Now button that cannot do anything.
+  showBooking = true,
 }) {
   const [activeImg, setActiveImg] = useState(0);
   const [imgLoading, setImgLoading] = useState(true);
@@ -1688,8 +1693,62 @@ export default function RoomDetail({
                 ))}
               </div>
 
-              {/* BOOK BUTTON */}
+              {/* BOOK BUTTON — or, on the standalone room page, an
+                  "about the hotel" panel, because no dates have been
+                  chosen there and the button had no working handler. */}
 
+              {!showBooking && (
+                <div className="bg-white px-5 pb-3 pt-5">
+                  <div className="rounded-xl border border-[#E9ECEF] bg-[#FBFAF7] p-5">
+                    <h3 className="m-0 font-['Playfair_Display'] text-lg font-semibold text-[#0F1923]">
+                      About VV Grand Park Residency
+                    </h3>
+
+                    <p className="mt-3 text-[0.86rem] leading-6 text-[#5A6472]">
+                      A comfortable stay in the heart of Thiruvarur, minutes
+                      from the Thyagaraja Temple and the town centre. Every
+                      room comes with air conditioning, complimentary Wi-Fi,
+                      daily housekeeping and 24-hour front desk support.
+                    </p>
+
+                    <ul className="mt-4 grid gap-2 p-0 text-[0.82rem] text-[#5A6472] list-none">
+                      {[
+                        "Free Wi-Fi and air conditioning in every room",
+                        "24-hour front desk and room service",
+                        "Airport and railway station pickup on request",
+                        "Walking distance to temples and local markets",
+                        "Free parking on site",
+                      ].map((line) => (
+                        <li key={line} className="flex gap-2">
+                          <span className="text-[var(--gold)]">•</span>
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <button
+                      type="button"
+                      onClick={onBack}
+                      className="
+                        mt-5 w-full rounded-xl bg-[#0f1923] py-3.5
+                        text-[0.92rem] font-bold text-white transition-all
+                        duration-200 hover:-translate-y-[1px]
+                        hover:bg-[var(--gold)] hover:text-black
+                        active:translate-y-0
+                      "
+                    >
+                      Check availability &amp; book
+                    </button>
+
+                    <p className="mt-2 text-center text-xs leading-5 text-[var(--c-muted)]">
+                      Choose your dates on the rooms page to see live
+                      availability and prices.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {showBooking && (
               <div className="bg-white px-5 pb-3 pt-5">
                 <button
                   type="button"
@@ -1747,6 +1806,7 @@ export default function RoomDetail({
                   administration.
                 </p>
               </div>
+              )}
 
               {/* PRICE ESTIMATE */}
 

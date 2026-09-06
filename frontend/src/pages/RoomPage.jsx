@@ -525,12 +525,15 @@ export default function RoomPage() {
           onBack={() =>
             navigate("/#rooms")
           }
-          onBook={(selectedRoom) => {
-            console.log(
-              "Book room:",
-              selectedRoom
-            );
-          }}
+          /*
+           * This page is reached from the home page showcase cards, where the
+           * guest has not picked dates yet, so there is nothing to book. The
+           * Book Now button here only ever ran a console.log — it did nothing
+           * when a guest pressed it. showBooking={false} replaces it with an
+           * "About VV Grand Park Residency" panel whose button sends the guest
+           * back to the rooms search to choose dates.
+           */
+          showBooking={false}
           onAuthPrompt={() => {
             navigate("/#rooms");
           }}
