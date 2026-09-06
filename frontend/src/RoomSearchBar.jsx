@@ -168,7 +168,10 @@ export default function RoomSearchBar({ onSearch, searching }) {
                 onClick={() => setGuestsOpen(false)}
               />
               <div className="absolute left-3 right-3 top-[calc(100%-4px)] z-20 rounded-xl border border-[#E9ECEF] bg-white p-3.5 shadow-[0_12px_36px_rgba(15,25,35,0.16)]">
-                <Stepper label="Adults" value={adults} onChange={setAdults} min={1} max={20} />
+                {/* Capped at 12: the largest room sleeps 4, so a party bigger
+                    than about 12 can never be housed and letting a guest pick
+                    20 only produces an unexplained "No Rooms Available". */}
+                <Stepper label="Adults" value={adults} onChange={setAdults} min={1} max={12} />
                 <div className="my-1 border-t border-[#F0F3F7]" />
                 <Stepper label="Children" value={children} onChange={setChildren} min={0} max={10} />
                 <button

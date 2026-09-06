@@ -477,6 +477,18 @@ function roomTaxableValue(booking) {
   return Math.max(0, Math.round((tariff - bookingDiscount - checkoutDiscount) * 100) / 100);
 }
 
+// True when a date string is before today. Compared date-only in local time so
+// a booking made at 11pm for "today" is still accepted.
+function isPastDate(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return target < today;
+}
+
 function resolveNightlyRate(room, guestCount) {
   const single = Number(room.price_per_night || 0);
   const double = Number(room.price_double || 0);
@@ -493,6 +505,10 @@ async function calculateBookingAmounts({
   guest_count,
   discount_applied = false,
   discount_amount = 0,
+  // Staff need to enter walk-ins and late paperwork for stays that have
+  // already begun, so the past-date guard is skipped for them. Public guest
+  // checkout always leaves this false.
+  allowPastDates = false,
 }) {
   const [roomRows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
     room_id,
@@ -515,6 +531,12 @@ async function calculateBookingAmounts({
   );
   if (nights <= 0) {
     const err = new Error("Invalid dates");
+    err.status = 400;
+    throw err;
+  }
+
+  if (!allowPastDates && isPastDate(check_in_date)) {
+    const err = new Error("Check-in date cannot be in the past");
     err.status = 400;
     throw err;
   }
@@ -2623,10 +2645,29 @@ app.post("/api/bookings", requireAuth, async (req, res, next) => {
     if (!roomRows.length)
       return res.status(404).json({ error: "Room not found" });
     const room = roomRows[0];
+
+    // Every other booking route enforces this; without it here a party of 10
+    // could be booked into a room that sleeps 2.
+    const requestedGuests = Math.max(1, Number(guest_count) || 1);
+    if (requestedGuests > Number(room.capacity || requestedGuests)) {
+      return res.status(400).json({
+        error: `This room allows up to ${room.capacity} guests`,
+      });
+    }
+
     const nights = Math.ceil(
       (new Date(check_out_date) - new Date(check_in_date)) / 86400000,
     );
     if (nights <= 0) return res.status(400).json({ error: "Invalid dates" });
+
+    // Guests cannot book a date that has already gone — that is always a typo
+    // or a stale browser tab. Staff CAN, because walk-ins and late paperwork
+    // are entered after the stay has already started.
+    if (!isStaff(req) && isPastDate(check_in_date)) {
+      return res
+        .status(400)
+        .json({ error: "Check-in date cannot be in the past" });
+    }
 
     const base_price = nights * resolveNightlyRate(room, guest_count);
     const gst_amount = Math.round(base_price * GST_RATE * 100) / 100;
@@ -2713,6 +2754,8 @@ app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) =
       check_out_date,
       advance_amount,
       guest_count: req.body.guest_count,
+      // staff route — walk-ins and late paperwork need past check-in dates
+      allowPastDates: true,
     });
     const requestedGuests = Math.max(1, Number(req.body.guest_count) || 1);
     if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
@@ -2793,6 +2836,8 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
       check_out_date,
       advance_amount,
       guest_count,
+      // staff route — walk-ins and late paperwork need past check-in dates
+      allowPastDates: true,
     });
     const requestedGuests = Math.max(1, Number(guest_count) || 1);
     if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
@@ -2934,6 +2979,8 @@ app.post(
         guest_count,
         discount_applied,
         discount_amount,
+        // staff route — walk-ins and late paperwork need past check-in dates
+        allowPastDates: true,
       });
       const requestedGuests = Math.max(1, Number(guest_count) || 1);
       if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {

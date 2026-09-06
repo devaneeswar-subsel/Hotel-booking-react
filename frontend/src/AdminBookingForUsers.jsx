@@ -9,8 +9,12 @@ import {
   MapPinIcon,
   UserIcon,
 } from "./Icons";
+import {
+  computeRoomBill,
+  nightlyRate as resolveNightlyRate,
+  money2,
+} from "./utils/billing";
 
-const GST_RATE = 0.18;
 const ADVANCE_RATE = 0.3;
 const MANUAL_PAYMENT_MODES = ["Cash", "Online"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -232,42 +236,36 @@ export default function AdminBookingForUsers({
 
   // rooms with a double-occupancy rate switch to it from 2 guests upward;
   // rooms without one keep a single rate at every occupancy
-  const nightlyRate = useMemo(() => {
-    const single = Number(room.price_per_night || 0);
-    const double = Number(room.price_double || 0);
-    const guests = Math.max(1, Number(form.guest_count) || 1);
-    return guests >= 2 && double > 0 ? double : single;
-  }, [room.price_per_night, room.price_double, form.guest_count]);
+  // Uses the shared helper so this preview always matches what the backend
+  // will actually charge (resolveNightlyRate in server.js).
+  const nightlyRate = useMemo(
+    () => resolveNightlyRate(room, form.guest_count),
+    [room, form.guest_count],
+  );
 
   const totals = useMemo(() => {
-    const roomSubtotal = nightlyRate * nights;
-    const discountAmount = form.discount_applied
-      ? Math.round(Number(form.discount_amount || 0) * 100) / 100
-      : 0;
-    // GST is charged on the full room tariff; the discount is deducted from
-    // the gross total afterwards, so a Rs.400 discount reduces the bill by
-    // exactly Rs.400 rather than Rs.472
-    const gst = Math.round(roomSubtotal * GST_RATE * 100) / 100;
-    const grossTotal = Math.round((roomSubtotal + gst) * 100) / 100;
-    const fullAmount = Math.max(
-      0,
-      Math.round((grossTotal - discountAmount) * 100) / 100,
-    );
-    const discountedRoomAmount = Math.max(0, roomSubtotal - discountAmount);
+    // PRE-TAX DISCOUNT: the discount comes off the tariff, then GST is charged
+    // on the reduced value.  3000 - 500 = 2500 -> GST 450 -> total 2950.
+    // computeRoomBill is the same function the invoice and every dashboard
+    // uses, so this preview can never drift from what the guest is charged.
+    const bill = computeRoomBill({
+      tariff: nightlyRate * nights,
+      discount: form.discount_applied ? form.discount_amount : 0,
+    });
+
+    const fullAmount = bill.total;
     const suggestedAdvanceAmount = Math.floor(fullAmount * ADVANCE_RATE);
-    const manualAdvanceAmount =
-      form.advance_amount === ""
-        ? 0
-        : Math.round(Number(form.advance_amount || 0) * 100) / 100;
-    const advanceAmount = manualAdvanceAmount;
-    const remainingAmount =
-      Math.round(Math.max(0, fullAmount - advanceAmount) * 100) / 100;
+    const advanceAmount =
+      form.advance_amount === "" ? 0 : money2(form.advance_amount);
+    const remainingAmount = Math.max(0, money2(fullAmount - advanceAmount));
+
     return {
-      roomSubtotal,
-      discountAmount,
-      discountedRoomAmount,
-      grossTotal,
-      gst,
+      roomSubtotal: bill.roomTariff,
+      discountAmount: bill.bookingDiscount,
+      discountedRoomAmount: bill.roomTaxable,
+      taxableAmount: bill.roomTaxable,
+      grossTotal: bill.total,
+      gst: bill.gst,
       fullAmount,
       suggestedAdvanceAmount,
       advanceAmount,
@@ -402,12 +400,14 @@ export default function AdminBookingForUsers({
         showToast("Enter a valid non-negative discount", "error");
         return false;
       }
-      if (totals.discountAmount > totals.grossTotal) {
+      // Pre-tax model: the discount comes off the room tariff, so it can never
+      // exceed the tariff itself (matching the backend's own check).
+      if (totals.discountAmount > totals.roomSubtotal) {
         setFieldErrors((prev) => ({
           ...prev,
-          discount_amount: "Discount cannot exceed the total amount",
+          discount_amount: `Discount cannot exceed the room tariff of ${money(totals.roomSubtotal)}`,
         }));
-        showToast("Discount cannot exceed room subtotal", "error");
+        showToast("Discount cannot exceed the room tariff", "error");
         return false;
       }
     }
@@ -845,22 +845,24 @@ export default function AdminBookingForUsers({
               )}
             </div>
           )}
-          <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
-            <span className="text-[#868E96]">GST (18%)</span>
-            <span className="font-bold text-[#0F1923]">{money(totals.gst)}</span>
-          </div>
-          {form.discount_applied && (
+          {/* Pre-tax discount: the discount is deducted BEFORE GST, so the
+              rows must read tariff -> discount -> taxable value -> GST. */}
+          {form.discount_applied && totals.discountAmount > 0 && (
             <>
-              <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
-                <span className="text-[#868E96]">Total before discount</span>
-                <span className="font-bold text-[#0F1923]">{money(totals.grossTotal)}</span>
-              </div>
               <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
                 <span className="text-[#868E96]">Discount</span>
                 <span className="font-bold text-[#C0392B]">- {money(totals.discountAmount)}</span>
               </div>
+              <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+                <span className="text-[#868E96]">Taxable value</span>
+                <span className="font-bold text-[#0F1923]">{money(totals.taxableAmount)}</span>
+              </div>
             </>
           )}
+          <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+            <span className="text-[#868E96]">GST (18%)</span>
+            <span className="font-bold text-[#0F1923]">{money(totals.gst)}</span>
+          </div>
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
             <span className="text-[#868E96]">Full amount</span>
             <span className="font-bold text-[#0F1923]">{money(totals.fullAmount)}</span>

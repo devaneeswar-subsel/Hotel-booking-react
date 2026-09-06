@@ -1433,35 +1433,54 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
               <div className="text-[0.62rem] font-bold text-gray-400 tracking-[1px] uppercase mb-2">
                 Pricing Preview
               </div>
+              {/* Show BOTH occupancy rates. Previewing only price_per_night
+                  hid what a 2-guest stay would actually cost. */}
               {[
                 {
-                  label: "Base price / night",
-                  val: `Rs.${Number(form.price_per_night).toLocaleString()}`,
+                  label: "1 guest / night",
+                  val: `Rs.${Number(form.price_per_night || 0).toLocaleString()}`,
                 },
                 {
                   label: "GST (18%)",
-                  val: `Rs.${Math.round(Number(form.price_per_night) * 0.18).toLocaleString()}`,
+                  val: `Rs.${Math.round(Number(form.price_per_night || 0) * GST_RATE).toLocaleString()}`,
                 },
-              ].map(({ label, val }) => (
+                {
+                  label: "Guest pays — 1 guest",
+                  val: `Rs.${Math.round(Number(form.price_per_night || 0) * (1 + GST_RATE)).toLocaleString()}`,
+                  strong: true,
+                },
+                ...(Number(form.price_double) > 0
+                  ? [
+                      {
+                        label: "2+ guests / night",
+                        val: `Rs.${Number(form.price_double).toLocaleString()}`,
+                      },
+                      {
+                        label: "GST (18%)",
+                        val: `Rs.${Math.round(Number(form.price_double) * GST_RATE).toLocaleString()}`,
+                      },
+                      {
+                        label: "Guest pays — 2+ guests",
+                        val: `Rs.${Math.round(Number(form.price_double) * (1 + GST_RATE)).toLocaleString()}`,
+                        strong: true,
+                      },
+                    ]
+                  : []),
+              ].map(({ label, val, strong }) => (
                 <div
-                  key={label}
-                  className="flex justify-between text-[0.82rem] mb-1"
+                  key={label + val}
+                  className={`flex justify-between text-[0.82rem] mb-1 ${
+                    strong ? "border-t border-gray-200 pt-1.5 mt-1" : ""
+                  }`}
                 >
-                  <span className="text-gray-400">{label}</span>
-                  <span className="font-semibold">{val}</span>
+                  <span className={strong ? "font-semibold text-navy" : "text-gray-400"}>
+                    {label}
+                  </span>
+                  <span className={strong ? "font-bold text-navy" : "font-semibold"}>
+                    {val}
+                  </span>
                 </div>
               ))}
-              <div className="flex justify-between text-[0.9rem] border-t border-gray-200 pt-2 mt-1">
-                <span className="font-display font-semibold text-navy">
-                  Guest pays / night
-                </span>
-                <strong className="font-display text-navy">
-                  Rs.
-                  {Math.round(
-                    Number(form.price_per_night) * 1.18,
-                  ).toLocaleString()}
-                </strong>
-              </div>
             </div>
           )}
         </div>
@@ -3761,7 +3780,13 @@ function AdminBookingForm({ room, adminUser, onClose, showToast, onSuccess }) {
         )
       : 0;
 
-  const basePrice = room.price_per_night * nights;
+  // Must use the double-occupancy rate when it applies, otherwise this preview
+  // quotes the single rate while the backend charges the double rate.
+  const nightly =
+    Number(form.guest_count) >= 2 && Number(room.price_double || 0) > 0
+      ? Number(room.price_double)
+      : Number(room.price_per_night || 0);
+  const basePrice = nightly * nights;
   const gst = Math.round(basePrice * GST_RATE * 100) / 100;
   const total = basePrice + gst;
 

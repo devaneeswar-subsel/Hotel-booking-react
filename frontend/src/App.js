@@ -568,7 +568,7 @@ function BookingModal({ room, user, onClose, showToast }) {
           )
         : 1;
     const basePrice = Number(b.total_price);
-    const gst = Math.round(basePrice * 0.18 * 100) / 100;
+    const gst = Math.round(basePrice * GST_RATE * 100) / 100;
     const total = Math.round((basePrice + gst) * 100) / 100;
     const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
     const today = new Date().toLocaleDateString("en-IN", {
@@ -1393,7 +1393,11 @@ function BookingReceiptModal({ booking, onClose, onDownloadInvoice }) {
         )
       : 1;
   const basePrice = Number(booking.total_price || 0);
-  const gst = Number(booking.gst_amount || Math.round(basePrice * GST_RATE));
+  // Round to paise like every other screen; Math.round(x * 0.18) alone rounds
+  // to whole rupees and made this figure disagree with the invoice.
+  const gst = Number(
+    booking.gst_amount || Math.round(basePrice * GST_RATE * 100) / 100,
+  );
   const addonCharges = Number(booking.addon_charges || 0);
   const total = Number(booking.final_total || basePrice + gst);
   const statusPill =
@@ -2495,7 +2499,7 @@ function AppContent() {
 
     const gst = Number(
       booking.gst_amount ||
-        Math.round(roomCharges * GST_RATE)
+        Math.round(roomCharges * GST_RATE * 100) / 100
     );
 
     const total = Number(
