@@ -1147,9 +1147,17 @@ export default function GuestCheckIn({
       (taxableRoom + addonTotal) * GST_RATE * 100,
     ) / 100;
 
+  /*
+   * ADDITIONAL: the GST calculation above is unchanged. It is dropped only
+   * for a booking the admin issued with GST off. gst_enabled defaults to 1,
+   * so every existing booking behaves exactly as before.
+   */
+  const gstEnabled = Number(b.gst_enabled ?? 1) !== 0;
+  const chargedTaxes = gstEnabled ? taxes : 0;
+
   const totalAmount = Math.max(
     0,
-    Math.round((taxableRoom + extraServices + taxes) * 100) / 100,
+    Math.round((taxableRoom + extraServices + chargedTaxes) * 100) / 100,
   );
 
   const grossTotal = totalAmount;
@@ -1166,7 +1174,9 @@ export default function GuestCheckIn({
 
   const roomTotalWithGst = Math.max(
     0,
-    Math.round(taxableRoom * (1 + GST_RATE) * 100) / 100,
+    gstEnabled
+      ? Math.round(taxableRoom * (1 + GST_RATE) * 100) / 100
+      : Math.round(taxableRoom * 100) / 100,
   );
 
   const paymentTotal = Number(
@@ -1239,16 +1249,18 @@ export default function GuestCheckIn({
   // The discount comes off the taxable value, so the guest also stops paying
   // the GST that was charged on it. Total saving = discount x 1.18.
   // Cap it so the discount plus its GST can never exceed what is still owed.
-  const maxCheckoutDiscount =
-    Math.round((roomRemaining / (1 + GST_RATE)) * 100) / 100;
+  const maxCheckoutDiscount = gstEnabled
+    ? Math.round((roomRemaining / (1 + GST_RATE)) * 100) / 100
+    : Math.round(roomRemaining * 100) / 100;
 
   const appliedCheckoutDiscount = Math.min(
     Math.max(0, Number(checkoutDiscount) || 0),
     maxCheckoutDiscount,
   );
 
-  const checkoutDiscountGst =
-    Math.round(appliedCheckoutDiscount * GST_RATE * 100) / 100;
+  const checkoutDiscountGst = gstEnabled
+    ? Math.round(appliedCheckoutDiscount * GST_RATE * 100) / 100
+    : 0;
 
   const checkoutDiscountTotalImpact =
     Math.round(
@@ -2219,12 +2231,16 @@ export default function GuestCheckIn({
                   )}
                 />
 
-                <Row
-                  label="Taxes & Fees (GST 18%)"
-                  value={money(
-                    taxes,
-                  )}
-                />
+                {gstEnabled ? (
+                  <Row
+                    label="Taxes & Fees (GST 18%)"
+                    value={money(
+                      taxes,
+                    )}
+                  />
+                ) : (
+                  <Row label="GST" value="Not charged" />
+                )}
 
                 <div className="mt-1 border-t border-gray-200 pt-1">
                   <Row
@@ -2277,12 +2293,14 @@ export default function GuestCheckIn({
                             also stops paying the GST charged on it — showing
                             that line makes the total add up.
                           */}
-                          <Row
-                            label="GST reversed on discount"
-                            value={`- ${money(
-                              checkoutDiscountGst,
-                            )}`}
-                          />
+                          {gstEnabled && (
+                            <Row
+                              label="GST reversed on discount"
+                              value={`- ${money(
+                                checkoutDiscountGst,
+                              )}`}
+                            />
+                          )}
                         </>
                       )}
 
@@ -2653,7 +2671,7 @@ export default function GuestCheckIn({
                         Math.round(
                           (discountAmount +
                             appliedCheckoutDiscount) *
-                            (1 + GST_RATE) *
+                            (gstEnabled ? 1 + GST_RATE : 1) *
                             100,
                         ) / 100,
                       )}

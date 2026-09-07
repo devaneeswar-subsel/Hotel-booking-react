@@ -63,6 +63,8 @@ export function computeRoomBill({
   discount = 0,
   addons = 0,
   checkoutDiscount = 0,
+  // ADDITIONAL: defaults to true, so every existing caller is unaffected.
+  gstEnabled = true,
 } = {}) {
   const roomTariff = money2(tariff);
   const bookingDiscount = money2(discount);
@@ -78,7 +80,13 @@ export function computeRoomBill({
   const roomTaxable = money2(roomTariff - totalDiscount);
   const taxable = money2(roomTaxable + addonCharges);
   const gst = money2(taxable * GST_RATE);
-  const total = money2(taxable + gst);
+
+  // ADDITIONAL: the GST calculation above is unchanged. It is dropped only
+  // when the admin issued this booking with GST off (gstEnabled false), in
+  // which case the guest pays the discounted room value as-is.
+  const chargedGst = gstEnabled ? gst : 0;
+
+  const total = money2(taxable + chargedGst);
 
   return {
     roomTariff,        // 3000 — what the room costs before discount
@@ -88,7 +96,8 @@ export function computeRoomBill({
     roomTaxable,       // 2500 — room value GST is charged on
     addonCharges,      // add-ons, taxed separately but at the same rate
     taxable,           // 2500 + add-ons
-    gst,               // 450
+    gst: chargedGst,   // 450, or 0 when GST is off for this booking
+    gstEnabled: Boolean(gstEnabled),
     total,             // 2950
   };
 }
@@ -102,6 +111,9 @@ export function computeRoomBill({
  * taxable_amount column existed.
  */
 export function billFromBooking(b = {}) {
+  // ADDITIONAL: gst_enabled defaults to 1, so bookings saved before this
+  // column existed keep their tax exactly as before.
+  const gstEnabled = Number(b.gst_enabled ?? 1) !== 0;
   const tariff = money2(b.total_price);
   const bookingDiscount = money2(b.discount_applied ? b.discount_amount : 0);
   const coDiscount = money2(
@@ -114,6 +126,7 @@ export function billFromBooking(b = {}) {
     discount: bookingDiscount,
     addons,
     checkoutDiscount: coDiscount,
+    gstEnabled,
   });
 
   // Trust the stored columns when the backend has written them.

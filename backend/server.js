@@ -167,6 +167,9 @@ async function runMigrations() {
       // this, never on the full tariff. Storing it means the invoice and the
       // dashboard read the same number instead of each recomputing it.
       "taxable_amount DECIMAL(10,2) DEFAULT NULL",
+      // ADDITIONAL: 1 = taxed exactly as before, 0 = admin issued this
+      // booking with GST off. Defaults to 1 so nothing existing changes.
+      "gst_enabled TINYINT DEFAULT 1",
     ];
     for (const col of cols) {
       try {
@@ -465,6 +468,27 @@ function clearLoginAttempts(req) {
 // GST is charged on THIS, never on the raw tariff. Every place that
 // recalculates a bill (add-ons, checkout, vehicle charges) must start here,
 // otherwise adding a charge silently cancels the guest's discount.
+/*
+ * ── ADDITIONAL FEATURE: no-GST bookings ──────────────────────────────────
+ *
+ * Returns true when a booking was issued with GST switched off from the
+ * admin booking screen (gst_enabled = 0).
+ *
+ * This does NOT change how GST is calculated. Every existing calculation
+ * runs exactly as before at the existing GST_RATE; the only addition is one
+ * line after each of them that replaces the computed tax with 0 when this
+ * returns true.
+ *
+ * gst_enabled defaults to 1, so every booking made before this feature —
+ * and every guest booking, which never sets it — behaves exactly as it
+ * always has.
+ */
+function isGstDisabled(booking) {
+  const flag = booking?.gst_enabled;
+  if (flag === undefined || flag === null) return false;
+  return Number(flag) === 0;
+}
+
 function roomTaxableValue(booking) {
   if (booking.taxable_amount != null) return Number(booking.taxable_amount);
   const tariff = Number(booking.total_price || 0);
@@ -528,7 +552,7 @@ async function recalcBookingTotals(bookingId) {
     roomTaxable,
     addonCharges: addonTotal,
     taxableAmount: subtotal,
-    gstAmount,
+    gstAmount: chargedGst,
     totalAmount,
     paid,
     remainingAmount: remaining,
@@ -567,6 +591,9 @@ async function calculateBookingAmounts({
   // already begun, so the past-date guard is skipped for them. Public guest
   // checkout always leaves this false.
   allowPastDates = false,
+  // ADDITIONAL: admin bookings may be issued without GST. Defaults to true,
+  // so guest checkout and every existing caller behave exactly as before.
+  gst_enabled = true,
 }) {
   const [roomRows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
     room_id,
@@ -652,9 +679,15 @@ async function calculateBookingAmounts({
   // discounted value, it is not charged on the full tariff.
   const taxableAmount = Math.round((roomSubtotal - discountAmount) * 100) / 100;
   const gstAmount = Math.round(taxableAmount * GST_RATE * 100) / 100;
+
+  // ADDITIONAL: the line above is unchanged. When the admin issued this
+  // booking with GST off, the computed tax is simply dropped, so the guest
+  // pays the discounted room value as-is (2000 - 500 = 1500).
+  const chargedGst = gst_enabled ? gstAmount : 0;
+
   const totalAmount = Math.max(
     0,
-    Math.round((taxableAmount + gstAmount) * 100) / 100,
+    Math.round((taxableAmount + chargedGst) * 100) / 100,
   );
   const discountedRoomAmount = taxableAmount;
   const advanceAmount = resolveAdvanceAmount(totalAmount, advance_amount);
@@ -670,7 +703,8 @@ async function calculateBookingAmounts({
     discountAmount,
     discountedRoomAmount,
     taxableAmount,
-    gstAmount,
+    gstAmount: chargedGst,
+    gstEnabled: Boolean(gst_enabled),
     totalAmount,
     advanceAmount,
     remainingAmount,
@@ -2812,6 +2846,7 @@ app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) =
       // more than the screen showed.
       discount_applied = false,
       discount_amount = 0,
+      gst_enabled = true,
     } = req.body;
     if (!room_id || !check_in_date || !check_out_date)
       return res.status(400).json({ error: "Missing required fields" });
@@ -2824,6 +2859,7 @@ app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) =
       guest_count: req.body.guest_count,
       discount_applied,
       discount_amount,
+      gst_enabled,
       // staff route — walk-ins and late paperwork need past check-in dates
       allowPastDates: true,
     });
@@ -2890,6 +2926,7 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
       // when the advance was paid online.
       discount_applied = false,
       discount_amount = 0,
+      gst_enabled = true,
     } = req.body;
 
     if (
@@ -2926,6 +2963,7 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
       // below rejects a payment the guest has already made
       discount_applied,
       discount_amount,
+      gst_enabled,
       // staff route — walk-ins and late paperwork need past check-in dates
       allowPastDates: true,
     });
@@ -3004,8 +3042,8 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
         payment_status, payment_id, advance_payment_id, advance_order_id,
         payment_method, booking_source, vehicle_type, vehicle_price,
         vehicle_status, pickup_location, dropoff_location,
-        discount_applied, discount_amount, status
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        discount_applied, discount_amount, gst_enabled, status
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
       [
         userId,
         room_id,
@@ -3036,6 +3074,7 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
         // it was previously lost on any online advance
         amounts.discountAmount > 0 ? 1 : 0,
         amounts.discountAmount,
+        amounts.gstEnabled ? 1 : 0,
       ],
     );
 
@@ -3115,6 +3154,7 @@ app.post(
         guest_count,
         discount_applied,
         discount_amount,
+        gst_enabled: req.body.gst_enabled !== false,
         // staff route — walk-ins and late paperwork need past check-in dates
         allowPastDates: true,
       });
@@ -3148,8 +3188,8 @@ app.post(
           advance_amount, advance_paid, balance_paid, remaining_amount,
           payment_status, payment_id, advance_payment_id, advance_order_id,
           payment_method, booking_source, vehicle_type, vehicle_price,
-          vehicle_status, pickup_location, dropoff_location, status
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+          vehicle_status, pickup_location, dropoff_location, gst_enabled, status
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
         [
           userId,
           room_id,
@@ -3180,6 +3220,7 @@ app.post(
           vehicle_type === "none" ? "not_required" : "pending",
           pickup_location || null,
           dropoff_location || null,
+          amounts.gstEnabled ? 1 : 0,
         ],
       );
 
@@ -3305,8 +3346,12 @@ function outstandingBalance(booking) {
     Number(
       booking.checkout_discount_applied ? booking.checkout_discount_amount : 0,
     ) || 0;
-  const checkoutDiscountImpact =
-    Math.round(checkoutDiscountBase * (1 + GST_RATE) * 100) / 100;
+  // ADDITIONAL: on a no-GST booking there is no tax to reverse, so a
+  // discount reduces the balance one-for-one. Normal bookings are unchanged.
+  const gstOff = isGstDisabled(booking);
+  const checkoutDiscountImpact = gstOff
+    ? Math.round(checkoutDiscountBase * 100) / 100
+    : Math.round(checkoutDiscountBase * (1 + GST_RATE) * 100) / 100;
 
   const bookingDiscount =
     Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
@@ -3316,7 +3361,9 @@ function outstandingBalance(booking) {
       bookingDiscount +
       Number(booking.addon_charges || 0),
   );
-  const roomWithGst = Math.round(taxableFallback * (1 + GST_RATE) * 100) / 100;
+  const roomWithGst = gstOff
+    ? Math.round(taxableFallback * 100) / 100
+    : Math.round(taxableFallback * (1 + GST_RATE) * 100) / 100;
   const totalAmount = Number(
     booking.total_amount || booking.final_total || roomWithGst,
   );
@@ -3622,19 +3669,28 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
     );
     const newTaxable = Math.round((newRoomTaxable + addonCharges) * 100) / 100;
     const newGst = Math.round(newTaxable * GST_RATE * 100) / 100;
-    const newTotal = Math.round((newTaxable + newGst) * 100) / 100;
+
+    // ADDITIONAL: unchanged calculation above; the tax is dropped only for a
+    // booking issued with GST off, so a discount there stays one-for-one.
+    const gstOff = isGstDisabled(booking);
+    const chargedGst = gstOff ? 0 : newGst;
+
+    const newTotal = Math.round((newTaxable + chargedGst) * 100) / 100;
 
     // what the bill was before this discount, for the response/audit trail
     const baseTaxable =
       Math.round((discountedRoomBase + addonCharges) * 100) / 100;
-    const baseTotal =
-      Math.round(baseTaxable * (1 + GST_RATE) * 100) / 100;
+    const baseTotal = gstOff
+      ? Math.round(baseTaxable * 100) / 100
+      : Math.round(baseTaxable * (1 + GST_RATE) * 100) / 100;
     const baseRemaining = Math.max(
       0,
       Math.round((baseTotal - advancePaid - balancePaid) * 100) / 100,
     );
 
-    const discountGst = Math.round(requestedDiscount * GST_RATE * 100) / 100;
+    const discountGst = gstOff
+      ? 0
+      : Math.round(requestedDiscount * GST_RATE * 100) / 100;
     const discountTotalImpact =
       Math.round((requestedDiscount + discountGst) * 100) / 100;
 
@@ -3674,7 +3730,7 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
         applied ? req.user.user_id : null,
         // room-only, matching what booking creation stores in this column
         newRoomTaxable,
-        newGst,
+        chargedGst,
         newTotal,
         newTotal,
         newRemaining,
@@ -3691,7 +3747,7 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
       checkout_discount_total_impact: discountTotalImpact,
       roomTaxableAmount: newRoomTaxable,
       taxableAmount: newTaxable,
-      gstAmount: newGst,
+      gstAmount: chargedGst,
       totalAmount: newTotal,
       advancePaid,
       balancePaid,

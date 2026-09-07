@@ -130,6 +130,9 @@ export default function AdminBookingForUsers({
     dropoff_location: "",
     advance_amount: "",
     payment_mode: "Cash",
+    // ADDITIONAL: blank by default, so the bar looks like an ordinary empty
+    // field and the booking bills exactly as it always has. Only "N" skips GST.
+    gst_mode: "",
     discount_applied: false,
     discount_amount: "",
   });
@@ -243,6 +246,14 @@ export default function AdminBookingForUsers({
     [room, form.guest_count],
   );
 
+  /*
+   * ADDITIONAL: GST stays on for every value except a typed N. Y, blank and
+   * any typo all leave the existing behaviour untouched, so the safe state is
+   * the default.
+   */
+  const gstEnabled =
+    String(form.gst_mode || "").trim().toUpperCase() !== "N";
+
   const totals = useMemo(() => {
     // PRE-TAX DISCOUNT: the discount comes off the tariff, then GST is charged
     // on the reduced value.  3000 - 500 = 2500 -> GST 450 -> total 2950.
@@ -251,6 +262,7 @@ export default function AdminBookingForUsers({
     const bill = computeRoomBill({
       tariff: nightlyRate * nights,
       discount: form.discount_applied ? form.discount_amount : 0,
+      gstEnabled,
     });
 
     const fullAmount = bill.total;
@@ -271,7 +283,7 @@ export default function AdminBookingForUsers({
       advanceAmount,
       remainingAmount,
     };
-  }, [form.advance_amount, form.discount_amount, form.discount_applied, nights, nightlyRate]);
+  }, [form.advance_amount, form.discount_amount, form.discount_applied, nights, nightlyRate, gstEnabled]);
 
   function update(name, value) {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -496,6 +508,7 @@ export default function AdminBookingForUsers({
           advance_amount: totals.advanceAmount,
           discount_applied: form.discount_applied,
           discount_amount: totals.discountAmount,
+          gst_enabled: gstEnabled,
         }),
       });
       const orderData = await orderRes.json();
@@ -544,6 +557,7 @@ export default function AdminBookingForUsers({
                   advance_amount: totals.advanceAmount,
                   discount_applied: form.discount_applied,
                   discount_amount: totals.discountAmount,
+                  gst_enabled: gstEnabled,
                   pickup_location:
                     form.vehicle_type === "none" ? "" : form.pickup_location,
                   dropoff_location:
@@ -617,6 +631,7 @@ export default function AdminBookingForUsers({
         vehicle_type: form.vehicle_type,
         advance_amount: totals.advanceAmount,
         payment_mode: form.payment_mode,
+        gst_enabled: gstEnabled,
         discount_applied: form.discount_applied,
         discount_amount: totals.discountAmount,
         pickup_location:
@@ -667,6 +682,18 @@ export default function AdminBookingForUsers({
             Record manual advance payment and confirm the customer's stay.
           </p>
         </div>
+        {/* ADDITIONAL: GST toggle. Blank or anything other than N bills this
+            booking exactly as it always has; N issues it without GST. */}
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            value={form.gst_mode}
+            onChange={(e) => update("gst_mode", e.target.value.toUpperCase())}
+            disabled={paying}
+            placeholder="Search"
+            className="w-52 rounded-lg border border-[#E9ECEF] bg-white px-4 py-2.5 text-sm outline-none placeholder:text-[#ADB5BD] focus:border-[#C9A84C]"
+          />
+
         <div className="rounded-lg border border-[#E9ECEF] bg-white px-4 py-2 text-right">
           <div className="text-[0.62rem] font-bold uppercase tracking-[1px] text-[#868E96]">
             Advance Due Now
@@ -676,6 +703,7 @@ export default function AdminBookingForUsers({
               ? money(totals.advanceAmount)
               : "Required"}
           </div>
+        </div>
         </div>
       </div>
 
@@ -802,6 +830,7 @@ export default function AdminBookingForUsers({
             <div className="mt-1 text-[0.7rem] text-[#868E96]">
               Past dates stay blocked unless enabled. Occupied nights remain unavailable.
             </div>
+
           </div>
 
           <div className="rounded-xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
@@ -1016,10 +1045,12 @@ export default function AdminBookingForUsers({
               </div>
             </>
           )}
-          <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
-            <span className="text-[#868E96]">GST (18%)</span>
-            <span className="font-bold text-[#0F1923]">{money(totals.gst)}</span>
-          </div>
+          {gstEnabled && (
+            <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+              <span className="text-[#868E96]">GST (18%)</span>
+              <span className="font-bold text-[#0F1923]">{money(totals.gst)}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
             <span className="text-[#868E96]">Full amount</span>
             <span className="font-bold text-[#0F1923]">{money(totals.fullAmount)}</span>

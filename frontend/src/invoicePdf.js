@@ -210,6 +210,13 @@ const co = b.check_out_date
     Math.round((basePrice - discountAmount) * 100) / 100,
   );
 
+  /*
+   * ADDITIONAL: gst_enabled defaults to 1, so every existing booking prints
+   * exactly as before. Only a booking the admin issued with GST off skips
+   * the tax lines below.
+   */
+  const invoiceGstEnabled = Number(b.gst_enabled ?? 1) !== 0;
+
   const roomGst =
     Math.round(discountedRoomAmount * GST_RATE * 100) / 100;
 
@@ -278,16 +285,18 @@ const co = b.check_out_date
   // Pre-tax model: the discount reduces the taxable value, so the GST charged
   // on it is refunded too. Total impact = discount x 1.18. Cap the discount so
   // that combined figure can never exceed what is still owed.
-  const maxCheckoutDiscount =
-    Math.round((roomRemaining / (1 + GST_RATE)) * 100) / 100;
+  const maxCheckoutDiscount = invoiceGstEnabled
+    ? Math.round((roomRemaining / (1 + GST_RATE)) * 100) / 100
+    : Math.round(roomRemaining * 100) / 100;
 
   const appliedCheckoutDiscount = Math.min(
     Math.max(0, rawCheckoutDiscount),
     maxCheckoutDiscount,
   );
 
-  const checkoutDiscountGst =
-    Math.round(appliedCheckoutDiscount * GST_RATE * 100) / 100;
+  const checkoutDiscountGst = invoiceGstEnabled
+    ? Math.round(appliedCheckoutDiscount * GST_RATE * 100) / 100
+    : 0;
 
   const checkoutDiscountImpact =
     Math.round(
@@ -302,10 +311,11 @@ const co = b.check_out_date
     b.addon_charges || 0,
   );
 
-  const addonGst =
-    Math.round(
-      addonTotal * GST_RATE * 100,
-    ) / 100;
+  const addonGst = invoiceGstEnabled
+    ? Math.round(
+        addonTotal * GST_RATE * 100,
+      ) / 100
+    : 0;
 
   const addonWithGst =
     Math.round(
@@ -362,8 +372,9 @@ const co = b.check_out_date
   const taxableTotal =
     Math.round((finalRoomTaxable + addonTotal) * 100) / 100;
 
-  const totalGst =
-    Math.round(taxableTotal * GST_RATE * 100) / 100;
+  const totalGst = invoiceGstEnabled
+    ? Math.round(taxableTotal * GST_RATE * 100) / 100
+    : 0;
 
   const grandTotal = Math.max(
     0,
@@ -1320,12 +1331,16 @@ if (addons.length) {
 
   // GST is charged on the room value AFTER both discounts. Using roomGst here
   // ignored the checkout discount, so the tax line was too high.
-  sumRow(
-    "GST (18%)",
-    money(
-      Math.round(finalRoomTaxable * GST_RATE * 100) / 100,
-    ),
-  );
+  // ADDITIONAL: no tax line at all on a no-GST booking — printing "GST Rs.0"
+  // would suggest tax was worked out and came to nothing.
+  if (invoiceGstEnabled) {
+    sumRow(
+      "GST (18%)",
+      money(
+        Math.round(finalRoomTaxable * GST_RATE * 100) / 100,
+      ),
+    );
+  }
 
   /* ─────────────────────────────────────────────────────────────────────
      CHECKOUT DISCOUNT
@@ -1342,17 +1357,19 @@ if (addons.length) {
     // The discount itself is already listed above with the booking discount.
     // What belongs here is the GST it reverses, so the guest can see why the
     // bill drops by more than the discount amount.
-    sumRow(
-      "GST reversed on discount",
-      `- ${money(
-        checkoutDiscountGst,
-      )}`,
-    );
+    if (invoiceGstEnabled) {
+      sumRow(
+        "GST reversed on discount",
+        `- ${money(
+          checkoutDiscountGst,
+        )}`,
+      );
 
-    sumRow(
-      "Total guest saving",
-      money(checkoutDiscountImpact),
-    );
+      sumRow(
+        "Total guest saving",
+        money(checkoutDiscountImpact),
+      );
+    }
   }
 
   // Payment history
@@ -1393,10 +1410,12 @@ if (addons.length) {
     money(addonTotal),
   );
 
-  sumRow(
-    "GST on Add-ons (18%)",
-    money(addonGst),
-  );
+  if (invoiceGstEnabled) {
+    sumRow(
+      "GST on Add-ons (18%)",
+      money(addonGst),
+    );
+  }
 
   if (
     remaining > 0
