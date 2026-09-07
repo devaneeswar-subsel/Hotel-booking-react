@@ -208,7 +208,6 @@ export default function Gallery() {
                 }`}
               >
                 {g.type}
-                <span className="ml-1.5 opacity-60">{g.count}</span>
               </button>
             );
           })}
