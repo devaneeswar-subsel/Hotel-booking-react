@@ -144,24 +144,30 @@ const co = b.check_out_date
       h > 0 ? `${h} hr ${m} min` : `${m} min`;
   }
 
-  // guests actually recorded at check-in,
-  // falling back to the booked count
+  /*
+   * Head count recorded at check-in.
+   *
+   * adults_count / children_count are what reception actually entered on the
+   * stepper, so they win. Only guests whose NAME was typed get a row in
+   * booking_guests, and reception is not required to name anyone beyond the
+   * primary guest — so counting rows undercounted the party. A check-in of
+   * 3 adults with one name filled in printed "1 Adult" on the invoice.
+   *
+   * The rows are still the fallback for older bookings saved before the
+   * count columns existed.
+   */
   const guestRows = b.guests || [];
 
   const adultCount =
-    guestRows.filter(
-      (g) => g.guest_type === "adult",
-    ).length ||
     Number(b.adults_count) ||
+    guestRows.filter((g) => g.guest_type === "adult").length ||
     Number(b.guest_count) ||
     1;
 
   const childCount =
-    guestRows.filter(
-      (g) => g.guest_type === "child",
-    ).length ||
-    Number(b.children_count) ||
-    0;
+    b.children_count != null
+      ? Number(b.children_count)
+      : guestRows.filter((g) => g.guest_type === "child").length || 0;
 
   const guestSummary = [
     `${adultCount} Adult${

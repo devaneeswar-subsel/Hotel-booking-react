@@ -450,12 +450,19 @@ export default function GuestCheckIn({
           (g) => g.guest_type === "child",
         );
 
+        /*
+         * adults_count is what the admin actually chose on the stepper, so it
+         * wins. Only rows with a name are stored in booking_guests, so a party
+         * of 2 where the second name was left blank saves 1 guest row — using
+         * savedAdults.length first silently reset the count back to 1 on every
+         * reload and the second name field could never be filled in.
+         */
         const adultCount = Math.min(
           MAX_ADULTS,
           Math.max(
             1,
-            savedAdults.length ||
-              Number(data.adults_count) ||
+            Number(data.adults_count) ||
+              savedAdults.length ||
               Number(data.guest_count) ||
               1,
           ),
@@ -473,13 +480,15 @@ export default function GuestCheckIn({
           })),
         );
 
+        // Same reasoning as adults: the saved count is authoritative, the
+        // stored rows only cover children whose name was entered.
         const kidCount = Math.min(
           MAX_CHILDREN,
           Math.max(
             0,
-            savedKids.length ||
-              Number(data.children_count) ||
-              0,
+            data.children_count != null
+              ? Number(data.children_count)
+              : savedKids.length || 0,
           ),
         );
 
@@ -582,6 +591,24 @@ export default function GuestCheckIn({
 
     if (!adultRows[0]?.name.trim()) {
       toast("Enter the primary guest name", "error");
+      return false;
+    }
+
+    /*
+     * Only the primary guest's name is required. The other adults and the
+     * children may be left blank — the head count is stored separately in
+     * adults_count / children_count, so the count survives even when a name
+     * is not entered.
+     */
+
+    // The room has a physical limit; checking in more people than it sleeps
+    // should be caught here rather than discovered at the door.
+    const roomCapacity = Number(booking?.capacity || 0);
+    if (roomCapacity > 0 && adults > roomCapacity) {
+      toast(
+        `This room sleeps ${roomCapacity}. Reduce the adult count or move the guest to a larger room.`,
+        "error",
+      );
       return false;
     }
 
