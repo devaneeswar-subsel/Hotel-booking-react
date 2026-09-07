@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { motion } from "framer-motion";
 
 const API = process.env.REACT_APP_API_URL;
@@ -7,11 +13,13 @@ const API = process.env.REACT_APP_API_URL;
    Gallery.jsx
 
    A carousel of the hotel's real room photographs, pulled from the rooms API
-   (image_url plus image2..image5 on each room). Falls back to a small set of
-   stock shots only if the API is unreachable, so the section never renders
-   empty.
+   (image_url plus image2..image5 on each room). Room-type pills let the user
+   switch which type's photos (5–6 max) are shown in the carousel. Falls back
+   to a small set of stock shots only if the API is unreachable, so the
+   section never renders empty.
    ──────────────────────────────────────────────────────────────────────────── */
 
+const FALLBACK_TYPE = "Our Rooms";
 const FALLBACK = [
   {
     src: "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=1200",
@@ -28,15 +36,18 @@ const FALLBACK = [
 ];
 
 const AUTOPLAY_MS = 4000;
+const MAX_PER_TYPE = 5; // show at most 5-6 images per selected room type
 
 export default function Gallery() {
-  const [slides, setSlides] = useState([]);
-  const [groups, setGroups] = useState([]);
+  // photosByType: { [roomType]: [{ src, label }] }
+  const [photosByType, setPhotosByType] = useState({});
+  const [groups, setGroups] = useState([]); // [{ type, count }]
+  const [selectedType, setSelectedType] = useState(null);
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const touchStartX = useRef(null);
 
-  /* ── collect every room photo the hotel has uploaded ──────────────────── */
+  /* ── collect every room photo the hotel has uploaded, grouped by type ──── */
   useEffect(() => {
     let cancelled = false;
 
@@ -46,17 +57,15 @@ export default function Gallery() {
         if (!res.ok) throw new Error("rooms unavailable");
         const rooms = await res.json();
 
-        /*
-         * Group every photo under its room type — Deluxe Room, Suite Room,
-         * Suite with Balcony. Room numbers are deliberately left out: the
-         * gallery sells the category, not a specific room.
-         */
         const byType = new Map();
-        const seenSrc = new Set();
+        const seenSrc = new Map(); // per-type dedupe: type -> Set(src)
 
         (Array.isArray(rooms) ? rooms : []).forEach((room) => {
           const type = room.room_type || "Our Rooms";
-          if (!byType.has(type)) byType.set(type, []);
+          if (!byType.has(type)) {
+            byType.set(type, []);
+            seenSrc.set(type, new Set());
+          }
 
           [
             room.image_url,
@@ -66,10 +75,13 @@ export default function Gallery() {
             room.image5,
           ].forEach((src) => {
             const clean = src && String(src).trim();
-            // the same photo can be reused across rooms of a type
-            if (clean && !seenSrc.has(clean)) {
-              seenSrc.add(clean);
-              byType.get(type).push({ src: clean, label: type });
+            const seen = seenSrc.get(type);
+            const bucket = byType.get(type);
+            // the same photo can be reused across rooms of a type; cap at
+            // MAX_PER_TYPE so the carousel stays to 5-6 images per type
+            if (clean && !seen.has(clean) && bucket.length < MAX_PER_TYPE) {
+              seen.add(clean);
+              bucket.push({ src: clean, label: type });
             }
           });
         });
@@ -81,18 +93,32 @@ export default function Gallery() {
           ...[...byType.keys()].filter((t) => !ORDER.includes(t)),
         ];
 
-        const collected = ordered.flatMap((t) => byType.get(t) || []);
+        const photosObj = {};
+        ordered.forEach((t) => {
+          photosObj[t] = byType.get(t) || [];
+        });
+
+        const groupList = ordered
+          .map((t) => ({ type: t, count: (byType.get(t) || []).length }))
+          .filter((g) => g.count > 0);
 
         if (!cancelled) {
-          setSlides(collected.length ? collected : FALLBACK);
-          setGroups(
-            ordered
-              .map((t) => ({ type: t, count: (byType.get(t) || []).length }))
-              .filter((g) => g.count > 0),
-          );
+          if (groupList.length) {
+            setPhotosByType(photosObj);
+            setGroups(groupList);
+            setSelectedType(groupList[0].type);
+          } else {
+            setPhotosByType({ [FALLBACK_TYPE]: FALLBACK });
+            setGroups([{ type: FALLBACK_TYPE, count: FALLBACK.length }]);
+            setSelectedType(FALLBACK_TYPE);
+          }
         }
       } catch {
-        if (!cancelled) setSlides(FALLBACK);
+        if (!cancelled) {
+          setPhotosByType({ [FALLBACK_TYPE]: FALLBACK });
+          setGroups([{ type: FALLBACK_TYPE, count: FALLBACK.length }]);
+          setSelectedType(FALLBACK_TYPE);
+        }
       }
     })();
 
@@ -101,7 +127,17 @@ export default function Gallery() {
     };
   }, []);
 
+  // only the currently selected room type's photos drive the carousel
+  const slides = useMemo(
+    () => (selectedType ? photosByType[selectedType] || [] : []),
+    [selectedType, photosByType],
+  );
   const count = slides.length;
+
+  // reset to the first photo whenever the selected room type changes
+  useEffect(() => {
+    setIndex(0);
+  }, [selectedType]);
 
   const go = useCallback(
     (next) => {
@@ -155,18 +191,16 @@ export default function Gallery() {
         Our <em className="text-amber-500">Rooms</em>
       </motion.h2>
 
-      {/* jump to a room type */}
+      {/* switch which room type's carousel is shown */}
       {groups.length > 1 && (
         <div className="mb-4 flex flex-wrap gap-2">
           {groups.map((g) => {
-            // index of this type's first photo in the flat slide list
-            const start = slides.findIndex((sl) => sl.label === g.type);
-            const active = slides[index]?.label === g.type;
+            const active = selectedType === g.type;
             return (
               <button
                 key={g.type}
                 type="button"
-                onClick={() => start >= 0 && setIndex(start)}
+                onClick={() => setSelectedType(g.type)}
                 className={`rounded-full border px-4 py-1.5 text-[0.78rem] font-semibold transition ${
                   active
                     ? "border-amber-400 bg-amber-400 text-slate-900"
@@ -228,7 +262,16 @@ export default function Gallery() {
               onClick={() => go(index - 1)}
               className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/85 text-slate-900 shadow transition hover:bg-white"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M15 18l-6-6 6-6" />
               </svg>
             </button>
@@ -239,7 +282,16 @@ export default function Gallery() {
               onClick={() => go(index + 1)}
               className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/85 text-slate-900 shadow transition hover:bg-white"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M9 18l6-6-6-6" />
               </svg>
             </button>
@@ -273,7 +325,9 @@ export default function Gallery() {
               type="button"
               onClick={() => setIndex(i)}
               className={`h-16 w-24 shrink-0 overflow-hidden rounded-lg border-2 transition ${
-                i === index ? "border-amber-400" : "border-transparent opacity-60 hover:opacity-100"
+                i === index
+                  ? "border-amber-400"
+                  : "border-transparent opacity-60 hover:opacity-100"
               }`}
             >
               <img
