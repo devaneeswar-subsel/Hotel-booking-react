@@ -441,7 +441,7 @@ export default function RoomDetail({
   showBooking = true,
 }) {
   const [activeImg, setActiveImg] = useState(0);
-  const [imgLoading, setImgLoading] = useState(true);
+
   const [menuOpen, setMenuOpen] = useState(false);
 
   const roomType = room?.room_type || "Standard";
@@ -483,7 +483,7 @@ export default function RoomDetail({
     });
 
     setActiveImg(0);
-    setImgLoading(true);
+
   }, [room?.room_id, room?.room_number]);
 
   // ───────────────────────────────────────────────────────────
@@ -538,7 +538,6 @@ export default function RoomDetail({
   const handleThumbClick = (index) => {
     if (index === activeImg) return;
 
-    setImgLoading(true);
     setActiveImg(index);
   };
 
@@ -554,7 +553,6 @@ export default function RoomDetail({
       return;
     }
 
-    setImgLoading(false);
   };
 
   // ───────────────────────────────────────────────────────────
@@ -1160,7 +1158,6 @@ export default function RoomDetail({
                 key={images[activeImg]}
                 src={images[activeImg]}
                 alt={`${roomType} at VV Grand Park Residency`}
-                onLoad={() => setImgLoading(false)}
                 onError={handleImageError}
                 className="
                   h-full
@@ -1172,40 +1169,7 @@ export default function RoomDetail({
                 "
               />
 
-              {imgLoading && (
-                <div
-                  className="
-                    absolute inset-0
-                    flex items-center justify-center
-                    bg-[var(--navy)]/60
-                    backdrop-blur-sm
-                  "
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <div
-                      className="
-                        h-8 w-8
-                        animate-spin
-                        rounded-full
-                        border-2
-                        border-[var(--gold)]/30
-                        border-t-[var(--gold)]
-                      "
-                    />
-
-                    <span
-                      className="
-                        text-[0.7rem]
-                        uppercase
-                        tracking-[2px]
-                        text-[var(--gold)]/70
-                      "
-                    >
-                      Loading
-                    </span>
-                  </div>
-                </div>
-              )}
+ 
 
               <div
                 className="
