@@ -438,7 +438,164 @@ export default function AdminBookingForUsers({
     return true;
   }
 
+  /*
+   * Razorpay's checkout.js is loaded on demand rather than in index.html, so
+   * guests who never reach a payment screen do not download it.
+   */
+  function loadRazorpayScript() {
+    return new Promise((resolve, reject) => {
+      if (window.Razorpay) return resolve();
+      const existing = document.querySelector(
+        'script[src="https://checkout.razorpay.com/v1/checkout.js"]',
+      );
+      if (existing) {
+        existing.addEventListener("load", () => resolve());
+        existing.addEventListener("error", () =>
+          reject(new Error("Could not load the payment window")),
+        );
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve();
+      script.onerror = () =>
+        reject(new Error("Could not load the payment window"));
+      document.body.appendChild(script);
+    });
+  }
+
+  /*
+   * ONLINE ADVANCE
+   *
+   * "Online" used to be recorded as a manual payment — the same code path as
+   * Cash — so no money was ever actually collected. It now opens Razorpay
+   * pre-filled with the advance amount and the customer's details, and the
+   * booking is only created after the signature is verified server-side.
+   */
+  async function payAdvanceOnline() {
+    if (!validate()) return;
+
+    setPaying(true);
+    try {
+      await loadRazorpayScript();
+
+      const customerEmail = String(form.customer_email ?? "")
+        .trim()
+        .toLowerCase();
+      const customerPhone = normalizePhone(form.customer_phone);
+
+      // The server recalculates the advance from the same inputs, so the
+      // amount charged can never drift from what this screen showed.
+      const orderRes = await apiFetch("/api/admin/bookings/advance-order", {
+        method: "POST",
+        body: JSON.stringify({
+          room_id: room.room_id,
+          check_in_date: form.check_in_date,
+          check_out_date: form.check_out_date,
+          guest_count: Number(form.guest_count) || 1,
+          advance_amount: totals.advanceAmount,
+          discount_applied: form.discount_applied,
+          discount_amount: totals.discountAmount,
+        }),
+      });
+      const orderData = await orderRes.json();
+      if (!orderRes.ok) {
+        throw new Error(orderData.error || "Unable to start the payment");
+      }
+
+      const rzp = new window.Razorpay({
+        key: orderData.razorpay_key,
+        amount: Math.round(Number(orderData.advanceAmount) * 100),
+        currency: orderData.currency || "INR",
+        name: "VV Grand Park Residency",
+        description: `Advance — ${room.room_type} (Room ${room.room_number})`,
+        order_id: orderData.order_id,
+        prefill: {
+          name: form.customer_name.trim(),
+          email: customerEmail,
+          contact: customerPhone,
+        },
+        theme: { color: "#0F1923" },
+        modal: {
+          ondismiss: () => {
+            setPaying(false);
+            showToast("Payment cancelled. No booking was created.", "error");
+          },
+        },
+        handler: async (response) => {
+          try {
+            // The booking row is created here, not before the payment, so an
+            // abandoned checkout never leaves a phantom reservation.
+            const confirmRes = await apiFetch(
+              "/api/admin/bookings/advance-confirm",
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  room_id: room.room_id,
+                  check_in_date: form.check_in_date,
+                  check_out_date: form.check_out_date,
+                  guest_count: Number(form.guest_count) || 1,
+                  customer: {
+                    name: form.customer_name.trim(),
+                    email: customerEmail,
+                    phone: customerPhone,
+                  },
+                  vehicle_type: form.vehicle_type,
+                  advance_amount: totals.advanceAmount,
+                  discount_applied: form.discount_applied,
+                  discount_amount: totals.discountAmount,
+                  pickup_location:
+                    form.vehicle_type === "none" ? "" : form.pickup_location,
+                  dropoff_location:
+                    form.vehicle_type === "none" ? "" : form.dropoff_location,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                }),
+              },
+            );
+            const data = await confirmRes.json();
+            if (!confirmRes.ok) {
+              throw new Error(data.error || "Payment could not be verified");
+            }
+            showToast(
+              `Payment received. Invoice email queued to ${
+                data.invoiceEmail || customerEmail
+              }`,
+              "success",
+            );
+            onSuccess?.(data.booking_id);
+          } catch (err) {
+            showToast(err.message, "error");
+          } finally {
+            setPaying(false);
+          }
+        },
+      });
+
+      rzp.on("payment.failed", (response) => {
+        // Razorpay allows a retry on the same order, so do not tear anything
+        // down here — just tell the operator what happened.
+        showToast(
+          `Payment failed: ${
+            response.error?.description || "Please try again."
+          }`,
+          "error",
+        );
+        setPaying(false);
+      });
+
+      rzp.open();
+    } catch (err) {
+      showToast(err.message, "error");
+      setPaying(false);
+    }
+  }
+
   async function payAdvance() {
+    // Online goes through Razorpay; Cash is recorded straight away.
+    if (form.payment_mode === "Online") return payAdvanceOnline();
+
     if (!validate()) return;
 
     setPaying(true);
@@ -935,12 +1092,28 @@ export default function AdminBookingForUsers({
             className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-[#0F1923] px-4 py-3 text-[0.9rem] font-bold text-white transition hover:bg-[#C9A84C] hover:text-[#0F1923] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <CheckIcon size={16} />
+            {/* Online opens Razorpay, so say so rather than "Confirm" —
+                the operator needs to know a payment window is coming. */}
             {paying
-              ? "Confirming..."
-              : String(form.advance_amount).trim()
-                ? `Confirm ${form.payment_mode} Advance ${money(totals.advanceAmount)}`
-                : `Confirm ${form.payment_mode} Advance`}
+              ? form.payment_mode === "Online"
+                ? "Opening payment..."
+                : "Confirming..."
+              : !String(form.advance_amount).trim()
+                ? form.payment_mode === "Online"
+                  ? "Collect Advance Online"
+                  : "Confirm Cash Advance"
+                : form.payment_mode === "Online"
+                  ? `Collect ${money(totals.advanceAmount)} Online`
+                  : `Confirm Cash Advance ${money(totals.advanceAmount)}`}
           </button>
+
+          {form.payment_mode === "Online" && (
+            <p className="mt-2 text-center text-[0.7rem] leading-4 text-[#868E96]">
+              A Razorpay window will open with {money(totals.advanceAmount)}{" "}
+              pre-filled. The booking is created only after the payment
+              succeeds.
+            </p>
+          )}
         </div>
       </div>
     </div>

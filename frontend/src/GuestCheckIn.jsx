@@ -664,7 +664,173 @@ export default function GuestCheckIn({
 
   /* ── mark paid ─────────────────────────────────────────────────────────── */
 
+  /*
+   * Razorpay's checkout.js is fetched on demand so the page does not pay for
+   * it on every check-in that settles in cash.
+   */
+  function loadRazorpayScript() {
+    return new Promise((resolve, reject) => {
+      if (window.Razorpay) return resolve();
+      const existing = document.querySelector(
+        'script[src="https://checkout.razorpay.com/v1/checkout.js"]',
+      );
+      if (existing) {
+        existing.addEventListener("load", () => resolve());
+        existing.addEventListener("error", () =>
+          reject(new Error("Could not load the payment window")),
+        );
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve();
+      script.onerror = () =>
+        reject(new Error("Could not load the payment window"));
+      document.body.appendChild(script);
+    });
+  }
+
+  /*
+   * ONLINE BALANCE
+   *
+   * Every mode except Cash means the guest is paying through Razorpay, so the
+   * payment window has to actually open. Previously all modes took the manual
+   * path and the booking was marked PAID whether or not any money arrived.
+   *
+   * The server computes the amount from the booking, so what Razorpay charges
+   * can never drift from the balance shown on this screen.
+   */
+  async function collectBalanceOnline() {
+    setSaving(true);
+
+    try {
+      // Guest details are saved first — if the operator abandons the payment
+      // window, the check-in paperwork is still not lost.
+      if (!isCheckedIn) {
+        await apiFetch(`/api/bookings/${bookingId}/checkin-details`, {
+          method: "PUT",
+          body: JSON.stringify(buildPayload()),
+        }).catch(() => {});
+      }
+
+      await loadRazorpayScript();
+
+      const orderRes = await apiFetch(
+        `/api/bookings/${bookingId}/balance-order`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+
+      /*
+       * A missing route makes Express return its HTML 404 page, and
+       * res.json() then fails with "Unexpected token '<'", which tells the
+       * operator nothing. Read the body as text first and say what actually
+       * happened.
+       */
+      const orderText = await orderRes.text();
+      let orderData;
+      try {
+        orderData = JSON.parse(orderText);
+      } catch {
+        throw new Error(
+          orderRes.status === 404
+            ? "Online payment is not available yet — the server needs to be restarted."
+            : `The server returned an unexpected response (${orderRes.status}).`,
+        );
+      }
+      if (!orderRes.ok) {
+        throw new Error(orderData.error || "Unable to start the payment");
+      }
+
+      const rzp = new window.Razorpay({
+        key: orderData.razorpay_key,
+        amount: Math.round(Number(orderData.amount) * 100),
+        currency: orderData.currency || "INR",
+        name: "VV Grand Park Residency",
+        description: `Balance — Booking #${bookingId}`,
+        order_id: orderData.order_id,
+        prefill: {
+          name: b.guest_name || adultRows[0]?.name || "",
+          email: b.email || "",
+          contact: b.phone || "",
+        },
+        theme: { color: "#0F1923" },
+        modal: {
+          ondismiss: () => {
+            setSaving(false);
+            toast("Payment cancelled. Nothing was charged.", "error");
+          },
+        },
+        handler: async (response) => {
+          try {
+            const verifyRes = await apiFetch(
+              `/api/bookings/${bookingId}/balance-verify`,
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  payment_mode: payMethod,
+                }),
+              },
+            );
+            const verifyText = await verifyRes.text();
+            let verifyData;
+            try {
+              verifyData = JSON.parse(verifyText);
+            } catch {
+              // The money HAS been taken at this point, so never imply it has
+              // not — tell the operator to check before charging again.
+              throw new Error(
+                "Payment went through but the booking could not be updated. Check the booking before charging again.",
+              );
+            }
+            if (!verifyRes.ok) {
+              throw new Error(
+                verifyData.error || "Payment could not be verified",
+              );
+            }
+
+            // Add-ons settle on the same payment run as the manual path.
+            await apiFetch(`/api/bookings/${bookingId}/addons/mark-paid`, {
+              method: "PATCH",
+              body: JSON.stringify({ payment_mode: addonMode }),
+            }).catch(() => {});
+
+            toast("Payment received", "success");
+            fetchBooking(false);
+            onRefresh && onRefresh();
+          } catch (err) {
+            toast(err.message, "error");
+          } finally {
+            setSaving(false);
+          }
+        },
+      });
+
+      rzp.on("payment.failed", (response) => {
+        // Razorpay allows a retry on the same order, so leave the booking as
+        // it is and just report what happened.
+        toast(
+          `Payment failed: ${
+            response.error?.description || "Please try again."
+          }`,
+          "error",
+        );
+        setSaving(false);
+      });
+
+      rzp.open();
+    } catch (e) {
+      toast(e.message, "error");
+      setSaving(false);
+    }
+  }
+
   async function markPaid() {
+    // Cash is recorded directly; every other mode collects through Razorpay.
+    if (payMethod !== "Cash") return collectBalanceOnline();
+
     setSaving(true);
 
     try {
@@ -2247,12 +2413,25 @@ export default function GuestCheckIn({
                   >
                     {I.check}
 
+                    {/* Only Cash is "recorded"; every other mode opens
+                        Razorpay, and the operator needs to know that before
+                        they click. */}
                     {saving
-                      ? "Recording..."
-                      : `Mark as Paid — ${money(
-                          finalRemaining,
-                        )}`}
+                      ? payMethod === "Cash"
+                        ? "Recording..."
+                        : "Opening payment..."
+                      : payMethod === "Cash"
+                        ? `Mark as Paid — ${money(finalRemaining)}`
+                        : `Collect ${money(finalRemaining)} Online`}
                   </button>
+
+                  {payMethod !== "Cash" && (
+                    <p className="mt-1.5 text-center text-[0.68rem] leading-4 text-gray-400">
+                      A Razorpay window will open with{" "}
+                      {money(finalRemaining)} pre-filled. The booking is
+                      settled only after the payment succeeds.
+                    </p>
+                  )}
 
                   <div className="mt-1.5 flex items-center justify-center gap-1 text-[0.66rem] text-gray-400">
                     {I.lock}

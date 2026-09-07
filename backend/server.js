@@ -2802,7 +2802,17 @@ app.post("/api/bookings", requireAuth, async (req, res, next) => {
 
 app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) => {
   try {
-    const { room_id, check_in_date, check_out_date, advance_amount } = req.body;
+    const {
+      room_id,
+      check_in_date,
+      check_out_date,
+      advance_amount,
+      // The discount was missing from this route, so an online advance was
+      // computed on the undiscounted tariff and Razorpay charged the guest
+      // more than the screen showed.
+      discount_applied = false,
+      discount_amount = 0,
+    } = req.body;
     if (!room_id || !check_in_date || !check_out_date)
       return res.status(400).json({ error: "Missing required fields" });
 
@@ -2812,6 +2822,8 @@ app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) =
       check_out_date,
       advance_amount,
       guest_count: req.body.guest_count,
+      discount_applied,
+      discount_amount,
       // staff route — walk-ins and late paperwork need past check-in dates
       allowPastDates: true,
     });
@@ -2820,6 +2832,18 @@ app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) =
       return res.status(400).json({
         error: `This room allows up to ${amounts.room.capacity} guests`,
       });
+    }
+
+    // Refuse to take money for nights that are not available. Checking here
+    // as well as at confirm time means the common case never reaches a
+    // payment that has to be refunded.
+    const conflict = await findDateConflict(db, {
+      room_id,
+      check_in_date,
+      check_out_date,
+    });
+    if (conflict) {
+      return res.status(409).json({ error: conflict });
     }
 
     const order = await razorpay.orders.create({
@@ -2862,6 +2886,10 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
+      // Without these the discount the admin applied was silently dropped
+      // when the advance was paid online.
+      discount_applied = false,
+      discount_amount = 0,
     } = req.body;
 
     if (
@@ -2894,6 +2922,10 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
       check_out_date,
       advance_amount,
       guest_count,
+      // must match what /advance-order used, otherwise the amount check
+      // below rejects a payment the guest has already made
+      discount_applied,
+      discount_amount,
       // staff route — walk-ins and late paperwork need past check-in dates
       allowPastDates: true,
     });
@@ -2915,6 +2947,47 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
         .status(400)
         .json({ error: "Paid order does not match this booking" });
     }
+
+    // An order exists from the moment it is created; only a paid one may
+    // create a booking.
+    if (paidOrder.status !== "paid") {
+      return res.status(400).json({ error: "This payment has not completed" });
+    }
+
+    /*
+     * REPLAY PROTECTION.
+     *
+     * Without this a retried request — a double-click, a flaky connection,
+     * a resent call — creates a SECOND confirmed booking for the same single
+     * payment, holding a room nobody paid for. The order id is unique per
+     * payment, so an existing booking carrying it means this call already ran.
+     */
+    const [dupe] = await db.query(
+      "SELECT booking_id FROM bookings WHERE advance_order_id=? LIMIT 1",
+      [razorpay_order_id],
+    );
+    if (dupe.length) {
+      return res.json({
+        message: "Booking already confirmed for this payment",
+        booking_id: dupe[0].booking_id,
+        duplicate: true,
+      });
+    }
+
+    // Someone else may have taken these nights while the payment window was
+    // open. The guest has paid, so say clearly that a refund is needed rather
+    // than silently double-booking the room.
+    const conflict = await findDateConflict(db, {
+      room_id,
+      check_in_date,
+      check_out_date,
+    });
+    if (conflict) {
+      return res.status(409).json({
+        error: `${conflict}. The payment succeeded — refund it from the Razorpay dashboard.`,
+        razorpay_payment_id,
+      });
+    }
     if (Number(paidOrder.amount) !== Math.round(amounts.advanceAmount * 100)) {
       return res
         .status(400)
@@ -2930,8 +3003,9 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
         advance_amount, advance_paid, balance_paid, remaining_amount,
         payment_status, payment_id, advance_payment_id, advance_order_id,
         payment_method, booking_source, vehicle_type, vehicle_price,
-        vehicle_status, pickup_location, dropoff_location, status
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        vehicle_status, pickup_location, dropoff_location,
+        discount_applied, discount_amount, status
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
       [
         userId,
         room_id,
@@ -2958,6 +3032,10 @@ app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res)
         vehicle_type === "none" ? "not_required" : "pending",
         pickup_location || null,
         dropoff_location || null,
+        // record the discount so the invoice and every dashboard can show it;
+        // it was previously lost on any online advance
+        amounts.discountAmount > 0 ? 1 : 0,
+        amounts.discountAmount,
       ],
     );
 
@@ -3045,6 +3123,18 @@ app.post(
         return res.status(400).json({
           error: `This room allows up to ${amounts.room.capacity} guests`,
         });
+      }
+
+      // This route had no availability check at all, so two members of staff
+      // could sell the same room for the same nights, and a room blocked for
+      // maintenance could still be booked from the admin screen.
+      const conflict = await findDateConflict(db, {
+        room_id,
+        check_in_date,
+        check_out_date,
+      });
+      if (conflict) {
+        return res.status(409).json({ error: conflict });
       }
 
       const userId = await findOrCreateGuestUser(customer || {});
@@ -3137,6 +3227,10 @@ const PAYMENT_TRACKING_COLUMNS = [
   "checkout_discount_reason VARCHAR(255) DEFAULT NULL",
   "checkout_discount_at DATETIME DEFAULT NULL",
   "checkout_discount_by INT DEFAULT NULL",
+  // Razorpay references for a balance settled online, so the payment can be
+  // traced back from the booking without opening the Razorpay dashboard.
+  "balance_payment_id VARCHAR(80) DEFAULT NULL",
+  "balance_order_id VARCHAR(80) DEFAULT NULL",
 ];
 
 let paymentColumnsChecked = false;
@@ -3153,6 +3247,255 @@ async function ensurePaymentColumns() {
   paymentColumnsChecked = true;
 }
 
+/*
+ * Reject a stay that overlaps an existing booking or a blocked date.
+ *
+ * POST /api/bookings does this inside a transaction, but the two admin
+ * booking routes did not check at all — two members of staff could sell the
+ * same room for the same nights, and a room blocked for maintenance could
+ * still be booked from the admin screen.
+ *
+ * Pass a connection when the caller is inside a transaction so the SELECT
+ * takes part in the same lock.
+ */
+async function findDateConflict(
+  conn,
+  { room_id, check_in_date, check_out_date, lock = false },
+) {
+  const [conflicts] = await conn.query(
+    `SELECT booking_id
+       FROM bookings
+      WHERE room_id = ?
+        AND status NOT IN ('cancelled','pending')
+        AND check_in_date < ?
+        AND check_out_date > ?
+      LIMIT 1${lock ? " FOR UPDATE" : ""}`,
+    [room_id, check_out_date, check_in_date],
+  );
+  if (conflicts.length) {
+    return "Selected dates are already booked for this room";
+  }
+
+  const [blocked] = await conn.query(
+    `SELECT blocked_date FROM room_blocked_dates
+      WHERE room_id = ? AND blocked_date >= ? AND blocked_date < ? LIMIT 1`,
+    [room_id, check_in_date, check_out_date],
+  );
+  if (blocked.length) {
+    return "Room is blocked for one or more selected dates";
+  }
+
+  return null;
+}
+
+/*
+ * What the guest still owes on a booking.
+ *
+ * Shared by the manual "Mark as Paid" route and by the online balance
+ * payment routes below, so the amount Razorpay charges is always exactly the
+ * amount the manual route would have recorded.
+ */
+function outstandingBalance(booking) {
+  const currentBalancePaid = Number(booking.balance_paid || 0);
+  const advancePaid = Number(booking.advance_paid || 0);
+
+  // PRE-TAX DISCOUNT MODEL: a checkout discount removes both the discounted
+  // amount and the GST that was charged on it, so its effect is discount x 1.18.
+  const checkoutDiscountBase =
+    Number(
+      booking.checkout_discount_applied ? booking.checkout_discount_amount : 0,
+    ) || 0;
+  const checkoutDiscountImpact =
+    Math.round(checkoutDiscountBase * (1 + GST_RATE) * 100) / 100;
+
+  const bookingDiscount =
+    Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
+  const taxableFallback = Math.max(
+    0,
+    Number(booking.total_price || 0) -
+      bookingDiscount +
+      Number(booking.addon_charges || 0),
+  );
+  const roomWithGst = Math.round(taxableFallback * (1 + GST_RATE) * 100) / 100;
+  const totalAmount = Number(
+    booking.total_amount || booking.final_total || roomWithGst,
+  );
+
+  // trust the stored column, but fall back to the derived figure when it is
+  // stale. total_amount already has the checkout discount applied, so it must
+  // not be subtracted a second time.
+  const storedRemaining = Number(booking.remaining_amount || 0);
+  const discountAlreadyInTotal = Number(booking.total_amount || 0) > 0;
+  const derivedRemaining = Math.max(
+    0,
+    Math.round(
+      (totalAmount -
+        advancePaid -
+        currentBalancePaid -
+        (discountAlreadyInTotal ? 0 : checkoutDiscountImpact)) * 100,
+    ) / 100,
+  );
+
+  return {
+    advancePaid,
+    currentBalancePaid,
+    totalAmount,
+    remaining: storedRemaining > 0 ? storedRemaining : derivedRemaining,
+  };
+}
+
+/*
+ * ONLINE BALANCE — step 1: create the Razorpay order.
+ *
+ * The amount is computed server-side from the booking, never taken from the
+ * request, so the browser cannot ask to be charged less than is owed.
+ */
+app.post("/api/bookings/:id/balance-order", requireManager, async (req, res, next) => {
+  try {
+    await ensurePaymentColumns();
+    const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
+      req.params.id,
+    ]);
+    if (!rows.length) return res.status(404).json({ error: "Booking not found" });
+    const booking = rows[0];
+
+    if (booking.status === "cancelled") {
+      return res
+        .status(400)
+        .json({ error: "Cannot collect payment on a cancelled booking" });
+    }
+
+    const { remaining } = outstandingBalance(booking);
+    if (remaining <= 0) {
+      return res.status(400).json({ error: "Nothing left to pay" });
+    }
+
+    const order = await razorpay.orders.create({
+      amount: Math.round(remaining * 100),
+      currency: "INR",
+      receipt: `BAL-${req.params.id}-${Date.now()}`,
+      notes: {
+        booking_id: String(req.params.id),
+        purpose: "balance",
+        collected_by: String(req.user.user_id),
+      },
+    });
+
+    res.json({
+      razorpay_key: process.env.RAZORPAY_KEY_ID,
+      order_id: order.id,
+      currency: order.currency,
+      amount: remaining,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/*
+ * ONLINE BALANCE — step 2: verify the signature, then settle the booking.
+ *
+ * Nothing is written until the signature checks out, so a failed or abandoned
+ * payment can never mark a booking as paid.
+ */
+app.post("/api/bookings/:id/balance-verify", requireManager, async (req, res, next) => {
+  try {
+    await ensurePaymentColumns();
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+      req.body || {};
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ error: "Missing payment details" });
+    }
+
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+    if (expectedSignature !== razorpay_signature) {
+      return res.status(400).json({ error: "Payment verification failed" });
+    }
+
+    const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
+      req.params.id,
+    ]);
+    if (!rows.length) return res.status(404).json({ error: "Booking not found" });
+    const booking = rows[0];
+
+    // The order must belong to THIS booking, otherwise a payment for one
+    // stay could be replayed to settle another.
+    const paidOrder = await razorpay.orders.fetch(razorpay_order_id);
+    if (String(paidOrder.notes?.booking_id || "") !== String(req.params.id)) {
+      return res
+        .status(400)
+        .json({ error: "This payment belongs to a different booking" });
+    }
+
+    // An order exists from the moment it is created. Only a paid one settles
+    // a booking.
+    if (paidOrder.status !== "paid") {
+      return res
+        .status(400)
+        .json({ error: "This payment has not completed" });
+    }
+
+    /*
+     * REPLAY PROTECTION.
+     *
+     * A double-click, a browser retry or a resent request would otherwise run
+     * this handler twice and add the same money to balance_paid each time,
+     * leaving the booking showing more collected than the guest ever paid.
+     * The order id is recorded on the booking, so a repeat is recognised and
+     * answered with the result of the first run.
+     */
+    if (String(booking.balance_order_id || "") === String(razorpay_order_id)) {
+      return res.json({
+        message: "Balance already collected",
+        balance_paid: Number(booking.balance_paid || 0),
+        payment_id: booking.balance_payment_id,
+        payment_status: "PAID",
+        duplicate: true,
+      });
+    }
+
+    const { currentBalancePaid } = outstandingBalance(booking);
+    const amountPaid = Math.round(Number(paidOrder.amount) / 100 * 100) / 100;
+    const newBalancePaid =
+      Math.round((currentBalancePaid + amountPaid) * 100) / 100;
+
+    await db.query(
+      `UPDATE bookings
+          SET balance_paid = ?,
+              remaining_amount = 0,
+              payment_status = 'PAID',
+              balance_payment_mode = ?,
+              balance_payment_id = ?,
+              balance_order_id = ?,
+              balance_paid_at = NOW(),
+              advance_payment_mode = COALESCE(advance_payment_mode, payment_method),
+              advance_paid_at = COALESCE(advance_paid_at, created_at)
+        WHERE booking_id = ?`,
+      [
+        newBalancePaid,
+        String(req.body?.payment_mode || "Online Payment").slice(0, 40),
+        razorpay_payment_id,
+        razorpay_order_id,
+        req.params.id,
+      ],
+    );
+
+    res.json({
+      message: "Balance collected",
+      balance_paid: newBalancePaid,
+      amount_paid: amountPaid,
+      payment_id: razorpay_payment_id,
+      payment_status: "PAID",
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => {
   try {
     await ensurePaymentColumns();
@@ -3163,50 +3506,13 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
     if (!rows.length) return res.status(404).json({ error: "Booking not found" });
 
     const booking = rows[0];
-    const currentBalancePaid = Number(booking.balance_paid || 0);
-    const advancePaid = Number(booking.advance_paid || 0);
 
-    // PRE-TAX DISCOUNT MODEL: a checkout discount removes both the discounted
-    // amount and the GST that was charged on it, so its effect on the balance
-    // is discount x 1.18.
-    const checkoutDiscountBase =
-      Number(booking.checkout_discount_applied ? booking.checkout_discount_amount : 0) || 0;
-    const checkoutDiscountImpact =
-      Math.round(checkoutDiscountBase * (1 + GST_RATE) * 100) / 100;
-
-    // What the guest owes for the room, derived only as a fallback for old
-    // rows that never stored total_amount.
-    const bookingDiscount =
-      Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
-    const taxableFallback = Math.max(
-      0,
-      Number(booking.total_price || 0) -
-        bookingDiscount +
-        Number(booking.addon_charges || 0),
-    );
-    const roomWithGst =
-      Math.round(taxableFallback * (1 + GST_RATE) * 100) / 100;
-    const totalAmount = Number(
-      booking.total_amount || booking.final_total || roomWithGst,
-    );
-
-    // trust the stored column, but fall back to the derived figure when it is
-    // stale (e.g. advance-only bookings that never wrote remaining_amount).
-    // total_amount is written by the checkout-discount route and already has
-    // the discount applied, so it must not be subtracted a second time here.
-    const storedRemaining = Number(booking.remaining_amount || 0);
-    const discountAlreadyInTotal = Number(booking.total_amount || 0) > 0;
-    const derivedRemaining = Math.max(
-      0,
-      Math.round(
-        (totalAmount -
-          advancePaid -
-          currentBalancePaid -
-          (discountAlreadyInTotal ? 0 : checkoutDiscountImpact)) * 100,
-      ) / 100,
-    );
-    const remaining = storedRemaining > 0 ? storedRemaining : derivedRemaining;
-    const newBalancePaid = currentBalancePaid + remaining;
+    // Same helper the online balance routes use, so a cash settlement and a
+    // Razorpay settlement can never disagree about what was owed. This block
+    // used to be a copy of that logic and had already started to drift.
+    const { currentBalancePaid, remaining } = outstandingBalance(booking);
+    const newBalancePaid =
+      Math.round((currentBalancePaid + remaining) * 100) / 100;
 
     // how the balance was collected — the time is stamped by MySQL itself so
     // there is no driver or timezone conversion to get wrong
