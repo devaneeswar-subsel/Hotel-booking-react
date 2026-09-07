@@ -1037,12 +1037,20 @@ export default function GuestCheckIn({
     ) / 100;
 
   /*
-   * BALANCE BEFORE CHECKOUT DISCOUNT
+   * BALANCE BEFORE ANY CHECKOUT DISCOUNT
    *
-   * This is the current room balance after:
-   * - original booking discount
-   * - advance payment
-   * - balance already paid
+   * Room tariff, minus the booking discount, plus add-ons, plus GST, minus
+   * everything already paid — and deliberately NOT minus the checkout
+   * discount.
+   *
+   * This used to be derived from b.total_amount, but the backend writes the
+   * checkout discount INTO total_amount. The preview below then subtracted
+   * the same discount a second time, so a Rs.500 discount applied to a
+   * Rs.2,000 balance showed Rs.820 instead of Rs.1,410 and every re-render
+   * pushed the figure lower.
+   *
+   * totalAmount above is computed from the tariff and the booking discount
+   * only, which is exactly the "before" figure this preview needs.
    */
   const roomRemaining =
     paymentStatus === "PAID"
@@ -1050,7 +1058,7 @@ export default function GuestCheckIn({
       : Math.max(
           0,
           Math.round(
-            (paymentTotal -
+            (totalAmount -
               advancePaid -
               balancePaid) *
               100,
@@ -2011,6 +2019,33 @@ export default function GuestCheckIn({
                   )}
                 />
 
+                {/*
+                  PRE-TAX DISCOUNT ORDER.
+                  The discount is deducted from the room tariff first and GST
+                  is charged on what is left, so the rows must read
+                  tariff -> discount -> taxable value -> GST -> total.
+                  The old order printed "Total before discount 2,360",
+                  "Discount -300", "Total Amount 2,360", which reads as
+                  2360 - 300 = 2360 and made no sense to anyone.
+                */}
+                {discountAmount > 0 && (
+                  <>
+                    <Row
+                      label="Booking Discount"
+                      value={`- ${money(
+                        discountAmount,
+                      )}`}
+                    />
+
+                    <Row
+                      label="Taxable Value"
+                      value={money(
+                        taxableRoom,
+                      )}
+                    />
+                  </>
+                )}
+
                 <Row
                   label="Extra Services"
                   value={money(
@@ -2019,29 +2054,11 @@ export default function GuestCheckIn({
                 />
 
                 <Row
-                  label="Taxes & Fees"
+                  label="Taxes & Fees (GST 18%)"
                   value={money(
                     taxes,
                   )}
                 />
-
-                {discountAmount > 0 && (
-                  <>
-                    <Row
-                      label="Total before discount"
-                      value={money(
-                        grossTotal,
-                      )}
-                    />
-
-                    <Row
-                      label="Booking Discount"
-                      value={`- ${money(
-                        discountAmount,
-                      )}`}
-                    />
-                  </>
-                )}
 
                 <div className="mt-1 border-t border-gray-200 pt-1">
                   <Row
@@ -2087,6 +2104,19 @@ export default function GuestCheckIn({
                             )}`}
                           />
 
+                          {/*
+                            Without this row the block read
+                            "1,410 - 500 = 820", which is wrong arithmetic on
+                            its face. The discount is pre-tax, so the guest
+                            also stops paying the GST charged on it — showing
+                            that line makes the total add up.
+                          */}
+                          <Row
+                            label="GST reversed on discount"
+                            value={`- ${money(
+                              checkoutDiscountGst,
+                            )}`}
+                          />
                         </>
                       )}
 
@@ -2105,7 +2135,13 @@ export default function GuestCheckIn({
                       <input
                         type="number"
                         min="0"
-                        max={roomRemaining}
+                        /*
+                          Cap at the discount whose GST-inclusive impact fits
+                          the balance. A Rs.500 discount removes Rs.590 from
+                          what is owed, so allowing the full balance here let
+                          reception type a figure the backend then rejected.
+                        */
+                        max={maxCheckoutDiscount}
                         step="0.01"
                         value={
                           checkoutDiscountInput
@@ -2412,13 +2448,36 @@ export default function GuestCheckIn({
                   )}
 
                   <div className="mt-1 border-t border-amber-200 pt-1">
+                    {/*
+                      Two different figures, both worth showing.
+
+                      "Total Discount" is what was actually discounted off the
+                      room. It used to add the booking discount to the
+                      GST-INCLUSIVE impact of the checkout discount, so 300 +
+                      500 printed as 890 and matched neither row above it.
+
+                      "Guest saves" is the cash effect: the discount plus the
+                      GST that is no longer charged on it.
+                    */}
                     <Row
                       label="Total Discount"
                       value={money(
                         discountAmount +
-                          checkoutDiscountTotalImpact,
+                          appliedCheckoutDiscount,
                       )}
                       strong
+                    />
+
+                    <Row
+                      label="Guest saves (incl. GST)"
+                      value={money(
+                        Math.round(
+                          (discountAmount +
+                            appliedCheckoutDiscount) *
+                            (1 + GST_RATE) *
+                            100,
+                        ) / 100,
+                      )}
                     />
                   </div>
                 </div>

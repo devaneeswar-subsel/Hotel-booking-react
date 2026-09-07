@@ -477,6 +477,64 @@ function roomTaxableValue(booking) {
   return Math.max(0, Math.round((tariff - bookingDiscount - checkoutDiscount) * 100) / 100);
 }
 
+/*
+ * Rewrite every derived money column on a booking from its current parts.
+ *
+ * Several routes used to update only gst_amount and final_total. The screens
+ * and the invoice read total_amount and remaining_amount first, so adding an
+ * add-on left those two stale and the guest was shown the pre-add-on figure —
+ * "Balance not collected yet" for money that was genuinely owed.
+ *
+ * Call this from anywhere that changes the room value, the add-ons, or a
+ * payment, and every column stays in step.
+ */
+async function recalcBookingTotals(bookingId) {
+  const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
+    bookingId,
+  ]);
+  if (!rows.length) return null;
+  const booking = rows[0];
+
+  const [addonRows] = await db.query(
+    "SELECT SUM(amount) AS total FROM booking_addons WHERE booking_id=?",
+    [bookingId],
+  );
+  const addonTotal = Math.round(Number(addonRows[0]?.total || 0) * 100) / 100;
+
+  const roomTaxable = roomTaxableValue(booking);
+  const subtotal = Math.round((roomTaxable + addonTotal) * 100) / 100;
+  const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
+  const totalAmount = Math.round((subtotal + gstAmount) * 100) / 100;
+
+  const paid =
+    Math.round(
+      (Number(booking.advance_paid || 0) + Number(booking.balance_paid || 0)) *
+        100,
+    ) / 100;
+  const remaining = Math.max(0, Math.round((totalAmount - paid) * 100) / 100);
+
+  await db.query(
+    `UPDATE bookings
+        SET addon_charges    = ?,
+            gst_amount       = ?,
+            final_total      = ?,
+            total_amount     = ?,
+            remaining_amount = ?
+      WHERE booking_id = ?`,
+    [addonTotal, gstAmount, totalAmount, totalAmount, remaining, bookingId],
+  );
+
+  return {
+    roomTaxable,
+    addonCharges: addonTotal,
+    taxableAmount: subtotal,
+    gstAmount,
+    totalAmount,
+    paid,
+    remainingAmount: remaining,
+  };
+}
+
 // True when a date string is before today. Compared date-only in local time so
 // a booking made at 11pm for "today" is still accepted.
 function isPastDate(dateStr) {
@@ -3246,9 +3304,17 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
 
     // Recompute the whole bill from the original figures every time, so a
     // repeat call replaces the previous checkout discount instead of stacking.
-    const newTaxable =
-      Math.round((discountedRoomBase - requestedDiscount + addonCharges) * 100) /
-      100;
+    //
+    // newRoomTaxable is the ROOM value only. The taxable_amount column means
+    // "room value after discount" everywhere else — booking creation stores
+    // base_price there — and every caller of roomTaxableValue() adds the
+    // add-on total on top. Storing room+add-ons here made those callers count
+    // the add-ons twice as soon as a checkout discount existed.
+    const newRoomTaxable = Math.max(
+      0,
+      Math.round((discountedRoomBase - requestedDiscount) * 100) / 100,
+    );
+    const newTaxable = Math.round((newRoomTaxable + addonCharges) * 100) / 100;
     const newGst = Math.round(newTaxable * GST_RATE * 100) / 100;
     const newTotal = Math.round((newTaxable + newGst) * 100) / 100;
 
@@ -3300,7 +3366,8 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
         applied ? reason : null,
         applied ? new Date() : null,
         applied ? req.user.user_id : null,
-        newTaxable,
+        // room-only, matching what booking creation stores in this column
+        newRoomTaxable,
         newGst,
         newTotal,
         newTotal,
@@ -3316,6 +3383,7 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
       checkout_discount_amount: requestedDiscount,
       checkout_discount_gst: discountGst,
       checkout_discount_total_impact: discountTotalImpact,
+      roomTaxableAmount: newRoomTaxable,
       taxableAmount: newTaxable,
       gstAmount: newGst,
       totalAmount: newTotal,
@@ -3479,21 +3547,21 @@ app.patch("/api/bookings/:id/checkout", requireAdmin, async (req, res) => {
       "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
       [req.params.id],
     );
-    const addonTotal = Number(addons[0]?.total || 0);
-    const subtotal = roomTaxableValue(booking) + addonTotal;
-    const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
-    const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
     await db.query(
-      `UPDATE bookings SET actual_checkout=?, hours_spent=?, addon_charges=?, gst_amount=?, final_total=?, status='completed' WHERE booking_id=?`,
-      [now, hoursSpent, addonTotal, gstAmount, finalTotal, req.params.id],
+      `UPDATE bookings SET actual_checkout=?, hours_spent=?, status='completed' WHERE booking_id=?`,
+      [now, hoursSpent, req.params.id],
     );
+    // recalc writes addon_charges, gst_amount, final_total, total_amount and
+    // remaining_amount together — the old query left the last two stale
+    const totals = await recalcBookingTotals(req.params.id);
     res.json({
       message: "Checked out successfully",
       actual_checkout: now,
       hours_spent: hoursSpent,
-      addon_charges: addonTotal,
-      gst_amount: gstAmount,
-      final_total: finalTotal,
+      addon_charges: totals.addonCharges,
+      gst_amount: totals.gstAmount,
+      final_total: totals.totalAmount,
+      remaining_amount: totals.remainingAmount,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3547,26 +3615,18 @@ app.post("/api/bookings/:id/addons", requireAdmin, async (req, res) => {
       "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
       [req.params.id],
     );
-    const addonTotal = Number(addons[0]?.total || 0);
-    const [bookingRows] = await db.query(
-      "SELECT * FROM bookings WHERE booking_id=?",
-      [req.params.id],
-    );
-    const booking = bookingRows[0];
-    const subtotal = roomTaxableValue(booking) + addonTotal;
-    const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
-    const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
-    await db.query(
-      "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
-      [addonTotal, gstAmount, finalTotal, req.params.id],
-    );
+    // recalcBookingTotals rewrites addon_charges, gst_amount, final_total,
+    // total_amount AND remaining_amount together, so no screen can read a
+    // stale figure after this call.
+    const totals = await recalcBookingTotals(req.params.id);
     res.status(201).json({
       addon_id: r.insertId,
       label,
       amount,
-      new_addon_total: addonTotal,
-      new_gst: gstAmount,
-      new_final_total: finalTotal,
+      new_addon_total: totals.addonCharges,
+      new_gst: totals.gstAmount,
+      new_final_total: totals.totalAmount,
+      new_remaining: totals.remainingAmount,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3593,23 +3653,15 @@ app.delete(
         "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
         [req.params.id],
       );
-      const addonTotal = Number(addons[0]?.total || 0);
-      const [bookingRows] = await db.query(
-        "SELECT * FROM bookings WHERE booking_id=?",
-        [req.params.id],
-      );
-      const booking = bookingRows[0];
-      const subtotal = roomTaxableValue(booking) + addonTotal;
-      const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
-      const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
-      await db.query(
-        "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
-        [addonTotal, gstAmount, finalTotal, req.params.id],
-      );
+      // one helper keeps total_amount and remaining_amount in step with
+      // final_total; updating only the latter left the screens stale
+      const totals = await recalcBookingTotals(req.params.id);
       res.json({
         message: "Addon removed",
-        new_addon_total: addonTotal,
-        new_final_total: finalTotal,
+        new_addon_total: totals.addonCharges,
+        new_gst: totals.gstAmount,
+        new_final_total: totals.totalAmount,
+        new_remaining: totals.remainingAmount,
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -4284,19 +4336,19 @@ app.patch(
         "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
         [req.params.id],
       );
-      const addonTotal = Number(addons[0]?.total || 0);
-      const subtotal = roomTaxableValue(booking) + addonTotal;
-      const gstAmount = Math.round(subtotal * 0.18 * 100) / 100;
-      const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
       await db.query(
-        `UPDATE bookings SET actual_checkout=?, hours_spent=?, addon_charges=?, gst_amount=?, final_total=?, status='completed' WHERE booking_id=?`,
-        [now, hoursSpent, addonTotal, gstAmount, finalTotal, req.params.id],
+        `UPDATE bookings SET actual_checkout=?, hours_spent=?, status='completed' WHERE booking_id=?`,
+        [now, hoursSpent, req.params.id],
       );
+      const totals = await recalcBookingTotals(req.params.id);
       res.json({
         message: "Checked out successfully",
         actual_checkout: now,
         hours_spent: hoursSpent,
-        final_total: finalTotal,
+        addon_charges: totals.addonCharges,
+        gst_amount: totals.gstAmount,
+        final_total: totals.totalAmount,
+        remaining_amount: totals.remainingAmount,
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -4329,25 +4381,15 @@ app.post(
         "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
         [req.params.id],
       );
-      const addonTotal = Number(addons[0]?.total || 0);
-      const [bookingRows] = await db.query(
-        "SELECT * FROM bookings WHERE booking_id=?",
-        [req.params.id],
-      );
-      const booking = bookingRows[0];
-      const subtotal = roomTaxableValue(booking) + addonTotal;
-      const gstAmount = Math.round(subtotal * 0.18 * 100) / 100;
-      const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
-      await db.query(
-        "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
-        [addonTotal, gstAmount, finalTotal, req.params.id],
-      );
+      const totals = await recalcBookingTotals(req.params.id);
       res.status(201).json({
         addon_id: r.insertId,
         label,
         amount,
-        new_addon_total: addonTotal,
-        new_final_total: finalTotal,
+        new_addon_total: totals.addonCharges,
+        new_gst: totals.gstAmount,
+        new_final_total: totals.totalAmount,
+        new_remaining: totals.remainingAmount,
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -4368,23 +4410,15 @@ app.delete(
         "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
         [req.params.id],
       );
-      const addonTotal = Number(addons[0]?.total || 0);
-      const [bookingRows] = await db.query(
-        "SELECT * FROM bookings WHERE booking_id=?",
-        [req.params.id],
-      );
-      const booking = bookingRows[0];
-      const subtotal = roomTaxableValue(booking) + addonTotal;
-      const gstAmount = Math.round(subtotal * 0.18 * 100) / 100;
-      const finalTotal = Math.round((subtotal + gstAmount) * 100) / 100;
-      await db.query(
-        "UPDATE bookings SET addon_charges=?, gst_amount=?, final_total=? WHERE booking_id=?",
-        [addonTotal, gstAmount, finalTotal, req.params.id],
-      );
+      // one helper keeps total_amount and remaining_amount in step with
+      // final_total; updating only the latter left the screens stale
+      const totals = await recalcBookingTotals(req.params.id);
       res.json({
         message: "Addon removed",
-        new_addon_total: addonTotal,
-        new_final_total: finalTotal,
+        new_addon_total: totals.addonCharges,
+        new_gst: totals.gstAmount,
+        new_final_total: totals.totalAmount,
+        new_remaining: totals.remainingAmount,
       });
     } catch (err) {
       res.status(500).json({ error: err.message });

@@ -227,20 +227,20 @@ const co = b.check_out_date
     b.balance_paid || 0,
   );
 
-  // Existing persisted booking total.
-  // This already represents the booking's original
-  // payable amount and should NOT have checkout discount
-  // applied to it a second time.
-  const paymentTotal = Number(
-    b.total_amount ||
-      b.final_total ||
-      roomTotal,
-  );
-
+  /*
+   * BALANCE BEFORE ANY CHECKOUT DISCOUNT.
+   *
+   * Derived from the tariff and the booking discount, NOT from
+   * b.total_amount. The backend writes the checkout discount into
+   * total_amount, so reading it here and then subtracting the checkout
+   * discount again below double-counted it — a Rs.500 discount on a
+   * Rs.2,000 balance printed Rs.820 instead of Rs.1,410, and the figure
+   * fell further every time the invoice was regenerated.
+   */
   const roomRemaining = Math.max(
     0,
     Math.round(
-      (paymentTotal -
+      (roomTotal -
         advancePaid -
         balancePaid) *
         100,
@@ -294,16 +294,6 @@ const co = b.check_out_date
       (appliedCheckoutDiscount + checkoutDiscountGst) * 100,
     ) / 100;
 
-  // Final room balance after checkout discount
-  const finalRoomRemaining = Math.max(
-    0,
-    Math.round(
-      (roomRemaining -
-        checkoutDiscountImpact) *
-        100,
-    ) / 100,
-  );
-
   // ─────────────────────────────────────────────────────────────────────
   // ADD-ONS
   // ─────────────────────────────────────────────────────────────────────
@@ -338,32 +328,51 @@ const co = b.check_out_date
         100,
     ) / 100;
 
-  // Final amount still payable after checkout discount
-  const remaining =
-    Math.round(
-      (finalRoomRemaining +
-        unpaidAddonTotal +
-        unpaidAddonGst) *
-        100,
-    ) / 100;
+  /*
+   * Amount still payable.
+   *
+   * Computed as grand total minus everything received, so the "Remaining to
+   * Pay" box and the "Grand Total" box can never contradict each other.
+   * unpaidAddonTotal is kept below only for the add-on breakdown lines.
+   */
+  const paidSoFar =
+    Math.round((advancePaid + balancePaid) * 100) / 100;
 
-  // Final invoice grand total after both discounts
-  //
-  // Original booking discount is already reflected in
-  // paymentTotal.
-  //
-  // Checkout discount is deducted separately here.
-  const grandTotal = Math.max(
+  /*
+   * GRAND TOTAL — rebuilt from first principles so it can never disagree
+   * with the backend.
+   *
+   *   room tariff
+   *   - booking discount
+   *   - checkout discount      = final room taxable value
+   *   + add-ons                = taxable value
+   *   + 18% GST on that        = grand total
+   *
+   * The previous version was `paymentTotal + addons + addonGst -
+   * checkoutDiscountImpact`. b.total_amount already contains the add-ons
+   * AND the checkout discount, so both were counted twice.
+   */
+  const finalRoomTaxable = Math.max(
     0,
     Math.round(
-      (
-        paymentTotal +
-        addonTotal +
-        addonGst -
-        checkoutDiscountImpact
-      ) *
-        100,
+      (discountedRoomAmount - appliedCheckoutDiscount) * 100,
     ) / 100,
+  );
+
+  const taxableTotal =
+    Math.round((finalRoomTaxable + addonTotal) * 100) / 100;
+
+  const totalGst =
+    Math.round(taxableTotal * GST_RATE * 100) / 100;
+
+  const grandTotal = Math.max(
+    0,
+    Math.round((taxableTotal + totalGst) * 100) / 100,
+  );
+
+  const remaining = Math.max(
+    0,
+    Math.round((grandTotal - paidSoFar) * 100) / 100,
   );
 
   const advanceMode =
@@ -1274,8 +1283,9 @@ if (addons.length) {
     money(basePrice),
   );
 
-  // The discount comes off the tariff FIRST, so the taxable value is shown
-  // before GST — this is the order a GST invoice must follow.
+  // Both discounts come off the tariff BEFORE tax, so the rows must read
+  // tariff -> discounts -> taxable value -> GST. This is the order a GST
+  // invoice has to follow.
   if (
     discountAmount > 0
   ) {
@@ -1285,17 +1295,36 @@ if (addons.length) {
         discountAmount,
       )}`,
     );
+  }
 
+  if (
+    appliedCheckoutDiscount > 0
+  ) {
     sumRow(
-      "Taxable Value",
-      money(discountedRoomAmount),
+      "Checkout Discount",
+      `- ${money(
+        appliedCheckoutDiscount,
+      )}`,
     );
   }
 
-  // GST is charged on the discounted (taxable) value
+  if (
+    discountAmount > 0 ||
+    appliedCheckoutDiscount > 0
+  ) {
+    sumRow(
+      "Taxable Value (Room)",
+      money(finalRoomTaxable),
+    );
+  }
+
+  // GST is charged on the room value AFTER both discounts. Using roomGst here
+  // ignored the checkout discount, so the tax line was too high.
   sumRow(
     "GST (18%)",
-    money(roomGst),
+    money(
+      Math.round(finalRoomTaxable * GST_RATE * 100) / 100,
+    ),
   );
 
   /* ─────────────────────────────────────────────────────────────────────
@@ -1310,18 +1339,19 @@ if (addons.length) {
       "CHECKOUT / FINAL DISCOUNT",
     );
 
+    // The discount itself is already listed above with the booking discount.
+    // What belongs here is the GST it reverses, so the guest can see why the
+    // bill drops by more than the discount amount.
     sumRow(
-      "Checkout Discount",
+      "GST reversed on discount",
       `- ${money(
-        appliedCheckoutDiscount,
+        checkoutDiscountGst,
       )}`,
     );
 
-    sumBox(
-      "Final Balance / Payable",
-      money(
-        finalRoomRemaining,
-      ),
+    sumRow(
+      "Total guest saving",
+      money(checkoutDiscountImpact),
     );
   }
 
