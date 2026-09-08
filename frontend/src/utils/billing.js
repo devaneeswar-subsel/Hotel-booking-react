@@ -1,14 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    BILLING — the single source of truth for every rupee shown in the app.
 
-   Before this file existed, `const GST_RATE = 0.18` was copy-pasted into
+   Before this file existed, `const GST_RATE = 0.12` was copy-pasted into
    eight different components and each one did its own arithmetic. When the
    discount model changed, some files were updated and some were not, so the
    admin screen, the manager screen and the invoice PDF all showed different
    totals for the same booking.
 
    Every component must now import from here. Do not add a local GST_RATE
-   or a local Math.round(x * 0.18) anywhere else.
+   or a local Math.round(x * 0.12) anywhere else.
 
    ── THE DISCOUNT MODEL ───────────────────────────────────────────────────
    A discount reduces the room's TAXABLE VALUE first. GST is then charged on
@@ -18,14 +18,14 @@
        tariff            3000
        - discount         500
        = taxable value   2500
-       + GST @18%         450
+       + GST @12%         450
        = total           2950
 
    The wrong way (GST on the full tariff, discount off the gross) gives 3040
    and overcharges the guest by the GST on the discount.
    ═══════════════════════════════════════════════════════════════════════ */
 
-export const GST_RATE = 0.18;
+export const GST_RATE = 0.12;
 
 /** Round to 2 decimal places (paise). Every money value goes through this. */
 export const money2 = (n) => Math.round((Number(n) || 0) * 100) / 100;

@@ -130,9 +130,6 @@ export default function AdminBookingForUsers({
     dropoff_location: "",
     advance_amount: "",
     payment_mode: "Cash",
-    // ADDITIONAL: blank by default, so the bar looks like an ordinary empty
-    // field and the booking bills exactly as it always has. Only "N" skips GST.
-    gst_mode: "",
     discount_applied: false,
     discount_amount: "",
   });
@@ -246,13 +243,6 @@ export default function AdminBookingForUsers({
     [room, form.guest_count],
   );
 
-  /*
-   * ADDITIONAL: GST stays on for every value except a typed N. Y, blank and
-   * any typo all leave the existing behaviour untouched, so the safe state is
-   * the default.
-   */
-  const gstEnabled =
-    String(form.gst_mode || "").trim().toUpperCase() !== "N";
 
   const totals = useMemo(() => {
     // PRE-TAX DISCOUNT: the discount comes off the tariff, then GST is charged
@@ -262,7 +252,7 @@ export default function AdminBookingForUsers({
     const bill = computeRoomBill({
       tariff: nightlyRate * nights,
       discount: form.discount_applied ? form.discount_amount : 0,
-      gstEnabled,
+      gstEnabled: true,
     });
 
     const fullAmount = bill.total;
@@ -283,7 +273,13 @@ export default function AdminBookingForUsers({
       advanceAmount,
       remainingAmount,
     };
-  }, [form.advance_amount, form.discount_amount, form.discount_applied, nights, nightlyRate, gstEnabled]);
+  }, [
+    form.advance_amount,
+    form.discount_amount,
+    form.discount_applied,
+    nights,
+    nightlyRate,
+  ]);
 
   function update(name, value) {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -508,7 +504,7 @@ export default function AdminBookingForUsers({
           advance_amount: totals.advanceAmount,
           discount_applied: form.discount_applied,
           discount_amount: totals.discountAmount,
-          gst_enabled: gstEnabled,
+          gst_enabled: true,
         }),
       });
       const orderData = await orderRes.json();
@@ -557,7 +553,7 @@ export default function AdminBookingForUsers({
                   advance_amount: totals.advanceAmount,
                   discount_applied: form.discount_applied,
                   discount_amount: totals.discountAmount,
-                  gst_enabled: gstEnabled,
+                  gst_enabled: true,
                   pickup_location:
                     form.vehicle_type === "none" ? "" : form.pickup_location,
                   dropoff_location:
@@ -631,7 +627,7 @@ export default function AdminBookingForUsers({
         vehicle_type: form.vehicle_type,
         advance_amount: totals.advanceAmount,
         payment_mode: form.payment_mode,
-        gst_enabled: gstEnabled,
+        gst_enabled: true,
         discount_applied: form.discount_applied,
         discount_amount: totals.discountAmount,
         pickup_location:
@@ -682,28 +678,18 @@ export default function AdminBookingForUsers({
             Record manual advance payment and confirm the customer's stay.
           </p>
         </div>
-        {/* ADDITIONAL: GST toggle. Blank or anything other than N bills this
-            booking exactly as it always has; N issues it without GST. */}
+        
         <div className="flex items-center gap-3">
-          <input
-            type="text"
-            value={form.gst_mode}
-            onChange={(e) => update("gst_mode", e.target.value.toUpperCase())}
-            disabled={paying}
-            placeholder="Search"
-            className="w-52 rounded-lg border border-[#E9ECEF] bg-white px-4 py-2.5 text-sm outline-none placeholder:text-[#ADB5BD] focus:border-[#C9A84C]"
-          />
-
-        <div className="rounded-lg border border-[#E9ECEF] bg-white px-4 py-2 text-right">
-          <div className="text-[0.62rem] font-bold uppercase tracking-[1px] text-[#868E96]">
-            Advance Due Now
+          <div className="rounded-lg border border-[#E9ECEF] bg-white px-4 py-2 text-right">
+            <div className="text-[0.62rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+              Advance Due Now
+            </div>
+            <div className="font-serif text-[1.25rem] font-bold text-[#0F1923]">
+              {String(form.advance_amount).trim()
+                ? money(totals.advanceAmount)
+                : "Required"}
+            </div>
           </div>
-          <div className="font-serif text-[1.25rem] font-bold text-[#0F1923]">
-            {String(form.advance_amount).trim()
-              ? money(totals.advanceAmount)
-              : "Required"}
-          </div>
-        </div>
         </div>
       </div>
 
@@ -775,9 +761,7 @@ export default function AdminBookingForUsers({
                 <DatePicker
                   selected={checkOutDate}
                   onChange={handleCheckOutChange}
-                  minDate={
-                    checkInDate || (allowPastDates ? null : new Date())
-                  }
+                  minDate={checkInDate || (allowPastDates ? null : new Date())}
                   filterDate={(date) =>
                     (allowPastDates || !isPastDate(date)) &&
                     isStayAvailable(checkInDate, date, occupiedNights)
@@ -828,9 +812,9 @@ export default function AdminBookingForUsers({
               Allow past dates for this booking
             </label>
             <div className="mt-1 text-[0.7rem] text-[#868E96]">
-              Past dates stay blocked unless enabled. Occupied nights remain unavailable.
+              Past dates stay blocked unless enabled. Occupied nights remain
+              unavailable.
             </div>
-
           </div>
 
           <div className="rounded-xl border border-[#E9ECEF] bg-white p-5 shadow-[0_1px_4px_rgba(15,25,35,0.05)]">
@@ -845,13 +829,16 @@ export default function AdminBookingForUsers({
               ].map(([name, label, type]) => (
                 <div key={name}>
                   <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
-                    {label}{name === "customer_email" ? " (optional)" : " *"}
+                    {label}
+                    {name === "customer_email" ? " (optional)" : " *"}
                   </label>
                   <input
                     required={name !== "customer_email"}
                     value={form[name]}
                     type={type}
-                    inputMode={name === "customer_phone" ? "numeric" : undefined}
+                    inputMode={
+                      name === "customer_phone" ? "numeric" : undefined
+                    }
                     maxLength={name === "customer_phone" ? 17 : undefined}
                     autoComplete={
                       name === "customer_name"
@@ -884,12 +871,12 @@ export default function AdminBookingForUsers({
                   {name === "customer_phone" &&
                     !fieldErrors[name] &&
                     customerLookup.message && (
-                    <div
-                      className={`mt-1 text-[0.72rem] font-semibold ${customerLookupClass}`}
-                    >
-                      {customerLookup.message}
-                    </div>
-                  )}
+                      <div
+                        className={`mt-1 text-[0.72rem] font-semibold ${customerLookupClass}`}
+                      >
+                        {customerLookup.message}
+                      </div>
+                    )}
                 </div>
               ))}
             </div>
@@ -1037,23 +1024,30 @@ export default function AdminBookingForUsers({
             <>
               <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
                 <span className="text-[#868E96]">Discount</span>
-                <span className="font-bold text-[#C0392B]">- {money(totals.discountAmount)}</span>
+                <span className="font-bold text-[#C0392B]">
+                  - {money(totals.discountAmount)}
+                </span>
               </div>
               <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
                 <span className="text-[#868E96]">Taxable value</span>
-                <span className="font-bold text-[#0F1923]">{money(totals.taxableAmount)}</span>
+                <span className="font-bold text-[#0F1923]">
+                  {money(totals.taxableAmount)}
+                </span>
               </div>
             </>
           )}
-          {gstEnabled && (
-            <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
-              <span className="text-[#868E96]">GST (18%)</span>
-              <span className="font-bold text-[#0F1923]">{money(totals.gst)}</span>
-            </div>
-          )}
+          <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
+            + <span className="text-[#868E96]">GST (12%)</span>+{" "}
+            <span className="font-bold text-[#0F1923]">
+              + {money(totals.gst)}+{" "}
+            </span>
+            +{" "}
+          </div>
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
             <span className="text-[#868E96]">Full amount</span>
-            <span className="font-bold text-[#0F1923]">{money(totals.fullAmount)}</span>
+            <span className="font-bold text-[#0F1923]">
+              {money(totals.fullAmount)}
+            </span>
           </div>
           <div className="border-t border-[#E9ECEF] py-3">
             <div className="mb-2 text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">

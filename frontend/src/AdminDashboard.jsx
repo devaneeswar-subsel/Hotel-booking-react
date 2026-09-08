@@ -14,6 +14,8 @@ import {
   SearchIcon,
   ArrowRightIcon,
   GridIcon,
+  VehicleIcon,
+  DownloadIcon,
 } from "./Icons";
 import VehicleCustomers from "./Components/VehicleCustomers";
 import AdminBookingForUsers from "./AdminBookingForUsers";
@@ -21,9 +23,11 @@ import { getPaginationItems } from "./pagination";
 import GuestCheckIn from "./GuestCheckIn";
 import BookingCalendar from "./BookingCalendar";
 import { printInvoicePdf } from "./invoicePdf";
+import { createPortal } from "react-dom";
+import ReportsTab from "./Components/ReportsTab";
 
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.18;
+const GST_RATE = 0.12;
 function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
@@ -206,7 +210,106 @@ function BarChart({ data, color = "#C9A84C", height = 64 }) {
     </div>
   );
 }
+function RowActionsMenu({ booking, onDetails, onCancel, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
 
+  const canCancel = booking.status === "confirmed" && !booking.actual_checkin;
+  const canDelete = !(booking.actual_checkin && !booking.actual_checkout);
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + 4,
+        left: rect.right - 176, // 176px = menu width (w-44), right-aligned to button
+      });
+    }
+    setOpen((o) => !o);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickAway(e) {
+      const clickedButton = btnRef.current && btnRef.current.contains(e.target);
+     const clickedMenu = menuRef.current && menuRef.current.contains(e.target);
+     if (!clickedButton && !clickedMenu) setOpen(false);
+    }
+    // close on scroll too, since the menu position would go stale
+    function handleScroll() {
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickAway);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClickAway);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={toggle}
+        className="flex h-7 w-7 items-center justify-center rounded border-[1.5px] border-gray-200 text-gray-500 hover:bg-gray-50"
+      >
+        ⋯
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: "fixed",
+              top: coords.top,
+              left: coords.left,
+              zIndex: 9999,
+            }}
+            className="w-44 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
+          >
+            <button
+              onClick={() => {
+                setOpen(false);
+                onDetails();
+              }}
+              className="block w-full px-3 py-2 text-left text-[0.78rem] hover:bg-gray-50"
+            >
+              Details
+            </button>
+            {canCancel && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onCancel();
+                }}
+                className="block w-full px-3 py-2 text-left text-[0.78rem] text-red-600 hover:bg-red-50"
+              >
+                Cancel booking
+              </button>
+            )}
+            <button
+              onClick={() => {
+                if (canDelete) {
+                  setOpen(false);
+                  onDelete();
+                }
+              }}
+              disabled={!canDelete}
+              title={!canDelete ? "Record check-out before deleting" : ""}
+              className="block w-full px-3 py-2 text-left text-[0.78rem] text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300"
+            >
+              Delete permanently
+            </button>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 function LineChart({ data, color = "#C9A84C", height = 80 }) {
   const [hovered, setHovered] = useState(null);
 
@@ -1441,7 +1544,7 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                   val: `Rs.${Number(form.price_per_night || 0).toLocaleString()}`,
                 },
                 {
-                  label: "GST (18%)",
+                  label: "GST (12%)",
                   val: `Rs.${Math.round(Number(form.price_per_night || 0) * GST_RATE).toLocaleString()}`,
                 },
                 {
@@ -1456,7 +1559,7 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                         val: `Rs.${Number(form.price_double).toLocaleString()}`,
                       },
                       {
-                        label: "GST (18%)",
+                        label: "GST (12%)",
                         val: `Rs.${Math.round(Number(form.price_double) * GST_RATE).toLocaleString()}`,
                       },
                       {
@@ -1898,7 +2001,7 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
                           className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-[0.82rem] text-navy outline-none transition focus:border-navy focus:ring-2 focus:ring-navy/10"
                         />
                         <p className="mt-1 text-[0.68rem] text-amber-700">
-                          18% GST is added on top. Leave blank to charge the
+                          12% GST is added on top. Leave blank to charge the
                           normal tariff for the selected nights.
                         </p>
                       </div>
@@ -1954,7 +2057,7 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
                       </div>
                     ))}
                     <p className="mt-2 text-[0.68rem] text-gray-500">
-                      18% GST is added. Payment stays pending until collected
+                      12% GST is added. Payment stays pending until collected
                       at check-in.
                     </p>
                   </div>
@@ -2078,9 +2181,9 @@ export default function AdminDashboard({
   const [bookingPage, setBookingPage] = useState(1);
   const [userPage, setUserPage] = useState(1);
   const itemsPerPage = 10;
-    const [bookingFilter, setBookingFilter] = useState("recent"); // recent | week | month | custom | checkedin
-    const [customStart, setCustomStart] = useState("");
-    const [customEnd, setCustomEnd] = useState("");
+  const [bookingFilter, setBookingFilter] = useState("recent"); // recent | week | month | custom | checkedin
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   // Overview panel: "recent" table or "calendar" view
   const [overviewView, setOverviewView] = useState("recent");
@@ -2140,7 +2243,8 @@ export default function AdminDashboard({
   const paginatedUsers = getPaginatedData(users, userPage);
   async function confirmCancelBooking(id) {
     const bookingToCancel =
-      cancelBookingData || bookings.find((booking) => booking.booking_id === id);
+      cancelBookingData ||
+      bookings.find((booking) => booking.booking_id === id);
     if (bookingToCancel?.actual_checkin) {
       showToast("Checked-in bookings cannot be cancelled", "error");
       setCancelBookingData(null);
@@ -2170,7 +2274,9 @@ export default function AdminDashboard({
       ? "Permanently delete this cancelled booking record?"
       : `Permanently delete this booking?\n\nRs.${Math.round(
           amount,
-        ).toLocaleString("en-IN")} will be removed from total revenue. This cannot be undone.`;
+        ).toLocaleString(
+          "en-IN",
+        )} will be removed from total revenue. This cannot be undone.`;
 
     if (!window.confirm(warning)) return;
     try {
@@ -2227,41 +2333,41 @@ export default function AdminDashboard({
       showToast(err.message, "error");
     }
   }
-    function getFilterRange(filter) {
-      const now = new Date();
-      if (filter === "week") {
-        const day = now.getDay();
-        const diffToMon = day === 0 ? -6 : 1 - day;
-        const monday = new Date(now);
-        monday.setDate(now.getDate() + diffToMon);
-        monday.setHours(0, 0, 0, 0);
-        const sunday = new Date(monday);
-        sunday.setDate(monday.getDate() + 6);
-        sunday.setHours(23, 59, 59, 999);
-        return { start: monday, end: sunday };
-      }
-      if (filter === "month") {
-        const start = new Date(now.getFullYear(), now.getMonth(), 1);
-        const end = new Date(
-          now.getFullYear(),
-          now.getMonth() + 1,
-          0,
-          23,
-          59,
-          59,
-          999,
-        );
-        return { start, end };
-      }
-      if (filter === "custom" && customStart && customEnd) {
-        const start = new Date(customStart);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(customEnd);
-        end.setHours(23, 59, 59, 999);
-        return { start, end };
-      }
-      return null;
+  function getFilterRange(filter) {
+    const now = new Date();
+    if (filter === "week") {
+      const day = now.getDay();
+      const diffToMon = day === 0 ? -6 : 1 - day;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + diffToMon);
+      monday.setHours(0, 0, 0, 0);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      sunday.setHours(23, 59, 59, 999);
+      return { start: monday, end: sunday };
     }
+    if (filter === "month") {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+        999,
+      );
+      return { start, end };
+    }
+    if (filter === "custom" && customStart && customEnd) {
+      const start = new Date(customStart);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(customEnd);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    }
+    return null;
+  }
   const dateKey = (value = new Date()) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
@@ -2288,9 +2394,7 @@ export default function AdminDashboard({
       const key = dateKey(d);
       return {
         label: d.toLocaleDateString("en-IN", { weekday: "short" }),
-        value: bookings.filter(
-          (b) => dateKey(b.check_in_date) === key,
-        ).length,
+        value: bookings.filter((b) => dateKey(b.check_in_date) === key).length,
       };
     });
   const usersLast7 = Array(7)
@@ -2309,7 +2413,8 @@ export default function AdminDashboard({
     paidBookings.reduce((acc, booking) => {
       const key = booking.room_type || "Room";
       acc[key] =
-        (acc[key] || 0) + Number(booking.final_total || booking.total_price || 0);
+        (acc[key] || 0) +
+        Number(booking.final_total || booking.total_price || 0);
       return acc;
     }, {}),
   )
@@ -2337,33 +2442,33 @@ export default function AdminDashboard({
   const confirmed = bookings.filter((b) => b.status === "confirmed").length;
   const cancelled = bookings.filter((b) => b.status === "cancelled").length;
   const completed = bookings.filter((b) => b.status === "completed").length;
-    const recentCutoff = Date.now() - 2 * 24 * 60 * 60 * 1000;
-    const recentBookings = bookings
-      .filter((booking) => getBookingCreatedTime(booking) >= recentCutoff)
-      .sort(
-        (a, b) =>
-          getBookingCreatedTime(b) - getBookingCreatedTime(a) ||
-          Number(b.booking_id || 0) - Number(a.booking_id || 0),
-      );
-    const filterRange = getFilterRange(bookingFilter);
-    const dateAndStatusFiltered =
-      bookingFilter === "recent"
-        ? recentBookings
-        : bookings.filter((b) => {
-      if (bookingFilter === "checkedin") {
-        return Boolean(b.actual_checkin) && !b.actual_checkout;
-      }
-      if (!filterRange) return true;
-      const checkIn = new Date(b.check_in_date);
-      return checkIn >= filterRange.start && checkIn <= filterRange.end;
-        });
-    const filteredBookings = dateAndStatusFiltered.filter(
-      (b) =>
-        !searchTerm ||
-        b.guest_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        b.room_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        b.email?.toLowerCase().includes(searchTerm.toLowerCase()),
+  const recentCutoff = Date.now() - 2 * 24 * 60 * 60 * 1000;
+  const recentBookings = bookings
+    .filter((booking) => getBookingCreatedTime(booking) >= recentCutoff)
+    .sort(
+      (a, b) =>
+        getBookingCreatedTime(b) - getBookingCreatedTime(a) ||
+        Number(b.booking_id || 0) - Number(a.booking_id || 0),
     );
+  const filterRange = getFilterRange(bookingFilter);
+  const dateAndStatusFiltered =
+    bookingFilter === "recent"
+      ? recentBookings
+      : bookings.filter((b) => {
+          if (bookingFilter === "checkedin") {
+            return Boolean(b.actual_checkin) && !b.actual_checkout;
+          }
+          if (!filterRange) return true;
+          const checkIn = new Date(b.check_in_date);
+          return checkIn >= filterRange.start && checkIn <= filterRange.end;
+        });
+  const filteredBookings = dateAndStatusFiltered.filter(
+    (b) =>
+      !searchTerm ||
+      b.guest_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      b.room_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      b.email?.toLowerCase().includes(searchTerm.toLowerCase()),
+  );
 
   const totalPages = Math.ceil(filteredBookings.length / itemsPerPage);
 
@@ -2371,19 +2476,25 @@ export default function AdminDashboard({
   const checkedInBookings = bookings.filter(
     (b) => b.actual_checkin && !b.actual_checkout && b.status === "confirmed",
   );
-
-  const tabs = [
+  const [showMoreNav, setShowMoreNav] = useState(false);
+  const primaryTabs = [
     { id: "overview", label: "Overview", icon: GridIcon },
+    { id: "book", label: "New Booking", icon: CalendarIcon },
     { id: "bookings", label: "Bookings", icon: BookingIcon },
-    { id: "vehicles", label: "Vehicle Customers", icon: BookingIcon },
-    { id: "checkins", label: "Check-in Details", icon: BedIcon },
     { id: "rooms", label: "Rooms", icon: BedIcon },
     { id: "users", label: "Users", icon: UsersIcon },
-    { id: "book", label: "New Booking", icon: CalendarIcon },
+    { id: "reports", label: "Reports", icon: DownloadIcon },
   ];
-    useEffect(() => {
-      setBookingPage(1);
-    }, [bookingFilter, customStart, customEnd]);
+
+  const secondaryTabs = [
+    { id: "vehicles", label: "Vehicle Customers", icon: BookingIcon },
+    { id: "checkins", label: "Check-in Details", icon: BedIcon },
+  ];
+
+  const tabs = [...primaryTabs, ...secondaryTabs]; // keep this — Topbar label lookup still needs every id
+  useEffect(() => {
+    setBookingPage(1);
+  }, [bookingFilter, customStart, customEnd]);
 
   useEffect(() => {
     setBookingPage((page) =>
@@ -2428,7 +2539,7 @@ export default function AdminDashboard({
     };
     return (
       <span
-        className={`inline-block px-2.5 py-0.5 rounded text-[0.62rem] font-bold uppercase ${map[label] ?? map.completed}`}
+        className={`inline-block whitespace-nowrap px-2.5 py-0.5 rounded text-[0.62rem] font-bold uppercase ${map[label] ?? map.completed}`}
       >
         {label}
       </span>
@@ -2466,36 +2577,72 @@ export default function AdminDashboard({
         <div className="px-5 pb-2.5 text-[0.6rem] tracking-[2px] uppercase text-white/25">
           Management
         </div>
-        {tabs.map(({ id, label, icon: TabIcon }) => (
+        {primaryTabs.map(({ id, label, icon: TabIcon }) => (
           <div
             key={id}
             onClick={() => {
               setBookingRoom(null);
-              // the check-in page is an overlay — close it, or it stays on top
-              // of whichever tab you navigate to
               setSelectedBookingId(null);
               setTab(id);
               setSidebarOpen(false);
             }}
             className={`flex items-center gap-2.5 px-5 py-[11px] cursor-pointer text-[0.82rem] transition-all duration-[180ms] border-l-[2.5px]
-              ${
-                tab === id
-                  ? "bg-gold/[0.12] border-gold text-gold font-semibold"
-                  : "border-transparent text-white/50 font-normal hover:text-white/70 hover:bg-white/[0.04]"
-              }`}
+      ${
+        tab === id
+          ? "bg-gold/[0.12] border-gold text-gold font-semibold"
+          : "border-transparent text-white/50 font-normal hover:text-white/70 hover:bg-white/[0.04]"
+      }`}
           >
             <TabIcon
               size={15}
               color={tab === id ? "#C9A84C" : "rgba(255,255,255,0.4)"}
             />
             {label}
-            {id === "checkins" && checkedInBookings.length > 0 && (
-              <span className="ml-auto bg-emerald-600 text-white rounded-[10px] px-1.5 text-[0.6rem] font-bold">
-                {checkedInBookings.length}
-              </span>
-            )}
           </div>
         ))}
+
+        {/* More — collapsed by default */}
+        <div
+          onClick={() => setShowMoreNav((v) => !v)}
+          className="flex items-center gap-2.5 px-5 py-[11px] cursor-pointer text-[0.72rem] font-semibold uppercase tracking-wide text-white/30 hover:text-white/50 transition-colors"
+        >
+          <span
+            className={`inline-block transition-transform duration-150 ${showMoreNav ? "rotate-90" : ""}`}
+          >
+            ▸
+          </span>
+          {showMoreNav ? "Less" : "More"}
+        </div>
+
+        {showMoreNav &&
+          secondaryTabs.map(({ id, label, icon: TabIcon }) => (
+            <div
+              key={id}
+              onClick={() => {
+                setBookingRoom(null);
+                setSelectedBookingId(null);
+                setTab(id);
+                setSidebarOpen(false);
+              }}
+              className={`flex items-center gap-2.5 px-5 py-[11px] cursor-pointer text-[0.82rem] transition-all duration-[180ms] border-l-[2.5px]
+        ${
+          tab === id
+            ? "bg-gold/[0.12] border-gold text-gold font-semibold"
+            : "border-transparent text-white/50 font-normal hover:text-white/70 hover:bg-white/[0.04]"
+        }`}
+            >
+              <TabIcon
+                size={15}
+                color={tab === id ? "#C9A84C" : "rgba(255,255,255,0.4)"}
+              />
+              {label}
+              {id === "checkins" && checkedInBookings.length > 0 && (
+                <span className="ml-auto bg-emerald-600 text-white rounded-[10px] px-1.5 text-[0.6rem] font-bold">
+                  {checkedInBookings.length}
+                </span>
+              )}
+            </div>
+          ))}
       </div>
 
       {/* Admin user + back */}
@@ -2792,67 +2939,143 @@ export default function AdminDashboard({
                   />
                 )}
                 {overviewView === "recent" && (
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse min-w-[600px]">
-                    <thead>
-                      <tr>
-                        {[
-                          "#",
-                          "Guest",
-                          "Room",
-                          "Check-in",
-                          "Total",
-                          "Status",
-                        ].map((h) => (
-                          <th key={h} className={thCls}>
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {adminRecentBookings.map((b) => (
-                        <tr
-                          key={b.booking_id}
-                          className="border-t border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors"
-                          onClick={() => setSelectedBookingId(b.booking_id)}
-                        >
-                          <td
-                            className={`${tdCls} text-[0.78rem] text-gray-400`}
-                          >
-                            {formatBookingId(b)}
-                          </td>
-                          <td
-                            className={`${tdCls} text-[0.85rem] font-semibold text-navy`}
-                          >
-                            {b.guest_name}
-                          </td>
-                          <td
-                            className={`${tdCls} text-[0.82rem] text-gray-600`}
-                          >
-                            {b.room_type}
-                          </td>
-                          <td
-                            className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}
-                          >
-                            {b.check_in_date?.slice(0, 10)}
-                          </td>
-                          <td
-                            className={`${tdCls} text-[0.85rem] font-semibold text-navy`}
-                          >
-                            Rs.
-                            {Number(
-                              b.final_total || b.total_price,
-                            ).toLocaleString()}
-                          </td>
-                          <td className={tdCls}>
-                            <StatusBadge status={b.status} booking={b} />
-                          </td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse min-w-[600px]">
+                      <thead>
+                        <tr>
+                          {[
+                            "#",
+                            "Guest",
+                            "Room",
+                            "Check-in",
+                            "Total",
+                            "Status",
+                          ].map((h) => (
+                            <th key={h} className={thCls}>
+                              {h}
+                            </th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {paginatedBookings.map((b) => (
+                          <tr
+                            key={b.booking_id}
+                            className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
+                          >
+                            <td
+                              className={`${tdCls} text-[0.75rem] text-gray-400`}
+                            >
+                              {formatBookingId(b)}
+                            </td>
+
+                            <td
+                              className={`${tdCls} text-[0.85rem] font-semibold text-navy`}
+                            >
+                              <div
+                                className="flex max-w-[170px] items-center gap-1.5"
+                                title={b.guest_name}
+                              >
+                                <span className="truncate">{b.guest_name}</span>
+                                {b.vehicle_type &&
+                                  b.vehicle_type !== "none" && (
+                                    <span
+                                      title={`Vehicle booked · ${b.vehicle_type}`}
+                                      className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#C9A84C]/15 ${
+                                        b.status === "cancelled"
+                                          ? "opacity-40"
+                                          : ""
+                                      }`}
+                                    >
+                                      <VehicleIcon size={12} color="#9A7A2E" />
+                                    </span>
+                                  )}
+                              </div>
+                            </td>
+
+                            <td className={tdCls}>
+                              <span className="bg-gray-100 px-2 py-0.5 rounded text-[0.72rem] font-semibold">
+                                {b.room_type}
+                              </span>
+                            </td>
+
+                            <td
+                              className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}
+                            >
+                              {b.check_in_date?.slice(0, 10)}
+                            </td>
+
+                            <td
+                              className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}
+                            >
+                              {b.check_out_date?.slice(0, 10)}
+                            </td>
+
+                            <td className={`${tdCls} align-middle`}>
+                              {b.actual_checkin ? (
+                                <div
+                                  className="flex items-center gap-1 whitespace-nowrap text-[0.72rem] font-semibold text-navy"
+                                  title={
+                                    b.actual_checkout
+                                      ? `Checked in ${new Date(b.actual_checkin).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} · Checked out ${new Date(b.actual_checkout).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`
+                                      : `Checked in ${new Date(b.actual_checkin).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`
+                                  }
+                                >
+                                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                                  {new Date(
+                                    b.actual_checkin,
+                                  ).toLocaleTimeString("en-IN", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                  {b.actual_checkout && (
+                                    <>
+                                      <span className="text-gray-300">→</span>
+                                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                                      {new Date(
+                                        b.actual_checkout,
+                                      ).toLocaleTimeString("en-IN", {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}
+                                    </>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-[0.75rem] text-gray-300">
+                                  —
+                                </span>
+                              )}
+                            </td>
+
+                            <td
+                              className={`${tdCls} text-[0.85rem] font-bold text-navy whitespace-nowrap`}
+                            >
+                              Rs.
+                              {Number(
+                                b.final_total || b.total_price,
+                              ).toLocaleString()}
+                            </td>
+
+                            <td className={tdCls}>
+                              <StatusBadge status={b.status} booking={b} />
+                            </td>
+
+                            <td className={tdCls}>
+                              <RowActionsMenu
+                                booking={b}
+                                onDetails={() =>
+                                  setSelectedBookingId(b.booking_id)
+                                }
+                                onCancel={() => setCancelBookingData(b)}
+                                onDelete={() => deleteBooking(b.booking_id, b)}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </>
@@ -2967,6 +3190,7 @@ export default function AdminDashboard({
                         "Room",
                         "Check-in",
                         "Check-out",
+                        "Actual Time",
                         "Total",
                         "Status",
                         "Actions",
@@ -2986,26 +3210,86 @@ export default function AdminDashboard({
                         <td className={`${tdCls} text-[0.75rem] text-gray-400`}>
                           {formatBookingId(b)}
                         </td>
+
+                        {/* Guest — name + vehicle icon if a vehicle was booked */}
                         <td
-                          className={`${tdCls} text-[0.85rem] font-semibold text-navy whitespace-nowrap`}
+                          className={`${tdCls} text-[0.85rem] font-semibold text-navy`}
                         >
-                          {b.guest_name}
+                          <div
+                            className="flex max-w-[160px] items-center gap-1.5"
+                            title={b.guest_name}
+                          >
+                            <span className="truncate">{b.guest_name}</span>
+                            {b.vehicle_type && b.vehicle_type !== "none" && (
+                              <span
+                                className={`inline-flex shrink-0 items-center gap-1 rounded-full bg-[#C9A84C]/15 px-2 py-0.5 text-[0.58rem] font-bold uppercase tracking-wide text-[#9A7A2E] ${
+                                  b.status === "cancelled" ? "opacity-40" : ""
+                                }`}
+                              >
+                                <VehicleIcon size={10} color="#9A7A2E" />
+                                {b.vehicle_type}
+                              </span>
+                            )}
+                          </div>
                         </td>
+
                         <td className={tdCls}>
                           <span className="bg-gray-100 px-2 py-0.5 rounded text-[0.72rem] font-semibold">
                             {b.room_type}
                           </span>
                         </td>
+
                         <td
                           className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}
                         >
                           {b.check_in_date?.slice(0, 10)}
                         </td>
+
                         <td
                           className={`${tdCls} text-[0.82rem] text-gray-600 whitespace-nowrap`}
                         >
                           {b.check_out_date?.slice(0, 10)}
                         </td>
+
+                        {/* Actual Time — one compact line, tooltip has the full detail */}
+                        <td className={`${tdCls} align-middle`}>
+                          {b.actual_checkin ? (
+                            <div
+                              className="flex items-center gap-1 whitespace-nowrap text-[0.72rem] font-semibold text-navy"
+                              title={
+                                b.actual_checkout
+                                  ? `Checked in ${new Date(b.actual_checkin).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} · Checked out ${new Date(b.actual_checkout).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`
+                                  : `Checked in ${new Date(b.actual_checkin).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`
+                              }
+                            >
+                              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                              {new Date(b.actual_checkin).toLocaleTimeString(
+                                "en-IN",
+                                {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                },
+                              )}
+                              {b.actual_checkout && (
+                                <>
+                                  <span className="text-gray-300">→</span>
+                                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                                  {new Date(
+                                    b.actual_checkout,
+                                  ).toLocaleTimeString("en-IN", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[0.75rem] text-gray-300">
+                              —
+                            </span>
+                          )}
+                        </td>
+
                         <td
                           className={`${tdCls} text-[0.85rem] font-bold text-navy whitespace-nowrap`}
                         >
@@ -3014,63 +3298,18 @@ export default function AdminDashboard({
                             b.final_total || b.total_price,
                           ).toLocaleString()}
                         </td>
+
                         <td className={tdCls}>
                           <StatusBadge status={b.status} booking={b} />
                         </td>
+
                         <td className={tdCls}>
-                          <div className="flex gap-1.5 flex-wrap">
-                            <button
-                              onClick={() => setSelectedBookingId(b.booking_id)}
-                              className="px-2.5 py-1 border-[1.5px] border-navy text-navy bg-none rounded text-[0.72rem] font-semibold cursor-pointer hover:bg-navy hover:text-white transition-colors"
-                            >
-                              Details
-                            </button>
-                            {b.status === "confirmed" && (
-                              <button
-                                onClick={() => {
-                                  if (!b.actual_checkin)
-                                    setCancelBookingData(b);
-                                }}
-                                disabled={Boolean(b.actual_checkin)}
-                                title={
-                                  b.actual_checkin
-                                    ? "Checked-in bookings cannot be cancelled"
-                                    : "Cancel booking"
-                                }
-                                className={`flex items-center gap-0.5 px-2.5 py-1 border-[1.5px] bg-none rounded text-[0.72rem] font-semibold transition-colors ${
-                                  b.actual_checkin
-                                    ? "cursor-not-allowed border-gray-300 text-gray-400 opacity-60"
-                                    : "cursor-pointer border-red-600 text-red-600 hover:bg-red-50"
-                                }`}
-                              >
-                                <XIcon
-                                  size={11}
-                                  color={
-                                    b.actual_checkin ? "#9CA3AF" : "#C0392B"
-                                  }
-                                />{" "}
-                                Cancel
-                              </button>
-                            )}
-                            <button
-                              onClick={() => deleteBooking(b.booking_id, b)}
-                              disabled={Boolean(
-                                b.actual_checkin && !b.actual_checkout,
-                              )}
-                              title={
-                                b.actual_checkin && !b.actual_checkout
-                                  ? "Record check-out before deleting"
-                                  : "Delete booking permanently"
-                              }
-                              className={`px-2.5 py-1 border-[1.5px] bg-none rounded text-[0.72rem] font-semibold transition-colors ${
-                                b.actual_checkin && !b.actual_checkout
-                                  ? "cursor-not-allowed border-gray-300 text-gray-400 opacity-60"
-                                  : "cursor-pointer border-red-600 text-red-600 hover:bg-red-600 hover:text-white"
-                              }`}
-                            >
-                              🗑 Delete
-                            </button>
-                          </div>
+                          <RowActionsMenu
+                            booking={b}
+                            onDetails={() => setSelectedBookingId(b.booking_id)}
+                            onCancel={() => setCancelBookingData(b)}
+                            onDelete={() => deleteBooking(b.booking_id, b)}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -3568,6 +3807,9 @@ export default function AdminDashboard({
               }}
             />
           )}
+          {tab === "reports" && (
+            <ReportsTab apiFetch={apiFetch} showToast={showToast} />
+          )}
 
           {tab === "book" && (
             <div>
@@ -3738,7 +3980,6 @@ function AdminBookingForm({ room, adminUser, onClose, showToast, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(true);
   const [occupiedNights, setOccupiedNights] = useState(new Set());
-
   useEffect(() => {
     let active = true;
 
@@ -3958,7 +4199,7 @@ function AdminBookingForm({ room, adminUser, onClose, showToast, onSuccess }) {
           </div>
 
           <div className="mb-2 flex items-center justify-between text-sm">
-            <span className="text-gray-500">GST (18%)</span>
+            <span className="text-gray-500">GST (12%)</span>
 
             <span className="font-semibold text-slate-900">
               ₹{gst.toLocaleString("en-IN")}

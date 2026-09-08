@@ -3,7 +3,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.18;
+const GST_RATE = 0.12;
 
 /* ─────────────────────────────────────────────────────────────────────────────
    GuestBookingModal.jsx
@@ -396,7 +396,7 @@ export default function GuestBookingModal({
                   </span>
                 </div>
                 <div className="flex justify-between text-xs">
-                  <span className="text-gray-400">GST (18%)</span>
+                  <span className="text-gray-400">GST (12%)</span>
                   <span className="font-semibold text-gray-700">
                     {money(gst)}
                   </span>

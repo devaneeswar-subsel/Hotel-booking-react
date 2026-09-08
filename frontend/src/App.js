@@ -33,7 +33,7 @@ import {
   MenuIcon,
 } from "lucide-react";
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.18;
+const GST_RATE = 0.12;
 function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
@@ -246,7 +246,7 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
                 val: `Rs.${basePrice.toLocaleString()}`,
               },
               {
-                label: "GST (18%)",
+                label: "GST (12%)",
                 val: `Rs.${Math.round(gst).toLocaleString()}`,
               },
               {
@@ -686,7 +686,7 @@ function BookingModal({ room, user, onClose, showToast }) {
     const SX = W - 90;
     [
       { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
-      { label: "GST (18%)", val: `Rs.${Math.round(gst).toLocaleString()}` },
+      { label: "GST (12%)", val: `Rs.${Math.round(gst).toLocaleString()}` },
     ].forEach(({ label, val }) => {
       doc
         .setFont("helvetica", "normal")
@@ -930,7 +930,7 @@ function BookingModal({ room, user, onClose, showToast }) {
                     val: `Rs.${basePrice.toLocaleString()}`,
                   },
                   {
-                    label: "GST (18%)",
+                    label: "GST (12%)",
                     val: `Rs.${Math.round(gst).toLocaleString()}`,
                   },
                 ].map(({ label, val }) => (
@@ -1393,7 +1393,7 @@ function BookingReceiptModal({ booking, onClose, onDownloadInvoice }) {
         )
       : 1;
   const basePrice = Number(booking.total_price || 0);
-  // Round to paise like every other screen; Math.round(x * 0.18) alone rounds
+  // Round to paise like every other screen; Math.round(x * 0.12) alone rounds
   // to whole rupees and made this figure disagree with the invoice.
   const gst = Number(
     booking.gst_amount || Math.round(basePrice * GST_RATE * 100) / 100,
@@ -1452,7 +1452,7 @@ function BookingReceiptModal({ booking, onClose, onDownloadInvoice }) {
                     ],
                   ]
                 : []),
-              ["GST (18%)", `Rs.${Math.round(gst).toLocaleString("en-IN")}`],
+              ["GST (12%)", `Rs.${Math.round(gst).toLocaleString("en-IN")}`],
               ["Payment ID", booking.payment_id || "-"],
             ].map(([label, val]) => (
               <div
@@ -2871,7 +2871,7 @@ function AppContent() {
         `Rs.${roomCharges.toLocaleString()}`,
       ],
       [
-        "GST (18%)",
+        "GST (12%)",
         `Rs.${Math.round(
           gst
         ).toLocaleString()}`,
@@ -3517,23 +3517,15 @@ function AppContent() {
     >
       <Hero
         user={user}
-        onAuthClick={() =>
-          setShowAuth(true)
-        }
+        onAuthClick={() => setShowAuth(true)}
         onLogout={handleLogout}
-        onMyBookings={
-          goToMyBookings
-        }
+        onMyBookings={goToMyBookings}
       />
 
       <Rooms
         user={user}
-        availableRoomIds={
-          availableRoomIds
-        }
-        onBookClick={(room) =>
-          setBookingRoom(room)
-        }
+        availableRoomIds={availableRoomIds}
+        onBookClick={(room) => setBookingRoom(room)}
         onAuthPrompt={(room, search) => {
           if (!room) return setShowAuth(true);
           setGuestBookingPrefill(search || null);
@@ -3546,20 +3538,18 @@ function AppContent() {
           setAvailableRoomIds(ids);
 
           setTimeout(() => {
-            document
-              .getElementById("rooms")
-              ?.scrollIntoView({
-                behavior: "smooth",
-              });
+            document.getElementById("rooms")?.scrollIntoView({
+              behavior: "smooth",
+            });
           }, 300);
         }}
       />
 
-      <NearbyAttractions />
-
       <Facilities />
 
       <Gallery />
+
+      <NearbyAttractions />
 
       <Testimonials />
 
@@ -3567,12 +3557,7 @@ function AppContent() {
 
       {/* AUTH MODAL */}
       {showAuth && (
-        <AuthModal
-          onClose={() =>
-            setShowAuth(false)
-          }
-          onLogin={handleLogin}
-        />
+        <AuthModal onClose={() => setShowAuth(false)} onLogin={handleLogin} />
       )}
 
       {/* GUEST BOOKING — no account required */}
@@ -3606,9 +3591,7 @@ function AppContent() {
         <BookingModal
           room={bookingRoom}
           user={user}
-          onClose={() =>
-            setBookingRoom(null)
-          }
+          onClose={() => setBookingRoom(null)}
           showToast={showToast}
         />
       )}
@@ -3618,21 +3601,15 @@ function AppContent() {
         <Toast
           msg={toast.msg}
           type={toast.type}
-          onHide={() =>
-            setToast(null)
-          }
+          onHide={() => setToast(null)}
         />
       )}
 
       {/* MY BOOKINGS BUTTON */}
-      {user &&
-        user.role !== "admin" &&
-        user.role !== "manager" && (
-          <button
-            onClick={
-              goToMyBookings
-            }
-            className="
+      {user && user.role !== "admin" && user.role !== "manager" && (
+        <button
+          onClick={goToMyBookings}
+          className="
               fixed
               bottom-7
               left-7
@@ -3652,15 +3629,11 @@ function AppContent() {
               duration-200
               hover:bg-[var(--gold)]
             "
-          >
-            <BookingIcon
-              size={15}
-              color="var(--gold-light)"
-            />
-
-            My Bookings
-          </button>
-        )}
+        >
+          <BookingIcon size={15} color="var(--gold-light)" />
+          My Bookings
+        </button>
+      )}
     </div>
   );
 }

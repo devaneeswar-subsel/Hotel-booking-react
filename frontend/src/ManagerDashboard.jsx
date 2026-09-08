@@ -20,7 +20,7 @@ import { getPaginationItems } from "./pagination";
 
 
 const API = process.env.REACT_APP_API_URL || "";
-const GST_RATE = 0.18;
+const GST_RATE = 0.12;
 
 const apiFetch = (url, options = {}) =>
   fetch(`${API}${url}`, {
@@ -780,7 +780,7 @@ const grandTotalPdf = Math.round(
           ]
         : []),
       {
-        label: "GST (18%)",
+        label: "GST (12%)",
         val: `Rs.${Math.round(roomGstPdf).toLocaleString()}`,
       },
     ].forEach(({ label, val }) => {
@@ -822,7 +822,7 @@ const grandTotalPdf = Math.round(
     [
       { label: "Add-on Charges", val: `Rs.${addonTotalPdf.toLocaleString()}` },
       {
-        label: "GST on Add-ons (18%)",
+        label: "GST on Add-ons (12%)",
         val: `Rs.${Math.round(addonGstPdf).toLocaleString()}`,
       },
     ].forEach(({ label, val }) => {
@@ -1457,7 +1457,7 @@ const bookingPaidLabel =
                   val: `Rs.${addonTotal.toLocaleString()}`,
                 },
                 {
-                  label: "GST on Add-ons (18%)",
+                  label: "GST on Add-ons (12%)",
                   val: `Rs.${Math.round(addonGst).toLocaleString()}`,
                 },
               ].map(({ label, val }) => (
@@ -1803,7 +1803,7 @@ function ManagerBookingForm({
               label: `Rs.${Number(room.price_per_night).toLocaleString()} × ${nights} night${nights > 1 ? "s" : ""}`,
               val: `Rs.${basePrice.toLocaleString()}`,
             },
-            { label: "GST (18%)", val: `Rs.${gst.toLocaleString()}` },
+            { label: "GST (12%)", val: `Rs.${gst.toLocaleString()}` },
           ].map(({ label, val }) => (
             <div
               key={label}
