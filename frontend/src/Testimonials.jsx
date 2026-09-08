@@ -6,22 +6,22 @@ const API = process.env.REACT_APP_API_URL;
 const STATIC_REVIEWS = [
   {
     initials: "AK",
-    name: "Arjun Kumar",
-    location: "Mumbai",
+    name: "akash kumar",
+    location: "Trichy",
     rating: 5,
     text: "The most exquisite stay I've ever experienced. Every detail was carefully crafted — from the bedding to the breathtaking view. Truly five-star in every sense.",
   },
   {
     initials: "PS",
-    name: "Priya Sharma",
-    location: "Bangalore",
+    name: "Deepa",
+    location: "Chennai",
     rating: 5,
     text: "The spa alone made the trip worth it. The staff remembered our preferences from day one. This is what luxury hospitality actually feels like.",
   },
   {
     initials: "RV",
-    name: "Rahul Verma",
-    location: "Chennai",
+    name: "mahesh",
+    location: "Coimbatore",
     rating: 5,
     text: "Celebrated our anniversary here. The rooftop dinner at sunset was unforgettable. Impeccable service, stunning rooms, and food that rivalled the finest restaurants.",
   },
