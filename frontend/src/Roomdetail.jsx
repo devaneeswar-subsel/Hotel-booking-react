@@ -291,10 +291,6 @@ const ROOM_EXTRAS = {
       "Private Bathroom",
     ],
     images: [
-      "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=1200",
-      "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=1200",
-      "https://images.unsplash.com/photo-1540518614846-7eded433c457?w=1200",
-      "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=1200",
     ],
   },
 
