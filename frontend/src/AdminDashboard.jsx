@@ -2948,8 +2948,11 @@ export default function AdminDashboard({
                             "Guest",
                             "Room",
                             "Check-in",
+                            "Check-out",
+                            "Actual Time",
                             "Total",
                             "Status",
+                            "Actions",
                           ].map((h) => (
                             <th key={h} className={thCls}>
                               {h}
