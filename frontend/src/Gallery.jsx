@@ -188,7 +188,7 @@ export default function Gallery() {
         {...fadeUp(0.15)}
         className="section-title mb-10 font-serif text-4xl font-bold text-slate-900"
       >
-        Our <em className="text-amber-500">Rooms</em>
+        Our <em className="text-amber-500">Photo Gallery</em>
       </motion.h2>
 
       {/* switch which room type's carousel is shown */}
