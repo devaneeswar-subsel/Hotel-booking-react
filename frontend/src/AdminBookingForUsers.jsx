@@ -678,7 +678,7 @@ export default function AdminBookingForUsers({
             Record manual advance payment and confirm the customer's stay.
           </p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <div className="rounded-lg border border-[#E9ECEF] bg-white px-4 py-2 text-right">
             <div className="text-[0.62rem] font-bold uppercase tracking-[1px] text-[#868E96]">
@@ -1037,11 +1037,10 @@ export default function AdminBookingForUsers({
             </>
           )}
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
-            + <span className="text-[#868E96]">GST (12%)</span>+{" "}
+            <span className="text-[#868E96]">GST (12%)</span>{" "}
             <span className="font-bold text-[#0F1923]">
-              + {money(totals.gst)}+{" "}
+               {money(totals.gst)}{" "}
             </span>
-            +{" "}
           </div>
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
             <span className="text-[#868E96]">Full amount</span>
