@@ -3861,7 +3861,7 @@ export default function AdminDashboard({
                               </span>
                             </div>
                             <div className="text-[0.62rem] font-body text-red-500">
-                              +18% GST
+                              +12% GST
                             </div>
                           </div>
                           <button

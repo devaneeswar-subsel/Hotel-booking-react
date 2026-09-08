@@ -673,7 +673,7 @@ async function calculateBookingAmounts({
   // The discount reduces the room's taxable value first, then GST is charged
   // on the reduced amount. Example: Rs.3000 tariff with a Rs.500 discount
   //   taxable = 3000 - 500 = 2500
-  //   GST     = 2500 x 18% = 450
+  //   GST     = 2500 x 12% = 450
   //   total   = 2500 + 450 = 2950
   // This is how a discount is shown on a GST invoice: the tax follows the
   // discounted value, it is not charged on the full tariff.
@@ -982,7 +982,7 @@ async function generateAdvanceInvoicePdf(booking) {
       ...(discountAmount > 0
         ? [["Discount", -discountAmount], ["Taxable Value", discountedRoomAmount]]
         : []),
-      ["GST (18%)", gstAmount],
+      ["GST (12%)", gstAmount],
       ["Total Amount", totalAmount],
       ["Advance Paid", advancePaid],
       ["Remaining Balance", remainingAmount],
@@ -1990,7 +1990,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
           y += 15;
           [
             ["Room Charges", `Rs.${basePrice.toLocaleString()}`],
-            ["GST (18%)", `Rs.${Math.round(gst).toLocaleString()}`],
+            ["GST (12%)", `Rs.${Math.round(gst).toLocaleString()}`],
           ].forEach(([label, val]) => {
             doc
               .fillColor("#868E96")
@@ -2470,7 +2470,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
                     white-space:nowrap;
                   "
                 >
-                  GST (18%)
+                  GST (12%)
                 </td>
 
                 <td

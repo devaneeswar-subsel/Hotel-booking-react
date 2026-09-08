@@ -44,7 +44,7 @@ const ROOMS = [
   {
     name: "Deluxe Room",
     price: "₹2,000",
-    priceNote: "single occupancy + 18% GST",
+    priceNote: "single occupancy + 12% GST",
     double: "₹2,300 for double occupancy",
     detail:
       "A comfortable air-conditioned room with a double bed, TV, hot water and free Wi-Fi. Suited to couples, solo travellers and short business stays in Thiruvarur.",
@@ -52,7 +52,7 @@ const ROOMS = [
   {
     name: "Suite Room",
     price: "₹4,500",
-    priceNote: "per night + 18% GST",
+    priceNote: "per night + 12% GST",
     double: "Same rate for single or double occupancy",
     detail:
       "A larger room with additional seating space, ideal for families visiting Thiruvarur for temple functions, weddings or longer stays.",
@@ -60,7 +60,7 @@ const ROOMS = [
   {
     name: "Suite with Balcony",
     price: "₹4,500",
-    priceNote: "per night + 18% GST",
+    priceNote: "per night + 12% GST",
     double: "Same rate for single or double occupancy",
     detail:
       "Our suite with a private balcony, offering extra light and open space. A good choice for guests staying several nights in Thiruvarur.",
@@ -126,7 +126,7 @@ const FAQS = [
   },
   {
     q: "What is the room tariff at your hotel in Thiruvarur?",
-    a: "Deluxe rooms start at ₹2,000 plus 12% GST for single occupancy and ₹2,300 plus 12% GST for two guests. Suite rooms and the suite with balcony are ₹4,500 plus 18% GST. Booking directly through our website or by phone gets you our best available rate.",
+    a: "Deluxe rooms start at ₹2,000 plus 12% GST for single occupancy and ₹2,300 plus 12% GST for two guests. Suite rooms and the suite with balcony are ₹4,500 plus 12% GST. Booking directly through our website or by phone gets you our best available rate.",
   },
   {
     q: "Do you have a parking facility?",

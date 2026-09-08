@@ -1414,7 +1414,7 @@ const bookingPaidLabel =
                     ]
                   : []),
                 {
-                  label: "GST (18%)",
+                  label: "GST (12%)",
                   val: `Rs.${Math.round(roomGst).toLocaleString()}`,
                 },
               ].map(({ label, val }) => (
@@ -3948,7 +3948,7 @@ const paginatedBookings = filteredBookings.slice(
                               </span>
                             </div>
                             <div className="text-[0.62rem] font-body text-red-500">
-                              +18% GST
+                              +12% GST
                             </div>
                           </div>
                           <button
