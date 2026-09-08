@@ -267,3 +267,22 @@ export const CreditCardIcon = (p) => (
     <line x1="1" y1="10" x2="23" y2="10" />
   </Icon>
 );
+export function VehicleIcon({ size = 16, color = "currentColor" }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 11l1.5-4.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11" />
+      <path d="M3 11h18v5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z" />
+      <circle cx="7.5" cy="16.5" r="1.5" />
+      <circle cx="16.5" cy="16.5" r="1.5" />
+    </svg>
+  );
+}

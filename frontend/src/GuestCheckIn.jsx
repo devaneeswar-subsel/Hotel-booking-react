@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { printInvoicePdf } from "./invoicePdf";
 
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.18;
+const GST_RATE = 0.12;
 
 const apiFetch = (url, options = {}) =>
   fetch(`${API}${url}`, {
@@ -2233,7 +2233,7 @@ export default function GuestCheckIn({
 
                 {gstEnabled ? (
                   <Row
-                    label="Taxes & Fees (GST 18%)"
+                    label="Taxes & Fees (GST 12%)"
                     value={money(
                       taxes,
                     )}

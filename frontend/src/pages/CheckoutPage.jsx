@@ -12,7 +12,7 @@ import {
 } from "../Icons";
 
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.18;
+const GST_RATE = 0.12;
 const VEHICLES = [
   {
     id: "4-seater",
@@ -471,7 +471,7 @@ export default function CheckoutPage({ user, showToast }) {
 
     [
       ["Room Charges", `Rs.${roomCharges.toLocaleString()}`],
-      ["GST (18%)", `Rs.${Math.round(gst).toLocaleString()}`],
+      ["GST (12%)", `Rs.${Math.round(gst).toLocaleString()}`],
     ].forEach(([label, value]) => {
       doc.setTextColor("#868E96");
       doc.setFont("helvetica", "normal");
@@ -730,7 +730,7 @@ export default function CheckoutPage({ user, showToast }) {
                     <span>{formatAmount(pricing.subtotal)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4 text-[#525B65]">
-                    <span>GST (18%)</span>
+                    <span>GST (12%)</span>
                     <span>{formatAmount(pricing.gst)}</span>
                   </div>
                 </div>
@@ -833,7 +833,7 @@ export default function CheckoutPage({ user, showToast }) {
                       "Room Charges",
                       formatAmount(confirmedBooking.total_price),
                     ],
-                    ["GST (18%)", formatAmount(confirmedBooking.gst_amount)],
+                    ["GST (12%)", formatAmount(confirmedBooking.gst_amount)],
                     ["Payment ID", confirmedBooking.payment_id || "-"],
                   ].map(([label, value]) => (
                     <div

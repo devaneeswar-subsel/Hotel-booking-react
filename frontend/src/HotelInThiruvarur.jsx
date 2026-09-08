@@ -126,7 +126,7 @@ const FAQS = [
   },
   {
     q: "What is the room tariff at your hotel in Thiruvarur?",
-    a: "Deluxe rooms start at ₹2,000 plus 18% GST for single occupancy and ₹2,300 plus 18% GST for two guests. Suite rooms and the suite with balcony are ₹4,500 plus 18% GST. Booking directly through our website or by phone gets you our best available rate.",
+    a: "Deluxe rooms start at ₹2,000 plus 12% GST for single occupancy and ₹2,300 plus 12% GST for two guests. Suite rooms and the suite with balcony are ₹4,500 plus 18% GST. Booking directly through our website or by phone gets you our best available rate.",
   },
   {
     q: "Do you have a parking facility?",

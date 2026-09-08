@@ -14,7 +14,7 @@
 //  The invoice date is read at print time, so it is always today's date.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const GST_RATE = 0.18;
+const GST_RATE = 0.12;
 
 // page geometry (A4, mm)
 const W = 210;
@@ -356,7 +356,7 @@ const co = b.check_out_date
    *   - booking discount
    *   - checkout discount      = final room taxable value
    *   + add-ons                = taxable value
-   *   + 18% GST on that        = grand total
+   *   + 12% GST on that        = grand total
    *
    * The previous version was `paymentTotal + addons + addonGst -
    * checkoutDiscountImpact`. b.total_amount already contains the add-ons
@@ -1335,7 +1335,7 @@ if (addons.length) {
   // would suggest tax was worked out and came to nothing.
   if (invoiceGstEnabled) {
     sumRow(
-      "GST (18%)",
+      "GST (12%)",
       money(
         Math.round(finalRoomTaxable * GST_RATE * 100) / 100,
       ),
@@ -1412,7 +1412,7 @@ if (addons.length) {
 
   if (invoiceGstEnabled) {
     sumRow(
-      "GST on Add-ons (18%)",
+      "GST on Add-ons (12%)",
       money(addonGst),
     );
   }

@@ -305,7 +305,7 @@ const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
-const GST_RATE = 0.18;
+const GST_RATE = 0.12;
 const VEHICLE_PRICES = {
   none: 0,
   "4-seater": 600,
@@ -552,7 +552,7 @@ async function recalcBookingTotals(bookingId) {
     roomTaxable,
     addonCharges: addonTotal,
     taxableAmount: subtotal,
-    gstAmount: chargedGst,
+    gstAmount,
     totalAmount,
     paid,
     remainingAmount: remaining,
