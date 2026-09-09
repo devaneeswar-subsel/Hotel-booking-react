@@ -812,18 +812,20 @@ const co = b.check_out_date
     y + 9,
   );
 
-  let leftY =
-    y +
-    9 +
-    emailLines.length *
-      4.5;
+  let leftY = y + 9 + emailLines.length * 4.5;
 
   if (b.phone) {
-    doc.text(
-      String(b.phone),
-      L + 13,
-      leftY,
-    );
+    doc.text(String(b.phone), L + 13, leftY);
+
+    leftY += 4.5;
+  }
+
+  if (b.gst_number) {
+    doc.setFont("helvetica", "bold");
+
+    doc.text(`GSTIN: ${b.gst_number}`, L + 13, leftY);
+
+    doc.setFont("helvetica", "normal");
 
     leftY += 4.5;
   }

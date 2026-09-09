@@ -125,6 +125,7 @@ export default function AdminBookingForUsers({
     customer_name: "",
     customer_email: "",
     customer_phone: "",
+    customer_gst: "",
     vehicle_type: "none",
     pickup_location: "",
     dropoff_location: "",
@@ -226,7 +227,67 @@ export default function AdminBookingForUsers({
       clearTimeout(timer);
     };
   }, [apiFetch, form.customer_phone]);
+  const GSTIN_PATTERN =
+    /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+    function getCustomerFieldError(name, value) {
+      const text = String(value || "").trim();
+      if (name === "customer_name") {
+        if (!text) return "Customer name is required";
+        if (!CUSTOMER_NAME_PATTERN.test(text)) {
+          return "Customer name must contain letters only";
+        }
+      }
+      if (name === "customer_email") {
+        if (!text) return "";
+        if (!EMAIL_PATTERN.test(text.toLowerCase())) {
+          return "Enter a valid email address";
+        }
+      }
+      if (name === "customer_phone") {
+        if (!text) return "Phone number is required";
+        if (!isValidPhone(text)) return "Enter a valid 10-digit mobile number";
+      }
+      if (name === "customer_gst") {
+        if (!text) return "";
+        if (!GSTIN_PATTERN.test(text.toUpperCase())) {
+          return "Enter a valid 15-character GSTIN";
+        }
+      }
+      return "";
+    }
+    function getCustomerFieldErrors() {
+      const errors = {};
+      [
+        "customer_name",
+        "customer_email",
+        "customer_phone",
+        "customer_gst",
+      ].forEach((name) => {
+        const error = getCustomerFieldError(name, form[name]);
+        if (error) errors[name] = error;
+      });
+      return errors;
+    }
+    function handleCustomerBlur(name) {
+      const error = getCustomerFieldError(name, form[name]);
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        if (error) next[name] = error;
+        else delete next[name];
+        return next;
+      });
 
+      if (error) return;
+      const value =
+        name === "customer_email"
+          ? form[name].trim().toLowerCase()
+          : name === "customer_phone"
+            ? normalizePhone(form[name])
+            : name === "customer_gst"
+              ? form[name].trim().toUpperCase()
+              : form[name].trim();
+      setForm((prev) => ({ ...prev, [name]: value }));
+    }
   const checkInDate = parseLocalDate(form.check_in_date);
   const checkOutDate = parseLocalDate(form.check_out_date);
   const nights =
@@ -548,6 +609,7 @@ export default function AdminBookingForUsers({
                     name: form.customer_name.trim(),
                     email: customerEmail,
                     phone: customerPhone,
+                    gst_number: form.customer_gst.trim() || null,
                   },
                   vehicle_type: form.vehicle_type,
                   advance_amount: totals.advanceAmount,
@@ -623,6 +685,7 @@ export default function AdminBookingForUsers({
           name: form.customer_name.trim(),
           email: customerEmail,
           phone: customerPhone,
+          gst_number: form.customer_gst.trim() || null,
         },
         vehicle_type: form.vehicle_type,
         advance_amount: totals.advanceAmount,
@@ -825,36 +888,58 @@ export default function AdminBookingForUsers({
               {[
                 ["customer_name", "Customer name", "text"],
                 ["customer_email", "Email address", "email"],
+                ["customer_gst", "GST number", "text"],
                 ["customer_phone", "Phone number", "tel"],
               ].map(([name, label, type]) => (
                 <div key={name}>
                   <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
                     {label}
-                    {name === "customer_email" ? " (optional)" : " *"}
+                    {name === "customer_email" || name === "customer_gst"
+                      ? " (optional)"
+                      : " *"}
                   </label>
                   <input
-                    required={name !== "customer_email"}
+                    required={
+                      name === "customer_name" || name === "customer_phone"
+                    }
                     value={form[name]}
                     type={type}
                     inputMode={
                       name === "customer_phone" ? "numeric" : undefined
                     }
-                    maxLength={name === "customer_phone" ? 17 : undefined}
+                    maxLength={
+                      name === "customer_phone"
+                        ? 17
+                        : name === "customer_gst"
+                          ? 15
+                          : undefined
+                    }
                     autoComplete={
                       name === "customer_name"
                         ? "name"
                         : name === "customer_email"
                           ? "email"
-                          : "tel"
+                          : name === "customer_gst"
+                            ? "off"
+                            : "tel"
                     }
-                    onChange={(e) => update(name, e.target.value)}
+                    onChange={(e) =>
+                      update(
+                        name,
+                        name === "customer_gst"
+                          ? e.target.value.toUpperCase()
+                          : e.target.value,
+                      )
+                    }
                     onBlur={() => handleCustomerBlur(name)}
                     placeholder={
                       name === "customer_phone"
                         ? "+91 98765 43210"
                         : name === "customer_email"
                           ? "Email address (optional)"
-                          : `${label} required`
+                          : name === "customer_gst"
+                            ? "GST number (optional)"
+                            : `${label} required`
                     }
                     aria-invalid={fieldErrors[name] ? "true" : "false"}
                     className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${
@@ -1039,7 +1124,7 @@ export default function AdminBookingForUsers({
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
             <span className="text-[#868E96]">GST (12%)</span>{" "}
             <span className="font-bold text-[#0F1923]">
-               {money(totals.gst)}{" "}
+              {money(totals.gst)}{" "}
             </span>
           </div>
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
