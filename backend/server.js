@@ -170,6 +170,7 @@ async function runMigrations() {
       // ADDITIONAL: 1 = taxed exactly as before, 0 = admin issued this
       // booking with GST off. Defaults to 1 so nothing existing changes.
       "gst_enabled TINYINT DEFAULT 1",
+      "gst_number VARCHAR(20) DEFAULT NULL",
     ];
     for (const col of cols) {
       try {
@@ -252,14 +253,14 @@ async function runMigrations() {
     await db.query(
       `CREATE TABLE IF NOT EXISTS booking_addons (addon_id INT AUTO_INCREMENT PRIMARY KEY, booking_id INT NOT NULL, label VARCHAR(100) NOT NULL, amount DECIMAL(10,2) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE)`,
     );
-      await db.query(
-        `CREATE TABLE IF NOT EXISTS room_blocked_dates (
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS room_blocked_dates (
           room_id INT NOT NULL,
           blocked_date DATE NOT NULL,
           PRIMARY KEY (room_id, blocked_date),
           FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
         )`,
-      );
+    );
 
     // why a room is held: maintenance, cleaning, or a bulk booking
     for (const col of [
@@ -498,7 +499,10 @@ function roomTaxableValue(booking) {
     Number(
       booking.checkout_discount_applied ? booking.checkout_discount_amount : 0,
     ) || 0;
-  return Math.max(0, Math.round((tariff - bookingDiscount - checkoutDiscount) * 100) / 100);
+  return Math.max(
+    0,
+    Math.round((tariff - bookingDiscount - checkoutDiscount) * 100) / 100,
+  );
 }
 
 /*
@@ -642,18 +646,18 @@ async function calculateBookingAmounts({
     throw err;
   }
 
-    const [blockedDates] = await db.query(
-      `SELECT blocked_date
+  const [blockedDates] = await db.query(
+    `SELECT blocked_date
        FROM room_blocked_dates
        WHERE room_id = ? AND blocked_date >= ? AND blocked_date < ?
        LIMIT 1`,
-      [room_id, check_in_date, check_out_date],
-    );
-    if (blockedDates.length) {
-      const err = new Error("Room is blocked for one or more selected dates");
-      err.status = 400;
-      throw err;
-    }
+    [room_id, check_in_date, check_out_date],
+  );
+  if (blockedDates.length) {
+    const err = new Error("Room is blocked for one or more selected dates");
+    err.status = 400;
+    throw err;
+  }
 
   const nightlyRate = resolveNightlyRate(room, guest_count);
   const roomSubtotal = nightlyRate * nights;
@@ -713,7 +717,9 @@ async function calculateBookingAmounts({
 
 async function findOrCreateGuestUser({ name, email, phone }) {
   const normalizedName = String(name || "").trim();
-  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
   const rawPhone = String(phone || "").trim();
   if (!normalizedName || !rawPhone) {
     const err = new Error("Customer name and phone are required");
@@ -748,12 +754,15 @@ async function findOrCreateGuestUser({ name, email, phone }) {
       err.status = 400;
       throw err;
     }
-    await db.query("UPDATE users SET name=?, email=COALESCE(?, email), phone=? WHERE user_id=?", [
-      normalizedName,
-      normalizedEmail || null,
-      normalizedPhone,
-      existing[0].user_id,
-    ]);
+    await db.query(
+      "UPDATE users SET name=?, email=COALESCE(?, email), phone=? WHERE user_id=?",
+      [
+        normalizedName,
+        normalizedEmail || null,
+        normalizedPhone,
+        existing[0].user_id,
+      ],
+    );
     return existing[0].user_id;
   }
 
@@ -769,9 +778,12 @@ async function findOrCreateGuestUser({ name, email, phone }) {
 app.get("/api/customers/lookup", requireManager, async (req, res) => {
   try {
     const phone = normalizeCustomerPhone(req.query.phone);
-    if (!phone) return res.status(400).json({ error: "Phone number is required" });
+    if (!phone)
+      return res.status(400).json({ error: "Phone number is required" });
     if (!INDIAN_MOBILE_PATTERN.test(phone)) {
-      return res.status(400).json({ error: "Enter a valid 10-digit mobile number" });
+      return res
+        .status(400)
+        .json({ error: "Enter a valid 10-digit mobile number" });
     }
 
     const [rows] = await db.query(
@@ -874,7 +886,8 @@ async function generateAdvanceInvoicePdf(booking) {
     ),
   );
   const roomSubtotal = Number(booking.total_price || 0);
-  const discountAmount = Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
+  const discountAmount =
+    Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
   // Prefer the stored taxable value; fall back for rows written before the
   // taxable_amount column existed.
   const discountedRoomAmount =
@@ -903,28 +916,53 @@ async function generateAdvanceInvoicePdf(booking) {
       .font("Helvetica-Bold")
       .fontSize(22)
       .text("VV GRAND PARK", 50, 28);
-    doc.fillColor("#C9A84C").font("Helvetica").fontSize(10).text("RESIDENCY", 50, 54);
+    doc
+      .fillColor("#C9A84C")
+      .font("Helvetica")
+      .fontSize(10)
+      .text("RESIDENCY", 50, 54);
     doc
       .fillColor("#ffffff")
       .font("Helvetica-Bold")
       .fontSize(20)
       .text("INVOICE", 395, 28, { align: "right" });
-    doc.fillColor("#AAB2BA").font("Helvetica").fontSize(9).text(invNo, 395, 54, {
-      align: "right",
-    });
+    doc
+      .fillColor("#AAB2BA")
+      .font("Helvetica")
+      .fontSize(9)
+      .text(invNo, 395, 54, {
+        align: "right",
+      });
 
-    doc.moveTo(50, 115).lineTo(545, 115).strokeColor("#C9A84C").lineWidth(1).stroke();
+    doc
+      .moveTo(50, 115)
+      .lineTo(545, 115)
+      .strokeColor("#C9A84C")
+      .lineWidth(1)
+      .stroke();
 
-    doc.fillColor("#868E96").font("Helvetica-Bold").fontSize(8).text("BILL TO", 50, 132);
+    doc
+      .fillColor("#868E96")
+      .font("Helvetica-Bold")
+      .fontSize(8)
+      .text("BILL TO", 50, 132);
     doc
       .fillColor("#0F1923")
       .font("Helvetica-Bold")
       .fontSize(13)
       .text(booking.guest_name || "Guest", 50, 148);
-    doc.fillColor("#495057").font("Helvetica").fontSize(9).text(booking.email || "", 50, 166);
+    doc
+      .fillColor("#495057")
+      .font("Helvetica")
+      .fontSize(9)
+      .text(booking.email || "", 50, 166);
     if (booking.phone) doc.text(booking.phone, 50, 180);
 
-    doc.fillColor("#868E96").font("Helvetica-Bold").fontSize(8).text("FROM", 350, 132);
+    doc
+      .fillColor("#868E96")
+      .font("Helvetica-Bold")
+      .fontSize(8)
+      .text("FROM", 350, 132);
     doc
       .fillColor("#0F1923")
       .font("Helvetica-Bold")
@@ -980,7 +1018,10 @@ async function generateAdvanceInvoicePdf(booking) {
       // Pre-tax discount: the discount comes off the tariff first, then GST is
       // charged on the reduced (taxable) value.
       ...(discountAmount > 0
-        ? [["Discount", -discountAmount], ["Taxable Value", discountedRoomAmount]]
+        ? [
+            ["Discount", -discountAmount],
+            ["Taxable Value", discountedRoomAmount],
+          ]
         : []),
       ["GST (12%)", gstAmount],
       ["Total Amount", totalAmount],
@@ -997,7 +1038,10 @@ async function generateAdvanceInvoicePdf(booking) {
         .fillColor(strong ? "#0F1923" : "#495057")
         .font(strong ? "Helvetica-Bold" : "Helvetica")
         .fontSize(strong ? 10 : 9)
-        .text(formatInvoiceMoney(amount), 430, y, { width: 110, align: "right" });
+        .text(formatInvoiceMoney(amount), 430, y, {
+          width: 110,
+          align: "right",
+        });
       y += 20;
     });
 
@@ -1049,10 +1093,15 @@ async function generateAdvanceInvoicePdf(booking) {
       .fillColor("#868E96")
       .font("Helvetica-Oblique")
       .fontSize(9)
-      .text("Thank you for choosing VV Grand Park Residency!", 50, footerY + 10, {
-        width: 495,
-        align: "center",
-      });
+      .text(
+        "Thank you for choosing VV Grand Park Residency!",
+        50,
+        footerY + 10,
+        {
+          width: 495,
+          align: "center",
+        },
+      );
     doc
       .font("Helvetica")
       .fontSize(8)
@@ -1082,7 +1131,8 @@ async function sendAdvanceInvoiceEmail(booking) {
   const roomLabel = `${escapeHtml(booking.room_type)} - Room ${escapeHtml(
     booking.room_number || booking.room_id,
   )}`;
-  const discountAmount = Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
+  const discountAmount =
+    Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
   const emailTermsHtml = INVOICE_TERMS.map(
     (term) =>
       `<li style="margin:0 0 6px;color:#6B7280;line-height:18px;">${escapeHtml(
@@ -1348,7 +1398,8 @@ app.get("/api/rooms", async (req, res) => {
     if (check_in && check_out) {
       q += ` AND room_id NOT IN (SELECT room_id FROM bookings WHERE status NOT IN ('cancelled','pending') AND check_in_date<? AND check_out_date>?)`;
       p.push(check_out, check_in);
-      q += " AND room_id NOT IN (SELECT room_id FROM room_blocked_dates WHERE blocked_date>=? AND blocked_date<?)";
+      q +=
+        " AND room_id NOT IN (SELECT room_id FROM room_blocked_dates WHERE blocked_date>=? AND blocked_date<?)";
       p.push(check_in, check_out);
     }
     const [rooms] = await db.query(q, p);
@@ -1394,19 +1445,23 @@ app.get("/api/rooms/:roomId/booked-dates", async (req, res) => {
   }
 });
 
-app.get("/api/rooms/:roomId/blocked-dates", requireManager, async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT DATE_FORMAT(blocked_date, '%Y-%m-%d') AS blocked_date,
+app.get(
+  "/api/rooms/:roomId/blocked-dates",
+  requireManager,
+  async (req, res) => {
+    try {
+      const [rows] = await db.query(
+        `SELECT DATE_FORMAT(blocked_date, '%Y-%m-%d') AS blocked_date,
              block_reason, block_note, booking_id
         FROM room_blocked_dates WHERE room_id=? ORDER BY blocked_date ASC`,
-      [req.params.roomId],
-    );
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+        [req.params.roomId],
+      );
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 app.get("/api/rooms/:id", async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM rooms WHERE room_id=?", [
@@ -1536,89 +1591,88 @@ function guestRateLimit(req, res, next) {
   next();
 }
 
-app.post("/api/payment/guest/create-order", guestRateLimit, async (req, res) => {
-  try {
-    const {
-      room_id,
-      check_in_date,
-      check_out_date,
-      guest_count,
-      customer,
-    } = req.body;
+app.post(
+  "/api/payment/guest/create-order",
+  guestRateLimit,
+  async (req, res) => {
+    try {
+      const { room_id, check_in_date, check_out_date, guest_count, customer } =
+        req.body;
 
-    if (!room_id || !check_in_date || !check_out_date) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
+      if (!room_id || !check_in_date || !check_out_date) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
 
-    // validates name/email/phone and reuses an existing guest account when the
-    // email is already known, so repeat visitors keep one booking history
-    const userId = await findOrCreateGuestUser(customer || {});
+      // validates name/email/phone and reuses an existing guest account when the
+      // email is already known, so repeat visitors keep one booking history
+      const userId = await findOrCreateGuestUser(customer || {});
 
-    const amounts = await calculateBookingAmounts({
-      room_id,
-      check_in_date,
-      check_out_date,
-      advance_amount: null,
-      guest_count,
-    });
-
-    const requestedGuests = Math.max(1, Number(guest_count) || 1);
-    if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
-      return res.status(400).json({
-        error: `This room allows up to ${amounts.room.capacity} guests`,
+      const amounts = await calculateBookingAmounts({
+        room_id,
+        check_in_date,
+        check_out_date,
+        advance_amount: null,
+        guest_count,
       });
-    }
 
-    const [result] = await db.query(
-      `INSERT INTO bookings
+      const requestedGuests = Math.max(1, Number(guest_count) || 1);
+      if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
+        return res.status(400).json({
+          error: `This room allows up to ${amounts.room.capacity} guests`,
+        });
+      }
+
+      const [result] = await db.query(
+        `INSERT INTO bookings
         (user_id, room_id, check_in_date, check_out_date, guest_count,
          total_price, taxable_amount, gst_amount, final_total, total_amount,
          payment_method, booking_source, vehicle_type, vehicle_price, status)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')`,
-      [
-        userId,
-        room_id,
-        check_in_date,
-        check_out_date,
-        requestedGuests,
-        amounts.roomSubtotal,
-        amounts.taxableAmount,
-        amounts.gstAmount,
-        amounts.totalAmount,
-        amounts.totalAmount,
-        "Razorpay",
-        "GUEST_CHECKOUT",
-        "none",
-        0,
-      ],
-    );
+        [
+          userId,
+          room_id,
+          check_in_date,
+          check_out_date,
+          requestedGuests,
+          amounts.roomSubtotal,
+          amounts.taxableAmount,
+          amounts.gstAmount,
+          amounts.totalAmount,
+          amounts.totalAmount,
+          "Razorpay",
+          "GUEST_CHECKOUT",
+          "none",
+          0,
+        ],
+      );
 
-    const bookingId = result.insertId;
+      const bookingId = result.insertId;
 
-    const order = await razorpay.orders.create({
-      amount: Math.round(amounts.totalAmount * 100),
-      currency: "INR",
-      receipt: `guest_${bookingId}`,
-      notes: { booking_id: String(bookingId), source: "guest_checkout" },
-    });
+      const order = await razorpay.orders.create({
+        amount: Math.round(amounts.totalAmount * 100),
+        currency: "INR",
+        receipt: `guest_${bookingId}`,
+        notes: { booking_id: String(bookingId), source: "guest_checkout" },
+      });
 
-    res.status(201).json({
-      booking_id: bookingId,
-      user_id: userId,
-      nights: amounts.nights,
-      room_subtotal: amounts.roomSubtotal,
-      gst_amount: amounts.gstAmount,
-      total_price: amounts.totalAmount,
-      razorpay_order_id: order.id,
-      razorpay_key: process.env.RAZORPAY_KEY_ID,
-      room_name: `${amounts.room.room_type} — Room ${
-        amounts.room.room_number || room_id
-      }`,
-    });
-  } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
-  }
-});
+      res.status(201).json({
+        booking_id: bookingId,
+        user_id: userId,
+        nights: amounts.nights,
+        room_subtotal: amounts.roomSubtotal,
+        gst_amount: amounts.gstAmount,
+        total_price: amounts.totalAmount,
+        razorpay_order_id: order.id,
+        razorpay_key: process.env.RAZORPAY_KEY_ID,
+        room_name: `${amounts.room.room_type} — Room ${
+          amounts.room.room_number || room_id
+        }`,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  },
+);
 
 app.post("/api/payment/guest/verify", guestRateLimit, async (req, res) => {
   try {
@@ -1927,7 +1981,11 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
             .font("Helvetica")
             .fontSize(9)
             .text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", 350, 162)
-            .text("+91 93849 82510 | +91 90032 51115 | vvgrandpark@gmail.com", 350, 175);
+            .text(
+              "+91 93849 82510 | +91 90032 51115 | vvgrandpark@gmail.com",
+              350,
+              175,
+            );
 
           const tableTop = 210;
           doc.rect(50, tableTop, 495, 25).fill("#0F1923");
@@ -2683,7 +2741,10 @@ app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
     const booking = bookings[0];
     const canManageBookings =
       req.user.role === "admin" || req.user.role === "manager";
-    if (!canManageBookings && Number(booking.user_id) !== Number(req.user.user_id)) {
+    if (
+      !canManageBookings &&
+      Number(booking.user_id) !== Number(req.user.user_id)
+    ) {
       return res.status(403).json({ error: "You cannot cancel this booking" });
     }
     if (booking.actual_checkin) {
@@ -2834,271 +2895,279 @@ app.post("/api/bookings", requireAuth, async (req, res, next) => {
   }
 });
 
-app.post("/api/admin/bookings/advance-order", requireManager, async (req, res) => {
-  try {
-    const {
-      room_id,
-      check_in_date,
-      check_out_date,
-      advance_amount,
-      // The discount was missing from this route, so an online advance was
-      // computed on the undiscounted tariff and Razorpay charged the guest
-      // more than the screen showed.
-      discount_applied = false,
-      discount_amount = 0,
-      gst_enabled = true,
-    } = req.body;
-    if (!room_id || !check_in_date || !check_out_date)
-      return res.status(400).json({ error: "Missing required fields" });
-
-    const amounts = await calculateBookingAmounts({
-      room_id,
-      check_in_date,
-      check_out_date,
-      advance_amount,
-      guest_count: req.body.guest_count,
-      discount_applied,
-      discount_amount,
-      gst_enabled,
-      // staff route — walk-ins and late paperwork need past check-in dates
-      allowPastDates: true,
-    });
-    const requestedGuests = Math.max(1, Number(req.body.guest_count) || 1);
-    if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
-      return res.status(400).json({
-        error: `This room allows up to ${amounts.room.capacity} guests`,
-      });
-    }
-
-    // Refuse to take money for nights that are not available. Checking here
-    // as well as at confirm time means the common case never reaches a
-    // payment that has to be refunded.
-    const conflict = await findDateConflict(db, {
-      room_id,
-      check_in_date,
-      check_out_date,
-    });
-    if (conflict) {
-      return res.status(409).json({ error: conflict });
-    }
-
-    const order = await razorpay.orders.create({
-      amount: Math.round(amounts.advanceAmount * 100),
-      currency: "INR",
-      receipt: `ADV-${Date.now()}`,
-      notes: {
-        room_id: String(room_id),
+app.post(
+  "/api/admin/bookings/advance-order",
+  requireManager,
+  async (req, res) => {
+    try {
+      const {
+        room_id,
         check_in_date,
         check_out_date,
-        advance_amount: String(amounts.advanceAmount),
-        created_by: String(req.user.user_id),
-      },
-    });
+        advance_amount,
+        // The discount was missing from this route, so an online advance was
+        // computed on the undiscounted tariff and Razorpay charged the guest
+        // more than the screen showed.
+        discount_applied = false,
+        discount_amount = 0,
+        gst_enabled = true,
+      } = req.body;
+      if (!room_id || !check_in_date || !check_out_date)
+        return res.status(400).json({ error: "Missing required fields" });
 
-    res.json({
-      razorpay_key: process.env.RAZORPAY_KEY_ID,
-      order_id: order.id,
-      currency: order.currency,
-      ...amounts,
-      room: undefined,
-    });
-  } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
-  }
-});
-
-app.post("/api/admin/bookings/advance-confirm", requireManager, async (req, res) => {
-  try {
-    const {
-      room_id,
-      check_in_date,
-      check_out_date,
-      guest_count,
-      customer,
-      vehicle_type = "none",
-      advance_amount,
-      pickup_location,
-      dropoff_location,
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
-      // Without these the discount the admin applied was silently dropped
-      // when the advance was paid online.
-      discount_applied = false,
-      discount_amount = 0,
-      gst_enabled = true,
-    } = req.body;
-
-    if (
-      !room_id ||
-      !check_in_date ||
-      !check_out_date ||
-      !razorpay_order_id ||
-      !razorpay_payment_id ||
-      !razorpay_signature
-    ) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest("hex");
-    if (expectedSignature !== razorpay_signature) {
-      return res.status(400).json({ error: "Payment verification failed" });
-    }
-
-    const validVehicleTypes = ["none", "4-seater", "7-seater", "12-seater"];
-    if (!validVehicleTypes.includes(vehicle_type)) {
-      return res.status(400).json({ error: "Invalid vehicle type" });
-    }
-
-    const amounts = await calculateBookingAmounts({
-      room_id,
-      check_in_date,
-      check_out_date,
-      advance_amount,
-      guest_count,
-      // must match what /advance-order used, otherwise the amount check
-      // below rejects a payment the guest has already made
-      discount_applied,
-      discount_amount,
-      gst_enabled,
-      // staff route — walk-ins and late paperwork need past check-in dates
-      allowPastDates: true,
-    });
-    const requestedGuests = Math.max(1, Number(guest_count) || 1);
-    if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
-      return res.status(400).json({
-        error: `This room allows up to ${amounts.room.capacity} guests`,
+      const amounts = await calculateBookingAmounts({
+        room_id,
+        check_in_date,
+        check_out_date,
+        advance_amount,
+        guest_count: req.body.guest_count,
+        discount_applied,
+        discount_amount,
+        gst_enabled,
+        // staff route — walk-ins and late paperwork need past check-in dates
+        allowPastDates: true,
       });
-    }
+      const requestedGuests = Math.max(1, Number(req.body.guest_count) || 1);
+      if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
+        return res.status(400).json({
+          error: `This room allows up to ${amounts.room.capacity} guests`,
+        });
+      }
 
-    const paidOrder = await razorpay.orders.fetch(razorpay_order_id);
-    const orderNotes = paidOrder.notes || {};
-    if (
-      String(orderNotes.room_id || "") !== String(room_id) ||
-      orderNotes.check_in_date !== check_in_date ||
-      orderNotes.check_out_date !== check_out_date
-    ) {
-      return res
-        .status(400)
-        .json({ error: "Paid order does not match this booking" });
-    }
-
-    // An order exists from the moment it is created; only a paid one may
-    // create a booking.
-    if (paidOrder.status !== "paid") {
-      return res.status(400).json({ error: "This payment has not completed" });
-    }
-
-    /*
-     * REPLAY PROTECTION.
-     *
-     * Without this a retried request — a double-click, a flaky connection,
-     * a resent call — creates a SECOND confirmed booking for the same single
-     * payment, holding a room nobody paid for. The order id is unique per
-     * payment, so an existing booking carrying it means this call already ran.
-     */
-    const [dupe] = await db.query(
-      "SELECT booking_id FROM bookings WHERE advance_order_id=? LIMIT 1",
-      [razorpay_order_id],
-    );
-    if (dupe.length) {
-      return res.json({
-        message: "Booking already confirmed for this payment",
-        booking_id: dupe[0].booking_id,
-        duplicate: true,
+      // Refuse to take money for nights that are not available. Checking here
+      // as well as at confirm time means the common case never reaches a
+      // payment that has to be refunded.
+      const conflict = await findDateConflict(db, {
+        room_id,
+        check_in_date,
+        check_out_date,
       });
-    }
+      if (conflict) {
+        return res.status(409).json({ error: conflict });
+      }
 
-    // Someone else may have taken these nights while the payment window was
-    // open. The guest has paid, so say clearly that a refund is needed rather
-    // than silently double-booking the room.
-    const conflict = await findDateConflict(db, {
-      room_id,
-      check_in_date,
-      check_out_date,
-    });
-    if (conflict) {
-      return res.status(409).json({
-        error: `${conflict}. The payment succeeded — refund it from the Razorpay dashboard.`,
+      const order = await razorpay.orders.create({
+        amount: Math.round(amounts.advanceAmount * 100),
+        currency: "INR",
+        receipt: `ADV-${Date.now()}`,
+        notes: {
+          room_id: String(room_id),
+          check_in_date,
+          check_out_date,
+          advance_amount: String(amounts.advanceAmount),
+          created_by: String(req.user.user_id),
+        },
+      });
+
+      res.json({
+        razorpay_key: process.env.RAZORPAY_KEY_ID,
+        order_id: order.id,
+        currency: order.currency,
+        ...amounts,
+        room: undefined,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  },
+);
+
+app.post(
+  "/api/admin/bookings/advance-confirm",
+  requireManager,
+  async (req, res) => {
+    try {
+      const {
+        room_id,
+        check_in_date,
+        check_out_date,
+        guest_count,
+        customer,
+        vehicle_type = "none",
+        advance_amount,
+        pickup_location,
+        dropoff_location,
+        razorpay_order_id,
         razorpay_payment_id,
+        razorpay_signature,
+        discount_applied = false,
+        discount_amount = 0,
+        gst_enabled = true,
+      } = req.body;
+
+      if (
+        !room_id ||
+        !check_in_date ||
+        !check_out_date ||
+        !razorpay_order_id ||
+        !razorpay_payment_id ||
+        !razorpay_signature
+      ) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      const expectedSignature = crypto
+        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest("hex");
+      if (expectedSignature !== razorpay_signature) {
+        return res.status(400).json({ error: "Payment verification failed" });
+      }
+
+      const validVehicleTypes = ["none", "4-seater", "7-seater", "12-seater"];
+      if (!validVehicleTypes.includes(vehicle_type)) {
+        return res.status(400).json({ error: "Invalid vehicle type" });
+      }
+
+      const amounts = await calculateBookingAmounts({
+        room_id,
+        check_in_date,
+        check_out_date,
+        advance_amount,
+        guest_count,
+        discount_applied,
+        discount_amount,
+        gst_enabled,
+        allowPastDates: true,
       });
-    }
-    if (Number(paidOrder.amount) !== Math.round(amounts.advanceAmount * 100)) {
-      return res
-        .status(400)
-        .json({ error: "Advance amount does not match paid order" });
-    }
+      const requestedGuests = Math.max(1, Number(guest_count) || 1);
+      if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
+        return res.status(400).json({
+          error: `This room allows up to ${amounts.room.capacity} guests`,
+        });
+      }
 
-    const userId = await findOrCreateGuestUser(customer || {});
+      const paidOrder = await razorpay.orders.fetch(razorpay_order_id);
+      const orderNotes = paidOrder.notes || {};
+      if (
+        String(orderNotes.room_id || "") !== String(room_id) ||
+        orderNotes.check_in_date !== check_in_date ||
+        orderNotes.check_out_date !== check_out_date
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Paid order does not match this booking" });
+      }
 
-    const [result] = await db.query(
-      `INSERT INTO bookings (
+      if (paidOrder.status !== "paid") {
+        return res
+          .status(400)
+          .json({ error: "This payment has not completed" });
+      }
+
+      const [dupe] = await db.query(
+        "SELECT booking_id FROM bookings WHERE advance_order_id=? LIMIT 1",
+        [razorpay_order_id],
+      );
+      if (dupe.length) {
+        return res.json({
+          message: "Booking already confirmed for this payment",
+          booking_id: dupe[0].booking_id,
+          duplicate: true,
+        });
+      }
+
+      const conflict = await findDateConflict(db, {
+        room_id,
+        check_in_date,
+        check_out_date,
+      });
+      if (conflict) {
+        return res.status(409).json({
+          error: `${conflict}. The payment succeeded — refund it from the Razorpay dashboard.`,
+          razorpay_payment_id,
+        });
+      }
+      if (
+        Number(paidOrder.amount) !== Math.round(amounts.advanceAmount * 100)
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Advance amount does not match paid order" });
+      }
+
+      const userId = await findOrCreateGuestUser(customer || {});
+
+      const gstNumberRaw = String(customer?.gst_number || "")
+        .trim()
+        .toUpperCase();
+      const GSTIN_PATTERN =
+        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+      if (gstNumberRaw && !GSTIN_PATTERN.test(gstNumberRaw)) {
+        return res
+          .status(400)
+          .json({ error: "Enter a valid 15-character GSTIN" });
+      }
+      const gstNumber = gstNumberRaw || null;
+
+      const [result] = await db.query(
+        `INSERT INTO bookings (
         user_id, room_id, check_in_date, check_out_date, guest_count,
         total_price, taxable_amount, gst_amount, final_total, total_amount,
         advance_amount, advance_paid, balance_paid, remaining_amount,
         payment_status, payment_id, advance_payment_id, advance_order_id,
         payment_method, booking_source, vehicle_type, vehicle_price,
         vehicle_status, pickup_location, dropoff_location,
-        discount_applied, discount_amount, gst_enabled, status
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
-      [
-        userId,
-        room_id,
-        check_in_date,
-        check_out_date,
-        requestedGuests,
-        amounts.roomSubtotal,
-        amounts.taxableAmount,
-        amounts.gstAmount,
-        amounts.totalAmount,
-        amounts.totalAmount,
-        amounts.advanceAmount,
-        amounts.advanceAmount,
-        0,
-        amounts.remainingAmount,
-        amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
-        razorpay_payment_id,
-        razorpay_payment_id,
-        razorpay_order_id,
-        "Razorpay Advance",
-        req.user.role === "admin" ? "ADMIN_ADVANCE" : "MANAGER_ADVANCE",
-        vehicle_type,
-        0,
-        vehicle_type === "none" ? "not_required" : "pending",
-        pickup_location || null,
-        dropoff_location || null,
-        // record the discount so the invoice and every dashboard can show it;
-        // it was previously lost on any online advance
-        amounts.discountAmount > 0 ? 1 : 0,
-        amounts.discountAmount,
-        amounts.gstEnabled ? 1 : 0,
-      ],
-    );
-
-    const bookingId = result.insertId;
-    loadBookingForInvoice(bookingId)
-      .then((booking) => booking && sendAdvanceInvoiceEmail(booking))
-      .catch((emailErr) =>
-        console.error("Advance booking invoice email error:", emailErr.message),
+        discount_applied, discount_amount, gst_enabled, gst_number, status
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        [
+          userId,
+          room_id,
+          check_in_date,
+          check_out_date,
+          requestedGuests,
+          amounts.roomSubtotal,
+          amounts.taxableAmount,
+          amounts.gstAmount,
+          amounts.totalAmount,
+          amounts.totalAmount,
+          amounts.advanceAmount,
+          amounts.advanceAmount,
+          0,
+          amounts.remainingAmount,
+          amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+          razorpay_payment_id,
+          razorpay_payment_id,
+          razorpay_order_id,
+          "Razorpay Advance",
+          req.user.role === "admin" ? "ADMIN_ADVANCE" : "MANAGER_ADVANCE",
+          vehicle_type,
+          0,
+          vehicle_type === "none" ? "not_required" : "pending",
+          pickup_location || null,
+          dropoff_location || null,
+          amounts.discountAmount > 0 ? 1 : 0,
+          amounts.discountAmount,
+          amounts.gstEnabled ? 1 : 0,
+          gstNumber,
+        ],
       );
 
-    res.status(201).json({
-      message: "Booking confirmed with advance payment",
-      booking_id: bookingId,
-      totalAmount: amounts.totalAmount,
-      advanceAmount: amounts.advanceAmount,
-      advancePaid: amounts.advanceAmount,
-      remainingAmount: amounts.remainingAmount,
-      paymentStatus: amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
-      bookingStatus: "CONFIRMED",
-    });
-  } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
-  }
-});
+      const bookingId = result.insertId;
+      loadBookingForInvoice(bookingId)
+        .then((booking) => booking && sendAdvanceInvoiceEmail(booking))
+        .catch((emailErr) =>
+          console.error(
+            "Advance booking invoice email error:",
+            emailErr.message,
+          ),
+        );
+
+      res.status(201).json({
+        message: "Booking confirmed with advance payment",
+        booking_id: bookingId,
+        totalAmount: amounts.totalAmount,
+        advanceAmount: amounts.advanceAmount,
+        advancePaid: amounts.advanceAmount,
+        remainingAmount: amounts.remainingAmount,
+        paymentStatus: amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+        bookingStatus: "CONFIRMED",
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  },
+);
 
 app.post(
   "/api/admin/bookings/manual-advance-confirm",
@@ -3133,7 +3202,9 @@ app.post(
 
       const selectedPaymentMode =
         MANUAL_ADVANCE_PAYMENT_MODES[
-          String(payment_mode || "").trim().toLowerCase()
+          String(payment_mode || "")
+            .trim()
+            .toLowerCase()
         ];
       if (!selectedPaymentMode) {
         return res
@@ -3180,16 +3251,28 @@ app.post(
       const userId = await findOrCreateGuestUser(customer || {});
       const manualPaymentId = `${selectedPaymentMode.toUpperCase()}-${Date.now()}-${req.user.user_id}`;
 
+      const gstNumberRaw = String(customer?.gst_number || "")
+        .trim()
+        .toUpperCase();
+      const GSTIN_PATTERN =
+        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+      if (gstNumberRaw && !GSTIN_PATTERN.test(gstNumberRaw)) {
+        return res
+          .status(400)
+          .json({ error: "Enter a valid 15-character GSTIN" });
+      }
+      const gstNumber = gstNumberRaw || null;
+
       const [result] = await db.query(
         `INSERT INTO bookings (
-          user_id, room_id, check_in_date, check_out_date, guest_count,
-          total_price, taxable_amount, gst_amount, final_total, total_amount,
-          discount_applied, discount_amount,
-          advance_amount, advance_paid, balance_paid, remaining_amount,
-          payment_status, payment_id, advance_payment_id, advance_order_id,
-          payment_method, booking_source, vehicle_type, vehicle_price,
-          vehicle_status, pickup_location, dropoff_location, gst_enabled, status
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+    user_id, room_id, check_in_date, check_out_date, guest_count,
+    total_price, taxable_amount, gst_amount, final_total, total_amount,
+    discount_applied, discount_amount,
+    advance_amount, advance_paid, balance_paid, remaining_amount,
+    payment_status, payment_id, advance_payment_id, advance_order_id,
+    payment_method, booking_source, vehicle_type, vehicle_price,
+    vehicle_status, pickup_location, dropoff_location, gst_enabled, gst_number, status
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
         [
           userId,
           room_id,
@@ -3221,6 +3304,7 @@ app.post(
           pickup_location || null,
           dropoff_location || null,
           amounts.gstEnabled ? 1 : 0,
+          gstNumber,
         ],
       );
 
@@ -3228,7 +3312,10 @@ app.post(
       loadBookingForInvoice(bookingId)
         .then((booking) => booking && sendAdvanceInvoiceEmail(booking))
         .catch((emailErr) =>
-          console.error("Manual booking invoice email error:", emailErr.message),
+          console.error(
+            "Manual booking invoice email error:",
+            emailErr.message,
+          ),
         );
 
       res.status(201).json({
@@ -3379,7 +3466,8 @@ function outstandingBalance(booking) {
       (totalAmount -
         advancePaid -
         currentBalancePaid -
-        (discountAlreadyInTotal ? 0 : checkoutDiscountImpact)) * 100,
+        (discountAlreadyInTotal ? 0 : checkoutDiscountImpact)) *
+        100,
     ) / 100,
   );
 
@@ -3397,47 +3485,53 @@ function outstandingBalance(booking) {
  * The amount is computed server-side from the booking, never taken from the
  * request, so the browser cannot ask to be charged less than is owed.
  */
-app.post("/api/bookings/:id/balance-order", requireManager, async (req, res, next) => {
-  try {
-    await ensurePaymentColumns();
-    const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
-      req.params.id,
-    ]);
-    if (!rows.length) return res.status(404).json({ error: "Booking not found" });
-    const booking = rows[0];
+app.post(
+  "/api/bookings/:id/balance-order",
+  requireManager,
+  async (req, res, next) => {
+    try {
+      await ensurePaymentColumns();
+      const [rows] = await db.query(
+        "SELECT * FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      if (!rows.length)
+        return res.status(404).json({ error: "Booking not found" });
+      const booking = rows[0];
 
-    if (booking.status === "cancelled") {
-      return res
-        .status(400)
-        .json({ error: "Cannot collect payment on a cancelled booking" });
+      if (booking.status === "cancelled") {
+        return res
+          .status(400)
+          .json({ error: "Cannot collect payment on a cancelled booking" });
+      }
+
+      const { remaining } = outstandingBalance(booking);
+      if (remaining <= 0) {
+        return res.status(400).json({ error: "Nothing left to pay" });
+      }
+
+      const order = await razorpay.orders.create({
+        amount: Math.round(remaining * 100),
+        currency: "INR",
+        receipt: `BAL-${req.params.id}-${Date.now()}`,
+        notes: {
+          booking_id: String(req.params.id),
+          purpose: "balance",
+          collected_by: String(req.user.user_id),
+        },
+      });
+
+      res.json({
+        razorpay_key: process.env.RAZORPAY_KEY_ID,
+        order_id: order.id,
+        currency: order.currency,
+        amount: remaining,
+      });
+    } catch (err) {
+      next(err);
     }
-
-    const { remaining } = outstandingBalance(booking);
-    if (remaining <= 0) {
-      return res.status(400).json({ error: "Nothing left to pay" });
-    }
-
-    const order = await razorpay.orders.create({
-      amount: Math.round(remaining * 100),
-      currency: "INR",
-      receipt: `BAL-${req.params.id}-${Date.now()}`,
-      notes: {
-        booking_id: String(req.params.id),
-        purpose: "balance",
-        collected_by: String(req.user.user_id),
-      },
-    });
-
-    res.json({
-      razorpay_key: process.env.RAZORPAY_KEY_ID,
-      order_id: order.id,
-      currency: order.currency,
-      amount: remaining,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
+  },
+);
 
 /*
  * ONLINE BALANCE — step 2: verify the signature, then settle the booking.
@@ -3445,73 +3539,81 @@ app.post("/api/bookings/:id/balance-order", requireManager, async (req, res, nex
  * Nothing is written until the signature checks out, so a failed or abandoned
  * payment can never mark a booking as paid.
  */
-app.post("/api/bookings/:id/balance-verify", requireManager, async (req, res, next) => {
-  try {
-    await ensurePaymentColumns();
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
-      req.body || {};
+app.post(
+  "/api/bookings/:id/balance-verify",
+  requireManager,
+  async (req, res, next) => {
+    try {
+      await ensurePaymentColumns();
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+        req.body || {};
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({ error: "Missing payment details" });
-    }
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return res.status(400).json({ error: "Missing payment details" });
+      }
 
-    const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest("hex");
-    if (expectedSignature !== razorpay_signature) {
-      return res.status(400).json({ error: "Payment verification failed" });
-    }
+      const expectedSignature = crypto
+        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest("hex");
+      if (expectedSignature !== razorpay_signature) {
+        return res.status(400).json({ error: "Payment verification failed" });
+      }
 
-    const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
-      req.params.id,
-    ]);
-    if (!rows.length) return res.status(404).json({ error: "Booking not found" });
-    const booking = rows[0];
+      const [rows] = await db.query(
+        "SELECT * FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      if (!rows.length)
+        return res.status(404).json({ error: "Booking not found" });
+      const booking = rows[0];
 
-    // The order must belong to THIS booking, otherwise a payment for one
-    // stay could be replayed to settle another.
-    const paidOrder = await razorpay.orders.fetch(razorpay_order_id);
-    if (String(paidOrder.notes?.booking_id || "") !== String(req.params.id)) {
-      return res
-        .status(400)
-        .json({ error: "This payment belongs to a different booking" });
-    }
+      // The order must belong to THIS booking, otherwise a payment for one
+      // stay could be replayed to settle another.
+      const paidOrder = await razorpay.orders.fetch(razorpay_order_id);
+      if (String(paidOrder.notes?.booking_id || "") !== String(req.params.id)) {
+        return res
+          .status(400)
+          .json({ error: "This payment belongs to a different booking" });
+      }
 
-    // An order exists from the moment it is created. Only a paid one settles
-    // a booking.
-    if (paidOrder.status !== "paid") {
-      return res
-        .status(400)
-        .json({ error: "This payment has not completed" });
-    }
+      // An order exists from the moment it is created. Only a paid one settles
+      // a booking.
+      if (paidOrder.status !== "paid") {
+        return res
+          .status(400)
+          .json({ error: "This payment has not completed" });
+      }
 
-    /*
-     * REPLAY PROTECTION.
-     *
-     * A double-click, a browser retry or a resent request would otherwise run
-     * this handler twice and add the same money to balance_paid each time,
-     * leaving the booking showing more collected than the guest ever paid.
-     * The order id is recorded on the booking, so a repeat is recognised and
-     * answered with the result of the first run.
-     */
-    if (String(booking.balance_order_id || "") === String(razorpay_order_id)) {
-      return res.json({
-        message: "Balance already collected",
-        balance_paid: Number(booking.balance_paid || 0),
-        payment_id: booking.balance_payment_id,
-        payment_status: "PAID",
-        duplicate: true,
-      });
-    }
+      /*
+       * REPLAY PROTECTION.
+       *
+       * A double-click, a browser retry or a resent request would otherwise run
+       * this handler twice and add the same money to balance_paid each time,
+       * leaving the booking showing more collected than the guest ever paid.
+       * The order id is recorded on the booking, so a repeat is recognised and
+       * answered with the result of the first run.
+       */
+      if (
+        String(booking.balance_order_id || "") === String(razorpay_order_id)
+      ) {
+        return res.json({
+          message: "Balance already collected",
+          balance_paid: Number(booking.balance_paid || 0),
+          payment_id: booking.balance_payment_id,
+          payment_status: "PAID",
+          duplicate: true,
+        });
+      }
 
-    const { currentBalancePaid } = outstandingBalance(booking);
-    const amountPaid = Math.round(Number(paidOrder.amount) / 100 * 100) / 100;
-    const newBalancePaid =
-      Math.round((currentBalancePaid + amountPaid) * 100) / 100;
+      const { currentBalancePaid } = outstandingBalance(booking);
+      const amountPaid =
+        Math.round((Number(paidOrder.amount) / 100) * 100) / 100;
+      const newBalancePaid =
+        Math.round((currentBalancePaid + amountPaid) * 100) / 100;
 
-    await db.query(
-      `UPDATE bookings
+      await db.query(
+        `UPDATE bookings
           SET balance_paid = ?,
               remaining_amount = 0,
               payment_status = 'PAID',
@@ -3522,51 +3624,57 @@ app.post("/api/bookings/:id/balance-verify", requireManager, async (req, res, ne
               advance_payment_mode = COALESCE(advance_payment_mode, payment_method),
               advance_paid_at = COALESCE(advance_paid_at, created_at)
         WHERE booking_id = ?`,
-      [
-        newBalancePaid,
-        String(req.body?.payment_mode || "Online Payment").slice(0, 40),
-        razorpay_payment_id,
-        razorpay_order_id,
-        req.params.id,
-      ],
-    );
+        [
+          newBalancePaid,
+          String(req.body?.payment_mode || "Online Payment").slice(0, 40),
+          razorpay_payment_id,
+          razorpay_order_id,
+          req.params.id,
+        ],
+      );
 
-    res.json({
-      message: "Balance collected",
-      balance_paid: newBalancePaid,
-      amount_paid: amountPaid,
-      payment_id: razorpay_payment_id,
-      payment_status: "PAID",
-    });
-  } catch (err) {
-    next(err);
-  }
-});
+      res.json({
+        message: "Balance collected",
+        balance_paid: newBalancePaid,
+        amount_paid: amountPaid,
+        payment_id: razorpay_payment_id,
+        payment_status: "PAID",
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
-app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => {
-  try {
-    await ensurePaymentColumns();
+app.patch(
+  "/api/bookings/:id/balance-paid",
+  requireManager,
+  async (req, res) => {
+    try {
+      await ensurePaymentColumns();
 
-    const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
-      req.params.id,
-    ]);
-    if (!rows.length) return res.status(404).json({ error: "Booking not found" });
+      const [rows] = await db.query(
+        "SELECT * FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      if (!rows.length)
+        return res.status(404).json({ error: "Booking not found" });
 
-    const booking = rows[0];
+      const booking = rows[0];
 
-    // Same helper the online balance routes use, so a cash settlement and a
-    // Razorpay settlement can never disagree about what was owed. This block
-    // used to be a copy of that logic and had already started to drift.
-    const { currentBalancePaid, remaining } = outstandingBalance(booking);
-    const newBalancePaid =
-      Math.round((currentBalancePaid + remaining) * 100) / 100;
+      // Same helper the online balance routes use, so a cash settlement and a
+      // Razorpay settlement can never disagree about what was owed. This block
+      // used to be a copy of that logic and had already started to drift.
+      const { currentBalancePaid, remaining } = outstandingBalance(booking);
+      const newBalancePaid =
+        Math.round((currentBalancePaid + remaining) * 100) / 100;
 
-    // how the balance was collected — the time is stamped by MySQL itself so
-    // there is no driver or timezone conversion to get wrong
-    const balanceMode = String(req.body?.payment_mode || "Cash").slice(0, 40);
+      // how the balance was collected — the time is stamped by MySQL itself so
+      // there is no driver or timezone conversion to get wrong
+      const balanceMode = String(req.body?.payment_mode || "Cash").slice(0, 40);
 
-    await db.query(
-      `UPDATE bookings
+      await db.query(
+        `UPDATE bookings
           SET balance_paid = ?,
               remaining_amount = 0,
               payment_status = 'PAID',
@@ -3575,141 +3683,152 @@ app.patch("/api/bookings/:id/balance-paid", requireManager, async (req, res) => 
               advance_payment_mode = COALESCE(advance_payment_mode, payment_method),
               advance_paid_at = COALESCE(advance_paid_at, created_at)
         WHERE booking_id = ?`,
-      [newBalancePaid, balanceMode, req.params.id],
-    );
+        [newBalancePaid, balanceMode, req.params.id],
+      );
 
-    const [saved] = await db.query(
-      `SELECT balance_paid, balance_payment_mode, balance_paid_at,
+      const [saved] = await db.query(
+        `SELECT balance_paid, balance_payment_mode, balance_paid_at,
               advance_payment_mode, advance_paid_at
          FROM bookings WHERE booking_id=?`,
-      [req.params.id],
-    );
-    const row = saved[0] || {};
-
-    // if the timestamp came back null the column is missing — the migration
-    // did not run, which almost always means the server was not restarted
-    if (!row.balance_paid_at) {
-      console.warn(
-        `⚠ balance_paid_at did not persist for booking ${req.params.id}. ` +
-          `Restart the backend so runMigrations() adds the split-payment columns.`,
+        [req.params.id],
       );
-    }
+      const row = saved[0] || {};
 
-    res.json({
-      message: "Balance marked as paid",
-      totalAmount: Number(booking.total_amount || booking.final_total || 0),
-      advancePaid: Number(booking.advance_paid || 0),
-      balancePaid: newBalancePaid,
-      balancePaymentMode: row.balance_payment_mode || balanceMode,
-      balancePaidAt: row.balance_paid_at || null,
-      persisted: Boolean(row.balance_paid_at),
-      remainingAmount: 0,
-      paymentStatus: "PAID",
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res, next) => {
-  try {
-    await ensurePaymentColumns();
+      // if the timestamp came back null the column is missing — the migration
+      // did not run, which almost always means the server was not restarted
+      if (!row.balance_paid_at) {
+        console.warn(
+          `⚠ balance_paid_at did not persist for booking ${req.params.id}. ` +
+            `Restart the backend so runMigrations() adds the split-payment columns.`,
+        );
+      }
 
-    const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
-      req.params.id,
-    ]);
-    if (!rows.length) return res.status(404).json({ error: "Booking not found" });
-    const booking = rows[0];
-
-    if (booking.status === "cancelled") {
-      return res
-        .status(400)
-        .json({ error: "Cannot apply a checkout discount to a cancelled booking" });
-    }
-
-    const requestedDiscount =
-      Math.round(Number(req.body?.checkout_discount_amount || 0) * 100) / 100;
-    if (!Number.isFinite(requestedDiscount) || requestedDiscount < 0) {
-      return res.status(400).json({ error: "Enter a valid discount amount" });
-    }
-
-    // PRE-TAX DISCOUNT MODEL (same as the booking-time discount).
-    // The checkout discount reduces the room's taxable value, then GST is
-    // recalculated on the lower amount. A Rs.500 discount therefore reduces
-    // what the guest owes by Rs.500 x 1.18 = Rs.590, because the Rs.90 of GST
-    // that was charged on that Rs.500 is no longer due.
-    const roomSubtotal = Number(booking.total_price || 0);
-    const originalDiscount =
-      Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
-    const discountedRoomBase = Math.max(0, roomSubtotal - originalDiscount);
-
-    // add-on charges are taxed too and are never touched by a room discount
-    const addonCharges = Number(booking.addon_charges || 0);
-
-    // The discount can only wipe out the room's remaining taxable value.
-    if (requestedDiscount > discountedRoomBase) {
-      return res.status(400).json({
-        error: `Checkout discount cannot exceed the room amount of Rs.${discountedRoomBase}`,
+      res.json({
+        message: "Balance marked as paid",
+        totalAmount: Number(booking.total_amount || booking.final_total || 0),
+        advancePaid: Number(booking.advance_paid || 0),
+        balancePaid: newBalancePaid,
+        balancePaymentMode: row.balance_payment_mode || balanceMode,
+        balancePaidAt: row.balance_paid_at || null,
+        persisted: Boolean(row.balance_paid_at),
+        remainingAmount: 0,
+        paymentStatus: "PAID",
       });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
+  },
+);
+app.patch(
+  "/api/bookings/:id/checkout-discount",
+  requireManager,
+  async (req, res, next) => {
+    try {
+      await ensurePaymentColumns();
 
-    const advancePaid = Number(booking.advance_paid || 0);
-    const balancePaid = Number(booking.balance_paid || 0);
+      const [rows] = await db.query(
+        "SELECT * FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      if (!rows.length)
+        return res.status(404).json({ error: "Booking not found" });
+      const booking = rows[0];
 
-    // Recompute the whole bill from the original figures every time, so a
-    // repeat call replaces the previous checkout discount instead of stacking.
-    //
-    // newRoomTaxable is the ROOM value only. The taxable_amount column means
-    // "room value after discount" everywhere else — booking creation stores
-    // base_price there — and every caller of roomTaxableValue() adds the
-    // add-on total on top. Storing room+add-ons here made those callers count
-    // the add-ons twice as soon as a checkout discount existed.
-    const newRoomTaxable = Math.max(
-      0,
-      Math.round((discountedRoomBase - requestedDiscount) * 100) / 100,
-    );
-    const newTaxable = Math.round((newRoomTaxable + addonCharges) * 100) / 100;
-    const newGst = Math.round(newTaxable * GST_RATE * 100) / 100;
+      if (booking.status === "cancelled") {
+        return res
+          .status(400)
+          .json({
+            error: "Cannot apply a checkout discount to a cancelled booking",
+          });
+      }
 
-    // ADDITIONAL: unchanged calculation above; the tax is dropped only for a
-    // booking issued with GST off, so a discount there stays one-for-one.
-    const gstOff = isGstDisabled(booking);
-    const chargedGst = gstOff ? 0 : newGst;
+      const requestedDiscount =
+        Math.round(Number(req.body?.checkout_discount_amount || 0) * 100) / 100;
+      if (!Number.isFinite(requestedDiscount) || requestedDiscount < 0) {
+        return res.status(400).json({ error: "Enter a valid discount amount" });
+      }
 
-    const newTotal = Math.round((newTaxable + chargedGst) * 100) / 100;
+      // PRE-TAX DISCOUNT MODEL (same as the booking-time discount).
+      // The checkout discount reduces the room's taxable value, then GST is
+      // recalculated on the lower amount. A Rs.500 discount therefore reduces
+      // what the guest owes by Rs.500 x 1.18 = Rs.590, because the Rs.90 of GST
+      // that was charged on that Rs.500 is no longer due.
+      const roomSubtotal = Number(booking.total_price || 0);
+      const originalDiscount =
+        Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
+      const discountedRoomBase = Math.max(0, roomSubtotal - originalDiscount);
 
-    // what the bill was before this discount, for the response/audit trail
-    const baseTaxable =
-      Math.round((discountedRoomBase + addonCharges) * 100) / 100;
-    const baseTotal = gstOff
-      ? Math.round(baseTaxable * 100) / 100
-      : Math.round(baseTaxable * (1 + GST_RATE) * 100) / 100;
-    const baseRemaining = Math.max(
-      0,
-      Math.round((baseTotal - advancePaid - balancePaid) * 100) / 100,
-    );
+      // add-on charges are taxed too and are never touched by a room discount
+      const addonCharges = Number(booking.addon_charges || 0);
 
-    const discountGst = gstOff
-      ? 0
-      : Math.round(requestedDiscount * GST_RATE * 100) / 100;
-    const discountTotalImpact =
-      Math.round((requestedDiscount + discountGst) * 100) / 100;
+      // The discount can only wipe out the room's remaining taxable value.
+      if (requestedDiscount > discountedRoomBase) {
+        return res.status(400).json({
+          error: `Checkout discount cannot exceed the room amount of Rs.${discountedRoomBase}`,
+        });
+      }
 
-    if (discountTotalImpact > baseRemaining) {
-      return res.status(400).json({
-        error: `Discount of Rs.${requestedDiscount} (Rs.${discountTotalImpact} with GST) exceeds the outstanding balance of Rs.${baseRemaining}`,
-      });
-    }
+      const advancePaid = Number(booking.advance_paid || 0);
+      const balancePaid = Number(booking.balance_paid || 0);
 
-    const newRemaining = Math.max(
-      0,
-      Math.round((newTotal - advancePaid - balancePaid) * 100) / 100,
-    );
+      // Recompute the whole bill from the original figures every time, so a
+      // repeat call replaces the previous checkout discount instead of stacking.
+      //
+      // newRoomTaxable is the ROOM value only. The taxable_amount column means
+      // "room value after discount" everywhere else — booking creation stores
+      // base_price there — and every caller of roomTaxableValue() adds the
+      // add-on total on top. Storing room+add-ons here made those callers count
+      // the add-ons twice as soon as a checkout discount existed.
+      const newRoomTaxable = Math.max(
+        0,
+        Math.round((discountedRoomBase - requestedDiscount) * 100) / 100,
+      );
+      const newTaxable =
+        Math.round((newRoomTaxable + addonCharges) * 100) / 100;
+      const newGst = Math.round(newTaxable * GST_RATE * 100) / 100;
 
-    const reason = req.body?.reason ? String(req.body.reason).slice(0, 255) : null;
-    const applied = requestedDiscount > 0;
+      // ADDITIONAL: unchanged calculation above; the tax is dropped only for a
+      // booking issued with GST off, so a discount there stays one-for-one.
+      const gstOff = isGstDisabled(booking);
+      const chargedGst = gstOff ? 0 : newGst;
 
-    await db.query(
-      `UPDATE bookings
+      const newTotal = Math.round((newTaxable + chargedGst) * 100) / 100;
+
+      // what the bill was before this discount, for the response/audit trail
+      const baseTaxable =
+        Math.round((discountedRoomBase + addonCharges) * 100) / 100;
+      const baseTotal = gstOff
+        ? Math.round(baseTaxable * 100) / 100
+        : Math.round(baseTaxable * (1 + GST_RATE) * 100) / 100;
+      const baseRemaining = Math.max(
+        0,
+        Math.round((baseTotal - advancePaid - balancePaid) * 100) / 100,
+      );
+
+      const discountGst = gstOff
+        ? 0
+        : Math.round(requestedDiscount * GST_RATE * 100) / 100;
+      const discountTotalImpact =
+        Math.round((requestedDiscount + discountGst) * 100) / 100;
+
+      if (discountTotalImpact > baseRemaining) {
+        return res.status(400).json({
+          error: `Discount of Rs.${requestedDiscount} (Rs.${discountTotalImpact} with GST) exceeds the outstanding balance of Rs.${baseRemaining}`,
+        });
+      }
+
+      const newRemaining = Math.max(
+        0,
+        Math.round((newTotal - advancePaid - balancePaid) * 100) / 100,
+      );
+
+      const reason = req.body?.reason
+        ? String(req.body.reason).slice(0, 255)
+        : null;
+      const applied = requestedDiscount > 0;
+
+      await db.query(
+        `UPDATE bookings
           SET checkout_discount_applied = ?,
               checkout_discount_amount = ?,
               checkout_discount_reason = ?,
@@ -3722,43 +3841,46 @@ app.patch("/api/bookings/:id/checkout-discount", requireManager, async (req, res
               remaining_amount = ?,
               payment_status = ?
         WHERE booking_id = ?`,
-      [
-        applied ? 1 : 0,
-        requestedDiscount,
-        applied ? reason : null,
-        applied ? new Date() : null,
-        applied ? req.user.user_id : null,
-        // room-only, matching what booking creation stores in this column
-        newRoomTaxable,
-        chargedGst,
-        newTotal,
-        newTotal,
-        newRemaining,
-        newRemaining > 0 ? "PARTIALLY_PAID" : "PAID",
-        req.params.id,
-      ],
-    );
+        [
+          applied ? 1 : 0,
+          requestedDiscount,
+          applied ? reason : null,
+          applied ? new Date() : null,
+          applied ? req.user.user_id : null,
+          // room-only, matching what booking creation stores in this column
+          newRoomTaxable,
+          chargedGst,
+          newTotal,
+          newTotal,
+          newRemaining,
+          newRemaining > 0 ? "PARTIALLY_PAID" : "PAID",
+          req.params.id,
+        ],
+      );
 
-    res.json({
-      message: applied ? "Checkout discount applied" : "Checkout discount removed",
-      checkout_discount_applied: applied,
-      checkout_discount_amount: requestedDiscount,
-      checkout_discount_gst: discountGst,
-      checkout_discount_total_impact: discountTotalImpact,
-      roomTaxableAmount: newRoomTaxable,
-      taxableAmount: newTaxable,
-      gstAmount: chargedGst,
-      totalAmount: newTotal,
-      advancePaid,
-      balancePaid,
-      baseRemaining,
-      remainingAmount: newRemaining,
-      paymentStatus: newRemaining > 0 ? "PARTIALLY_PAID" : "PAID",
-    });
-  } catch (err) {
-    next(err);
-  }
-});
+      res.json({
+        message: applied
+          ? "Checkout discount applied"
+          : "Checkout discount removed",
+        checkout_discount_applied: applied,
+        checkout_discount_amount: requestedDiscount,
+        checkout_discount_gst: discountGst,
+        checkout_discount_total_impact: discountTotalImpact,
+        roomTaxableAmount: newRoomTaxable,
+        taxableAmount: newTaxable,
+        gstAmount: chargedGst,
+        totalAmount: newTotal,
+        advancePaid,
+        balancePaid,
+        baseRemaining,
+        remainingAmount: newRemaining,
+        paymentStatus: newRemaining > 0 ? "PARTIALLY_PAID" : "PAID",
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 // ── shared check-in detail persistence ───────────────────────────────────────
 // Creates the table on demand so a missed migration can never silently drop
 // the guest list, and returns what was actually written so the caller can
@@ -3805,11 +3927,15 @@ async function saveCheckinDetails(bookingId, body = {}) {
   );
 
   if (Array.isArray(guests)) {
-    await db.query("DELETE FROM booking_guests WHERE booking_id=?", [bookingId]);
+    await db.query("DELETE FROM booking_guests WHERE booking_id=?", [
+      bookingId,
+    ]);
     for (const g of guests) {
       if (!g || !String(g.name || "").trim()) continue;
       const age =
-        g.age === undefined || g.age === null || g.age === "" ? null : Number(g.age);
+        g.age === undefined || g.age === null || g.age === ""
+          ? null
+          : Number(g.age);
       await db.query(
         `INSERT INTO booking_guests (booking_id, guest_type, name, age, gender)
          VALUES (?,?,?,?,?)`,
@@ -3834,28 +3960,32 @@ async function saveCheckinDetails(bookingId, body = {}) {
 // One-off repair: bookings settled before the tracking columns existed have a
 // balance amount but no mode or date. Fill those from the best evidence we have
 // so the invoice and summary stop showing a dash.
-app.patch("/api/admin/backfill-payment-dates", requireAdmin, async (req, res) => {
-  try {
-    await ensurePaymentColumns();
+app.patch(
+  "/api/admin/backfill-payment-dates",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      await ensurePaymentColumns();
 
-    const [result] = await db.query(
-      `UPDATE bookings
+      const [result] = await db.query(
+        `UPDATE bookings
           SET balance_payment_mode = COALESCE(balance_payment_mode, checkin_payment_mode, payment_method),
               balance_paid_at      = COALESCE(balance_paid_at, actual_checkin, created_at),
               advance_payment_mode = COALESCE(advance_payment_mode, payment_method),
               advance_paid_at      = COALESCE(advance_paid_at, created_at)
         WHERE balance_paid > 0
           AND (balance_paid_at IS NULL OR balance_payment_mode IS NULL)`,
-    );
+      );
 
-    res.json({
-      message: "Backfilled payment details on older bookings",
-      updated: result.affectedRows,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json({
+        message: "Backfilled payment details on older bookings",
+        updated: result.affectedRows,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 app.patch("/api/bookings/:id/checkin", requireAdmin, async (req, res) => {
   try {
@@ -4192,7 +4322,8 @@ app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
     // the room silently frees up while it is actually occupied
     if (bk.actual_checkin && !bk.actual_checkout) {
       return res.status(400).json({
-        error: "This guest is still checked in. Record check-out before deleting.",
+        error:
+          "This guest is still checked in. Record check-out before deleting.",
       });
     }
 
@@ -4275,9 +4406,7 @@ app.patch("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
     }
     if (req.body.price_double !== undefined) {
       fields.push("price_double=?");
-      values.push(
-        req.body.price_double === "" ? null : req.body.price_double,
-      );
+      values.push(req.body.price_double === "" ? null : req.body.price_double);
     }
     if (description !== undefined) {
       fields.push("description=?");
@@ -4336,196 +4465,208 @@ const BLOCK_REASONS = {
   other: "Other",
 };
 
-app.post("/api/admin/rooms/:id/blocked-dates", requireAdmin, async (req, res) => {
-  try {
-    const roomId = req.params.id;
-    const dates = Array.isArray(req.body.dates) ? req.body.dates : [];
-    const validDates = [...new Set(dates)]
-      .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date)))
-      .sort();
+app.post(
+  "/api/admin/rooms/:id/blocked-dates",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const roomId = req.params.id;
+      const dates = Array.isArray(req.body.dates) ? req.body.dates : [];
+      const validDates = [...new Set(dates)]
+        .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date)))
+        .sort();
 
-    if (!validDates.length) {
-      return res.status(400).json({ error: "Select at least one valid date" });
-    }
-
-    const reasonKey = String(req.body.reason || "maintenance").toLowerCase();
-    if (!BLOCK_REASONS[reasonKey]) {
-      return res.status(400).json({ error: "Select a valid block reason" });
-    }
-    const reasonLabel = BLOCK_REASONS[reasonKey];
-    const note = req.body.note ? String(req.body.note).slice(0, 255) : null;
-
-    let bookingId = null;
-
-    /*
-     * A bulk booking is a real stay, not just a maintenance hold, so it gets
-     * a booking row and shows up in the Bookings tab like any other. The
-     * guest name is required; the rest is optional because these are usually
-     * taken over the phone.
-     */
-    if (reasonKey === "bulk") {
-      const guestName = String(req.body.guest_name || "").trim();
-      if (!guestName) {
+      if (!validDates.length) {
         return res
           .status(400)
-          .json({ error: "Guest or company name is required for a bulk booking" });
+          .json({ error: "Select at least one valid date" });
       }
 
-      const [roomRows] = await db.query(
-        "SELECT * FROM rooms WHERE room_id=?",
-        [roomId],
-      );
-      if (!roomRows.length)
-        return res.status(404).json({ error: "Room not found" });
-      const room = roomRows[0];
-
-      // the block covers each night; check-out is the morning after the last
-      const checkIn = validDates[0];
-      const lastNight = new Date(validDates[validDates.length - 1]);
-      lastNight.setDate(lastNight.getDate() + 1);
-      const checkOut = `${lastNight.getFullYear()}-${String(
-        lastNight.getMonth() + 1,
-      ).padStart(2, "0")}-${String(lastNight.getDate()).padStart(2, "0")}`;
-
-      const nights = validDates.length;
-      const guests = Math.max(1, Number(req.body.guest_count) || 1);
-      const nightlyRate = resolveNightlyRate(room, guests);
-      const roomSubtotal =
-        req.body.total_amount !== undefined && req.body.total_amount !== ""
-          ? Math.max(0, Number(req.body.total_amount))
-          : nightlyRate * nights;
-      const gstAmount = Math.round(roomSubtotal * GST_RATE * 100) / 100;
-      const totalAmount = Math.round((roomSubtotal + gstAmount) * 100) / 100;
-
-      // reuse an account when the email is known, otherwise make a placeholder
-      let userId;
-      if (req.body.email) {
-        userId = await findOrCreateGuestUser({
-          name: guestName,
-          email: req.body.email,
-          phone: req.body.phone,
-        });
-      } else {
-        const placeholderEmail = `bulk-${Date.now()}@vvgrandpark.local`;
-        const hashed = await bcrypt.hash(
-          crypto.randomBytes(12).toString("hex"),
-          12,
-        );
-        const [u] = await db.query(
-          "INSERT INTO users (name,email,password,phone,role) VALUES (?,?,?,?,'guest')",
-          [guestName, placeholderEmail, hashed, req.body.phone || null],
-        );
-        userId = u.insertId;
+      const reasonKey = String(req.body.reason || "maintenance").toLowerCase();
+      if (!BLOCK_REASONS[reasonKey]) {
+        return res.status(400).json({ error: "Select a valid block reason" });
       }
+      const reasonLabel = BLOCK_REASONS[reasonKey];
+      const note = req.body.note ? String(req.body.note).slice(0, 255) : null;
 
-      const [result] = await db.query(
-        `INSERT INTO bookings
+      let bookingId = null;
+
+      /*
+       * A bulk booking is a real stay, not just a maintenance hold, so it gets
+       * a booking row and shows up in the Bookings tab like any other. The
+       * guest name is required; the rest is optional because these are usually
+       * taken over the phone.
+       */
+      if (reasonKey === "bulk") {
+        const guestName = String(req.body.guest_name || "").trim();
+        if (!guestName) {
+          return res
+            .status(400)
+            .json({
+              error: "Guest or company name is required for a bulk booking",
+            });
+        }
+
+        const [roomRows] = await db.query(
+          "SELECT * FROM rooms WHERE room_id=?",
+          [roomId],
+        );
+        if (!roomRows.length)
+          return res.status(404).json({ error: "Room not found" });
+        const room = roomRows[0];
+
+        // the block covers each night; check-out is the morning after the last
+        const checkIn = validDates[0];
+        const lastNight = new Date(validDates[validDates.length - 1]);
+        lastNight.setDate(lastNight.getDate() + 1);
+        const checkOut = `${lastNight.getFullYear()}-${String(
+          lastNight.getMonth() + 1,
+        ).padStart(2, "0")}-${String(lastNight.getDate()).padStart(2, "0")}`;
+
+        const nights = validDates.length;
+        const guests = Math.max(1, Number(req.body.guest_count) || 1);
+        const nightlyRate = resolveNightlyRate(room, guests);
+        const roomSubtotal =
+          req.body.total_amount !== undefined && req.body.total_amount !== ""
+            ? Math.max(0, Number(req.body.total_amount))
+            : nightlyRate * nights;
+        const gstAmount = Math.round(roomSubtotal * GST_RATE * 100) / 100;
+        const totalAmount = Math.round((roomSubtotal + gstAmount) * 100) / 100;
+
+        // reuse an account when the email is known, otherwise make a placeholder
+        let userId;
+        if (req.body.email) {
+          userId = await findOrCreateGuestUser({
+            name: guestName,
+            email: req.body.email,
+            phone: req.body.phone,
+          });
+        } else {
+          const placeholderEmail = `bulk-${Date.now()}@vvgrandpark.local`;
+          const hashed = await bcrypt.hash(
+            crypto.randomBytes(12).toString("hex"),
+            12,
+          );
+          const [u] = await db.query(
+            "INSERT INTO users (name,email,password,phone,role) VALUES (?,?,?,?,'guest')",
+            [guestName, placeholderEmail, hashed, req.body.phone || null],
+          );
+          userId = u.insertId;
+        }
+
+        const [result] = await db.query(
+          `INSERT INTO bookings
           (user_id, room_id, check_in_date, check_out_date, guest_count,
            total_price, taxable_amount, gst_amount, final_total, total_amount,
            advance_paid, balance_paid, remaining_amount, payment_status,
            payment_method, booking_source, vehicle_type, vehicle_price,
            notes, status)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'confirmed')`,
-        [
-          userId,
-          roomId,
-          checkIn,
-          checkOut,
-          guests,
-          roomSubtotal,
-          roomSubtotal,
-          gstAmount,
-          totalAmount,
-          totalAmount,
-          0,
-          0,
-          totalAmount,
-          "PENDING",
-          "Bulk Booking",
-          "BULK_BOOKING",
-          "none",
-          0,
-          note || `Bulk booking — ${guestName}`,
-        ],
-      );
-      bookingId = result.insertId;
-    }
+          [
+            userId,
+            roomId,
+            checkIn,
+            checkOut,
+            guests,
+            roomSubtotal,
+            roomSubtotal,
+            gstAmount,
+            totalAmount,
+            totalAmount,
+            0,
+            0,
+            totalAmount,
+            "PENDING",
+            "Bulk Booking",
+            "BULK_BOOKING",
+            "none",
+            0,
+            note || `Bulk booking — ${guestName}`,
+          ],
+        );
+        bookingId = result.insertId;
+      }
 
-    await db.query(
-      `INSERT INTO room_blocked_dates
+      await db.query(
+        `INSERT INTO room_blocked_dates
          (room_id, blocked_date, block_reason, block_note, booking_id)
        VALUES ${validDates.map(() => "(?,?,?,?,?)").join(",")}
        ON DUPLICATE KEY UPDATE
          block_reason = VALUES(block_reason),
          block_note   = VALUES(block_note),
          booking_id   = VALUES(booking_id)`,
-      validDates.flatMap((date) => [
-        roomId,
-        date,
-        reasonLabel,
-        note,
-        bookingId,
-      ]),
-    );
+        validDates.flatMap((date) => [
+          roomId,
+          date,
+          reasonLabel,
+          note,
+          bookingId,
+        ]),
+      );
 
-    res.json({
-      message:
-        reasonKey === "bulk"
-          ? "Bulk booking created and dates blocked"
-          : `Room dates blocked — ${reasonLabel}`,
-      reason: reasonLabel,
-      booking_id: bookingId,
-    });
-  } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
-  }
-});
-
-app.delete("/api/admin/rooms/:id/blocked-dates", requireAdmin, async (req, res) => {
-  try {
-    const dates = Array.isArray(req.body.dates) ? req.body.dates : [];
-    const validDates = [...new Set(dates)].filter((date) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(String(date)),
-    );
-    if (!validDates.length) {
-      return res.status(400).json({ error: "Select at least one date" });
+      res.json({
+        message:
+          reasonKey === "bulk"
+            ? "Bulk booking created and dates blocked"
+            : `Room dates blocked — ${reasonLabel}`,
+        reason: reasonLabel,
+        booking_id: bookingId,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
     }
-    // collect any bulk bookings tied to these dates before deleting the holds
-    const [linked] = await db.query(
-      `SELECT DISTINCT booking_id FROM room_blocked_dates
+  },
+);
+
+app.delete(
+  "/api/admin/rooms/:id/blocked-dates",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const dates = Array.isArray(req.body.dates) ? req.body.dates : [];
+      const validDates = [...new Set(dates)].filter((date) =>
+        /^\d{4}-\d{2}-\d{2}$/.test(String(date)),
+      );
+      if (!validDates.length) {
+        return res.status(400).json({ error: "Select at least one date" });
+      }
+      // collect any bulk bookings tied to these dates before deleting the holds
+      const [linked] = await db.query(
+        `SELECT DISTINCT booking_id FROM room_blocked_dates
         WHERE room_id=? AND booking_id IS NOT NULL
           AND blocked_date IN (${validDates.map(() => "?").join(",")})`,
-      [req.params.id, ...validDates],
-    );
-
-    await db.query(
-      `DELETE FROM room_blocked_dates WHERE room_id=? AND blocked_date IN (${validDates
-        .map(() => "?")
-        .join(",")})`,
-      [req.params.id, ...validDates],
-    );
-
-    // a bulk booking with no remaining blocked nights is no longer a stay
-    let removedBookings = 0;
-    for (const row of linked) {
-      const [[stillHeld]] = await db.query(
-        "SELECT COUNT(*) AS n FROM room_blocked_dates WHERE booking_id=?",
-        [row.booking_id],
+        [req.params.id, ...validDates],
       );
-      if (Number(stillHeld?.n || 0) === 0) {
-        await db.query(
-          "DELETE FROM bookings WHERE booking_id=? AND booking_source='BULK_BOOKING'",
+
+      await db.query(
+        `DELETE FROM room_blocked_dates WHERE room_id=? AND blocked_date IN (${validDates
+          .map(() => "?")
+          .join(",")})`,
+        [req.params.id, ...validDates],
+      );
+
+      // a bulk booking with no remaining blocked nights is no longer a stay
+      let removedBookings = 0;
+      for (const row of linked) {
+        const [[stillHeld]] = await db.query(
+          "SELECT COUNT(*) AS n FROM room_blocked_dates WHERE booking_id=?",
           [row.booking_id],
         );
-        removedBookings += 1;
+        if (Number(stillHeld?.n || 0) === 0) {
+          await db.query(
+            "DELETE FROM bookings WHERE booking_id=? AND booking_source='BULK_BOOKING'",
+            [row.booking_id],
+          );
+          removedBookings += 1;
+        }
       }
-    }
 
-    res.json({ message: "Room dates unblocked", removedBookings });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json({ message: "Room dates unblocked", removedBookings });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 app.delete("/api/admin/rooms/:id", requireAdmin, async (req, res, next) => {
   try {
@@ -4621,43 +4762,78 @@ app.get("/api/manager/bookings/:id", requireManager, async (req, res) => {
   }
 });
 
-app.patch("/api/manager/bookings/:id/vehicle", requireManager, async (req, res) => {
-  try {
-    const {
-      vehicle_type,
-      vehicle_price,
-      vehicle_status,
-      pickup_location,
-      dropoff_location,
-    } = req.body;
-    const validTypes = ["4-seater", "7-seater", "12-seater"];
-    const validStatuses = ["pending", "assigned", "picked_up", "completed", "cancelled"];
-    if (!validTypes.includes(vehicle_type))
-      return res.status(400).json({ error: "Invalid vehicle type" });
-    if (!validStatuses.includes(vehicle_status))
-      return res.status(400).json({ error: "Invalid vehicle status" });
-    if (!Number.isFinite(Number(vehicle_price)) || Number(vehicle_price) < 0)
-      return res.status(400).json({ error: "Invalid vehicle price" });
+app.patch(
+  "/api/manager/bookings/:id/vehicle",
+  requireManager,
+  async (req, res) => {
+    try {
+      const {
+        vehicle_type,
+        vehicle_price,
+        vehicle_status,
+        pickup_location,
+        dropoff_location,
+      } = req.body;
+      const validTypes = ["4-seater", "7-seater", "12-seater"];
+      const validStatuses = [
+        "pending",
+        "assigned",
+        "picked_up",
+        "completed",
+        "cancelled",
+      ];
+      if (!validTypes.includes(vehicle_type))
+        return res.status(400).json({ error: "Invalid vehicle type" });
+      if (!validStatuses.includes(vehicle_status))
+        return res.status(400).json({ error: "Invalid vehicle status" });
+      if (!Number.isFinite(Number(vehicle_price)) || Number(vehicle_price) < 0)
+        return res.status(400).json({ error: "Invalid vehicle price" });
 
-    const [rows] = await db.query(
-      "SELECT total_price, vehicle_price, addon_charges FROM bookings WHERE booking_id=? AND vehicle_type IS NOT NULL AND vehicle_type != 'none'",
-      [req.params.id],
-    );
-    if (!rows.length) return res.status(404).json({ error: "Vehicle booking not found" });
+      const [rows] = await db.query(
+        "SELECT total_price, vehicle_price, addon_charges FROM bookings WHERE booking_id=? AND vehicle_type IS NOT NULL AND vehicle_type != 'none'",
+        [req.params.id],
+      );
+      if (!rows.length)
+        return res.status(404).json({ error: "Vehicle booking not found" });
 
-    const roomSubtotal = Number(rows[0].total_price || 0) - Number(rows[0].vehicle_price || 0);
-    const updatedSubtotal = roomSubtotal + Number(vehicle_price);
-    const gstAmount = Math.round(updatedSubtotal * GST_RATE * 100) / 100;
-    const finalTotal = Math.round((updatedSubtotal + gstAmount + Number(rows[0].addon_charges || 0) * (1 + GST_RATE)) * 100) / 100;
-    await db.query(
-      "UPDATE bookings SET vehicle_type=?, vehicle_price=?, vehicle_status=?, pickup_location=?, dropoff_location=?, total_price=?, gst_amount=?, final_total=? WHERE booking_id=?",
-      [vehicle_type, Number(vehicle_price), vehicle_status, pickup_location || null, dropoff_location || null, updatedSubtotal, gstAmount, finalTotal, req.params.id],
-    );
-    res.json({ message: "Vehicle details updated", vehicle_price: Number(vehicle_price), vehicle_status, pickup_location, dropoff_location, final_total: finalTotal });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      const roomSubtotal =
+        Number(rows[0].total_price || 0) - Number(rows[0].vehicle_price || 0);
+      const updatedSubtotal = roomSubtotal + Number(vehicle_price);
+      const gstAmount = Math.round(updatedSubtotal * GST_RATE * 100) / 100;
+      const finalTotal =
+        Math.round(
+          (updatedSubtotal +
+            gstAmount +
+            Number(rows[0].addon_charges || 0) * (1 + GST_RATE)) *
+            100,
+        ) / 100;
+      await db.query(
+        "UPDATE bookings SET vehicle_type=?, vehicle_price=?, vehicle_status=?, pickup_location=?, dropoff_location=?, total_price=?, gst_amount=?, final_total=? WHERE booking_id=?",
+        [
+          vehicle_type,
+          Number(vehicle_price),
+          vehicle_status,
+          pickup_location || null,
+          dropoff_location || null,
+          updatedSubtotal,
+          gstAmount,
+          finalTotal,
+          req.params.id,
+        ],
+      );
+      res.json({
+        message: "Vehicle details updated",
+        vehicle_price: Number(vehicle_price),
+        vehicle_status,
+        pickup_location,
+        dropoff_location,
+        final_total: finalTotal,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 app.patch(
   "/api/manager/bookings/:id/checkin",
