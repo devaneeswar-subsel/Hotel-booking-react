@@ -2348,39 +2348,43 @@ const roomTotalWithGst = Math.max(
               icon={I.card}
               title="Payment"
             >
-              <Field label="Payment Method">
-                {locked ? (
-                  <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5">
-                    <span className="text-[0.8rem] font-semibold text-navy">
-                      {payMethod}
-                    </span>
+<Field label="Payment Method">
+  {/*
+    Payment method stays editable after check-in (same idea as
+    billing details). Only lock it once the stay is closed.
+  */}
+  {isCancelled || isCheckedOut ? (
+    <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5">
+      <span className="text-[0.8rem] font-semibold text-navy">
+        {payMethod}
+      </span>
 
-                    <span className="text-[0.66rem] text-gray-400">
-                      Locked
-                    </span>
-                  </div>
-                ) : (
-                  <select
-                    value={payMethod}
-                    onChange={(e) =>
-                      setPayMethod(
-                        e.target.value,
-                      )
-                    }
-                    className={inputCls}
-                  >
-                    {PAYMENT_METHODS.map(
-                      (m) => (
-                        <option
-                          key={m}
-                        >
-                          {m}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                )}
-              </Field>
+      <span className="text-[0.66rem] text-gray-400">
+        Locked
+      </span>
+    </div>
+  ) : (
+    <select
+      value={payMethod}
+      onChange={(e) =>
+        setPayMethod(
+          e.target.value,
+        )
+      }
+      className={inputCls}
+    >
+      {PAYMENT_METHODS.map(
+        (m) => (
+          <option
+            key={m}
+          >
+            {m}
+          </option>
+        ),
+      )}
+    </select>
+  )}
+</Field>
 
               {/* ── ORIGINAL BOOKING AMOUNT SUMMARY ───────────────────── */}
 
