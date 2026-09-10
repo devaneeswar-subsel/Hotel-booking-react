@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 // ─────────────────────────────────────────────────────────────
 // ICONS
 // ─────────────────────────────────────────────────────────────
-
+const GST_RATE = 0.12; // matches the backend's GST_RATE
 const IconBed = () => (
   <svg
     width="18"
@@ -461,8 +461,12 @@ export default function RoomDetail({
   }, [room?.image_url, extra]);
 
   const price = Number(room?.price_per_night || 0);
+  const gstAmount = Math.round(price * GST_RATE * 100) / 100;
+  const totalWithGst = Math.round((price + gstAmount) * 100) / 100;
 
   const formattedPrice = price.toLocaleString("en-IN");
+  const formattedGst = gstAmount.toLocaleString("en-IN");
+  const formattedTotal = totalWithGst.toLocaleString("en-IN");
 
   const capacity = Number(room?.capacity || 2);
 
@@ -691,7 +695,6 @@ export default function RoomDetail({
 
   return (
     <div className="min-h-screen bg-[var(--c-bg)] font-[var(--font-body)]">
-
       {/* ======================================================
           NAVBAR
       ====================================================== */}
@@ -711,7 +714,6 @@ export default function RoomDetail({
             px-4 sm:px-6 lg:px-[3%]
           "
         >
-
           {/* LOGO */}
 
           <button
@@ -780,9 +782,7 @@ export default function RoomDetail({
               <a
                 key={link.label}
                 href={link.href}
-                onClick={(event) =>
-                  handleSectionLink(event, link.id)
-                }
+                onClick={(event) => handleSectionLink(event, link.id)}
                 className="
                   whitespace-nowrap
                   px-0.5 py-1
@@ -816,9 +816,7 @@ export default function RoomDetail({
           >
             <a
               href="/#rooms"
-              onClick={(event) =>
-                handleSectionLink(event, "rooms")
-              }
+              onClick={(event) => handleSectionLink(event, "rooms")}
               className="
                 inline-flex
                 items-center
@@ -840,9 +838,7 @@ export default function RoomDetail({
                 hover:text-black
               "
             >
-              <span className="text-base leading-none">
-                ←
-              </span>
+              <span className="text-base leading-none">←</span>
 
               <span>Back to Rooms</span>
             </a>
@@ -865,9 +861,7 @@ export default function RoomDetail({
                 >
                   <IconUser />
 
-                  <span>
-                    {user.name?.split(" ")[0] || "User"}
-                  </span>
+                  <span>{user.name?.split(" ")[0] || "User"}</span>
                 </div>
 
                 <button
@@ -889,15 +883,9 @@ export default function RoomDetail({
                     hover:text-[var(--gold-light)]
                   "
                 >
-                  {user.role === "admin" ? (
-                    <IconSettings />
-                  ) : (
-                    <IconBooking />
-                  )}
+                  {user.role === "admin" ? <IconSettings /> : <IconBooking />}
 
-                  {user.role === "admin"
-                    ? "Admin Panel"
-                    : "My Bookings"}
+                  {user.role === "admin" ? "Admin Panel" : "My Bookings"}
                 </button>
               </>
             )}
@@ -907,13 +895,9 @@ export default function RoomDetail({
 
           <button
             type="button"
-            aria-label={
-              menuOpen ? "Close menu" : "Open menu"
-            }
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
             aria-expanded={menuOpen}
-            onClick={() =>
-              setMenuOpen((value) => !value)
-            }
+            onClick={() => setMenuOpen((value) => !value)}
             className="
               flex h-[40px] w-[40px]
               flex-shrink-0
@@ -928,11 +912,7 @@ export default function RoomDetail({
               xl:hidden
             "
           >
-            {menuOpen ? (
-              <IconXMenu />
-            ) : (
-              <IconMenu />
-            )}
+            {menuOpen ? <IconXMenu /> : <IconMenu />}
           </button>
         </div>
       </nav>
@@ -973,14 +953,11 @@ export default function RoomDetail({
             sm:px-8
           "
         >
-
           {/* MOBILE BACK TO ROOMS */}
 
           <a
             href="/#rooms"
-            onClick={(event) =>
-              handleSectionLink(event, "rooms")
-            }
+            onClick={(event) => handleSectionLink(event, "rooms")}
             className="
               mb-4
               flex
@@ -1002,9 +979,7 @@ export default function RoomDetail({
               hover:text-black
             "
           >
-            <span className="text-lg leading-none">
-              ←
-            </span>
+            <span className="text-lg leading-none">←</span>
 
             <span>Back to Rooms</span>
           </a>
@@ -1029,9 +1004,7 @@ export default function RoomDetail({
               <a
                 key={link.label}
                 href={link.href}
-                onClick={(event) =>
-                  handleSectionLink(event, link.id)
-                }
+                onClick={(event) => handleSectionLink(event, link.id)}
                 className="
                   block
                   border-b border-white/5
@@ -1053,7 +1026,6 @@ export default function RoomDetail({
 
           {user && (
             <div className="mt-2 border-t border-white/10">
-
               <div
                 className="
                   flex items-center gap-2
@@ -1088,15 +1060,9 @@ export default function RoomDetail({
                   hover:text-[var(--gold-light)]
                 "
               >
-                {user.role === "admin" ? (
-                  <IconSettings />
-                ) : (
-                  <IconBooking />
-                )}
+                {user.role === "admin" ? <IconSettings /> : <IconBooking />}
 
-                {user.role === "admin"
-                  ? "Admin Panel"
-                  : "My Bookings"}
+                {user.role === "admin" ? "Admin Panel" : "My Bookings"}
               </button>
             </div>
           )}
@@ -1128,13 +1094,11 @@ export default function RoomDetail({
             xl:grid-cols-[minmax(0,1fr)_360px]
           "
         >
-
           {/* ==================================================
               LEFT CONTENT
           ================================================== */}
 
           <div className="w-full min-w-0">
-
             {/* MAIN IMAGE */}
 
             <div
@@ -1164,8 +1128,6 @@ export default function RoomDetail({
                   duration-300
                 "
               />
-
- 
 
               <div
                 className="
@@ -1202,15 +1164,9 @@ export default function RoomDetail({
                 <button
                   key={`${img}-${index}`}
                   type="button"
-                  onClick={() =>
-                    handleThumbClick(index)
-                  }
+                  onClick={() => handleThumbClick(index)}
                   aria-label={`View image ${index + 1}`}
-                  aria-current={
-                    activeImg === index
-                      ? "true"
-                      : undefined
-                  }
+                  aria-current={activeImg === index ? "true" : undefined}
                   className={[
                     `
                       relative
@@ -1245,8 +1201,7 @@ export default function RoomDetail({
                     alt=""
                     loading="lazy"
                     onError={(event) => {
-                      event.currentTarget.style.opacity =
-                        "0";
+                      event.currentTarget.style.opacity = "0";
                     }}
                     className="
                       h-full
@@ -1376,30 +1331,29 @@ export default function RoomDetail({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  {extra.amenities.map(
-                    (amenity, index) => (
-                      <motion.div
-                        key={amenity}
-                        initial={{
-                          opacity: 0,
-                          scale: 0.9,
-                        }}
-                        whileInView={{
-                          opacity: 1,
-                          scale: 1,
-                        }}
-                        viewport={{
-                          once: true,
-                        }}
-                        transition={{
-                          duration: 0.3,
-                          delay: index * 0.03,
-                          ease: "easeOut",
-                        }}
-                        whileHover={{
-                          scale: 1.03,
-                        }}
-                        className="
+                  {extra.amenities.map((amenity, index) => (
+                    <motion.div
+                      key={amenity}
+                      initial={{
+                        opacity: 0,
+                        scale: 0.9,
+                      }}
+                      whileInView={{
+                        opacity: 1,
+                        scale: 1,
+                      }}
+                      viewport={{
+                        once: true,
+                      }}
+                      transition={{
+                        duration: 0.3,
+                        delay: index * 0.03,
+                        ease: "easeOut",
+                      }}
+                      whileHover={{
+                        scale: 1.03,
+                      }}
+                      className="
                           flex
                           cursor-default
                           items-center gap-1.5
@@ -1412,12 +1366,11 @@ export default function RoomDetail({
                           font-semibold
                           text-[var(--gold)]
                         "
-                      >
-                        <IconCheck />
-                        <span>{amenity}</span>
-                      </motion.div>
-                    )
-                  )}
+                    >
+                      <IconCheck />
+                      <span>{amenity}</span>
+                    </motion.div>
+                  ))}
                 </div>
               </motion.div>
             </div>
@@ -1447,7 +1400,6 @@ export default function RoomDetail({
                 shadow-[0_4px_24px_rgba(0,0,0,0.08)]
               "
             >
-
               {/* PRICE HEADER */}
 
               <div
@@ -1497,20 +1449,22 @@ export default function RoomDetail({
                 <div className="flex items-baseline gap-1.5">
                   <span
                     className="
-                      font-[var(--font-display)]
-                      text-[2rem]
-                      font-extrabold
-                      leading-none
-                      text-white
-                      sm:text-[2.4rem]
-                    "
+      font-[var(--font-display)]
+      text-[2rem]
+      font-extrabold
+      leading-none
+      text-white
+      sm:text-[2.4rem]
+    "
                   >
-                    ₹{formattedPrice}
+                    ₹{formattedTotal}
                   </span>
 
-                  <span className="text-sm text-white/40">
-                    /night
-                  </span>
+                  <span className="text-sm text-white/40">/night</span>
+                </div>
+
+                <div className="mt-1 text-[0.7rem] text-white/40">
+                  ₹{formattedPrice} + ₹{formattedGst} GST (12%)
                 </div>
 
                 <div
@@ -1664,9 +1618,9 @@ export default function RoomDetail({
 
                     <p className="mt-3 text-[0.86rem] leading-6 text-[#5A6472]">
                       A comfortable stay in the heart of Thiruvarur, minutes
-                      from the Thyagaraja Temple and the town centre. Every
-                      room comes with air conditioning, complimentary Wi-Fi,
-                      daily housekeeping and 24-hour front desk support.
+                      from the Thyagaraja Temple and the town centre. Every room
+                      comes with air conditioning, complimentary Wi-Fi, daily
+                      housekeeping and 24-hour front desk support.
                     </p>
 
                     <ul className="mt-4 grid gap-2 p-0 text-[0.82rem] text-[#5A6472] list-none">
@@ -1707,18 +1661,18 @@ export default function RoomDetail({
               )}
 
               {showBooking && (
-              <div className="bg-white px-5 pb-3 pt-5">
-                <button
-                  type="button"
-                  onClick={handleBook}
-                  disabled={isAdmin}
-                  title={
-                    isAdmin
-                      ? "Admin cannot book from user room details"
-                      : "Book this room"
-                  }
-                  className={[
-                    `
+                <div className="bg-white px-5 pb-3 pt-5">
+                  <button
+                    type="button"
+                    onClick={handleBook}
+                    disabled={isAdmin}
+                    title={
+                      isAdmin
+                        ? "Admin cannot book from user room details"
+                        : "Book this room"
+                    }
+                    className={[
+                      `
                       w-full
                       rounded-xl
                       py-4
@@ -1727,13 +1681,13 @@ export default function RoomDetail({
                       transition-all
                       duration-200
                     `,
-                    isAdmin
-                      ? `
+                      isAdmin
+                        ? `
                         cursor-not-allowed
                         bg-[#DEE2E6]
                         text-[#868E96]
                       `
-                      : `
+                        : `
                         bg-[#0f1923]
                         text-white
                         hover:-translate-y-[1px]
@@ -1741,29 +1695,25 @@ export default function RoomDetail({
                         hover:text-black
                         active:translate-y-0
                       `,
-                  ].join(" ")}
-                >
-                  {isAdmin
-                    ? "Admin Booking Disabled"
-                    : "Book Now"}
-                </button>
+                    ].join(" ")}
+                  >
+                    {isAdmin ? "Admin Booking Disabled" : "Book Now"}
+                  </button>
 
-                <p
-                  className="
+                  <p
+                    className="
                     mt-2
                     text-center
                     text-xs
                     leading-5
                     text-[var(--c-muted)]
                   "
-                >
-                  Less than 24 hours before check-in:
-                  100% of the first night's room charge;
-                  for booking cancellation and refund
-                  requests, please contact the hotel
-                  administration.
-                </p>
-              </div>
+                  >
+                    Less than 24 hours before check-in: 100% of the first
+                    night's room charge; for booking cancellation and refund
+                    requests, please contact the hotel administration.
+                  </p>
+                </div>
               )}
 
               {/* PRICE ESTIMATE */}
@@ -1840,85 +1790,49 @@ export default function RoomDetail({
                       bg-[var(--navy)]
                     "
                   >
-                    {[1, 2, 3, 5, 7].map(
-                      (n, index) => (
+                    {[1, 2, 3, 5, 7].map((n, index) => {
+                      const nightsSubtotal = price * n;
+                      const nightsGst =
+                        Math.round(nightsSubtotal * GST_RATE * 100) / 100;
+                      const nightsTotal =
+                        Math.round((nightsSubtotal + nightsGst) * 100) / 100;
+
+                      return (
                         <motion.div
                           key={n}
-                          initial={{
-                            opacity: 0,
-                            x: -12,
-                          }}
-                          whileInView={{
-                            opacity: 1,
-                            x: 0,
-                          }}
-                          viewport={{
-                            once: true,
-                          }}
+                          initial={{ opacity: 0, x: -12 }}
+                          whileInView={{ opacity: 1, x: 0 }}
+                          viewport={{ once: true }}
                           transition={{
                             duration: 0.35,
                             delay: index * 0.06,
                             ease: "easeOut",
                           }}
                           whileHover={{
-                            backgroundColor:
-                              "rgba(201,168,76,0.08)",
+                            backgroundColor: "rgba(201,168,76,0.08)",
                           }}
-                          className="
-                            flex
-                            items-center
-                            justify-between
-                            px-4 py-3
-                          "
+                          className="flex items-center justify-between px-4 py-3"
                         >
-                          <div
-                            className="
-                              flex
-                              items-center
-                              gap-2.5
-                            "
-                          >
-                            <div
-                              className="
-                                flex
-                                h-6 w-6
-                                items-center
-                                justify-center
-                                rounded-lg
-                                bg-[var(--gold)]/15
-                                text-[0.68rem]
-                                font-bold
-                                text-[var(--gold)]
-                              "
-                            >
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-[var(--gold)]/15 text-[0.68rem] font-bold text-[var(--gold)]">
                               {n}
                             </div>
-
-                            <span
-                              className="
-                                text-[0.82rem]
-                                text-white/50
-                              "
-                            >
+                            <span className="text-[0.82rem] text-white/50">
                               night{n > 1 ? "s" : ""}
                             </span>
                           </div>
 
-                          <span
-                            className="
-                              text-[0.88rem]
-                              font-bold
-                              text-[var(--gold)]
-                            "
-                          >
-                            ₹
-                            {(price * n).toLocaleString(
-                              "en-IN"
-                            )}
-                          </span>
+                          <div className="text-right">
+                            <div className="text-[0.88rem] font-bold text-[var(--gold)]">
+                              ₹{nightsTotal.toLocaleString("en-IN")}
+                            </div>
+                            <div className="text-[0.6rem] text-white/30">
+                              incl. GST
+                            </div>
+                          </div>
                         </motion.div>
-                      )
-                    )}
+                      );
+                    })}
                   </div>
                 </motion.div>
               </div>
@@ -1960,9 +1874,7 @@ export default function RoomDetail({
                     text-[var(--c-muted)]
                   "
                 >
-                  <span className="text-[var(--gold)]">
-                    {badge.icon}
-                  </span>
+                  <span className="text-[var(--gold)]">{badge.icon}</span>
 
                   {badge.label}
                 </div>
@@ -2038,31 +1950,30 @@ export default function RoomDetail({
               md:grid-cols-2
             "
           >
-            {policies.map(
-              (policy, index) => (
-                <motion.div
-                  key={index}
-                  initial={{
-                    opacity: 0,
-                    x: -16,
-                  }}
-                  whileInView={{
-                    opacity: 1,
-                    x: 0,
-                  }}
-                  viewport={{
-                    once: true,
-                    amount: 0.3,
-                  }}
-                  transition={{
-                    duration: 0.4,
-                    delay: index * 0.04,
-                    ease: "easeOut",
-                  }}
-                  whileHover={{
-                    scale: 1.01,
-                  }}
-                  className="
+            {policies.map((policy, index) => (
+              <motion.div
+                key={index}
+                initial={{
+                  opacity: 0,
+                  x: -16,
+                }}
+                whileInView={{
+                  opacity: 1,
+                  x: 0,
+                }}
+                viewport={{
+                  once: true,
+                  amount: 0.3,
+                }}
+                transition={{
+                  duration: 0.4,
+                  delay: index * 0.04,
+                  ease: "easeOut",
+                }}
+                whileHover={{
+                  scale: 1.01,
+                }}
+                className="
                     flex
                     h-full
                     cursor-default
@@ -2077,9 +1988,9 @@ export default function RoomDetail({
                     hover:border-[var(--gold)]/40
                     hover:bg-[var(--gold)]/10
                   "
-                >
-                  <span
-                    className="
+              >
+                <span
+                  className="
                       mt-0.5
                       flex
                       h-7 w-7
@@ -2090,22 +2001,21 @@ export default function RoomDetail({
                       bg-[var(--gold)]/15
                       text-[var(--gold)]
                     "
-                  >
-                    {policy.icon}
-                  </span>
+                >
+                  {policy.icon}
+                </span>
 
-                  <span
-                    className="
+                <span
+                  className="
                       text-[0.78rem]
                       leading-snug
                       text-white/70
                     "
-                  >
-                    {policy.text}
-                  </span>
-                </motion.div>
-              )
-            )}
+                >
+                  {policy.text}
+                </span>
+              </motion.div>
+            ))}
           </div>
         </motion.section>
       </main>
