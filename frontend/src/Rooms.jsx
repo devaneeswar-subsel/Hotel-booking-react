@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { getRoomSlug } from "./utils/roomSlug";
 const API = process.env.REACT_APP_API_URL;
-
+const GST_RATE = 0.12; // matches the backend's GST_RATE
 const FALLBACK = {
   Standard:
     "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=700",
@@ -519,8 +519,9 @@ export default function Rooms({
               room.description ||
               `Comfortable ${roomName} accommodation at VV Grand Park Residency in Thiruvarur with modern amenities and premium comfort.`;
 
-            const roomPrice =
-              Number(room.price_per_night);
+            const roomPrice = Number(room.price_per_night);
+            const roomGst = Math.round(roomPrice * GST_RATE * 100) / 100;
+            const roomTotal = Math.round((roomPrice + roomGst) * 100) / 100;
 
             const roomCapacity =
               room.capacity || 2;
@@ -531,152 +532,129 @@ export default function Rooms({
               FALLBACK.Deluxe;
 
             return (
-            <motion.article
-  key={room.room_id}
-  className="room-card"
-  initial={{
-    opacity: 0,
-    y: 40,
-  }}
-  whileInView={{
-    opacity: 1,
-    y: 0,
-  }}
-  viewport={{
-    once: true,
-  }}
-  transition={{
-    duration: 0.6,
-    delay: index * 0.1,
-    type: "spring",
-    stiffness: 80,
-  }}
-  itemScope
-  itemType="https://schema.org/HotelRoom"
->
-  <Link
-    to={`/rooms/${roomSlug}`}
-    className="block"
-    aria-label={`View ${roomName} details`}
-  >
-    <div className="room-card-img">
-      <img
-        src={roomImage}
-        alt={`${roomName} at VV Grand Park Residency, Thiruvarur`}
-        loading={
-          index < 3
-            ? "eager"
-            : "lazy"
-        }
-        decoding="async"
-        width="700"
-        height="467"
-        itemProp="image"
-        onError={(e) => {
-          e.currentTarget.src =
-            FALLBACK.Deluxe;
-        }}
-      />
+              <motion.article
+                key={room.room_id}
+                className="room-card"
+                initial={{
+                  opacity: 0,
+                  y: 40,
+                }}
+                whileInView={{
+                  opacity: 1,
+                  y: 0,
+                }}
+                viewport={{
+                  once: true,
+                }}
+                transition={{
+                  duration: 0.6,
+                  delay: index * 0.1,
+                  type: "spring",
+                  stiffness: 80,
+                }}
+                itemScope
+                itemType="https://schema.org/HotelRoom"
+              >
+                <Link
+                  to={`/rooms/${roomSlug}`}
+                  className="block"
+                  aria-label={`View ${roomName} details`}
+                >
+                  <div className="room-card-img">
+                    <img
+                      src={roomImage}
+                      alt={`${roomName} at VV Grand Park Residency, Thiruvarur`}
+                      loading={index < 3 ? "eager" : "lazy"}
+                      decoding="async"
+                      width="700"
+                      height="467"
+                      itemProp="image"
+                      onError={(e) => {
+                        e.currentTarget.src = FALLBACK.Deluxe;
+                      }}
+                    />
 
-      <div
-        className="room-type-badge"
-        itemProp="name"
-      >
-        {roomName}
-      </div>
-    </div>
+                    <div className="room-type-badge" itemProp="name">
+                      {roomName}
+                    </div>
+                  </div>
 
-    <div className="room-card-body">
-      <div className="font-body font-bold">
-        {isShowcase
-          ? roomName
-          : searchRoomLabels[room.room_id] || roomName}
-      </div>
+                  <div className="room-card-body">
+                    <div className="font-body font-bold">
+                      {isShowcase
+                        ? roomName
+                        : searchRoomLabels[room.room_id] || roomName}
+                    </div>
 
-      <p
-        className="truncate"
-        title={roomDescription}
-        itemProp="description"
-      >
-        {roomDescription}
-      </p>
+                    <p
+                      className="truncate"
+                      title={roomDescription}
+                      itemProp="description"
+                    >
+                      {roomDescription}
+                    </p>
 
-      <div className="room-card-footer">
-        <div
-          className="font-body"
-          itemScope
-          itemType="https://schema.org/Offer"
-        >
-          <meta
-            itemProp="priceCurrency"
-            content="INR"
-          />
+                    <div
+                      className="font-body"
+                      itemScope
+                      itemType="https://schema.org/Offer"
+                    >
+                      <meta itemProp="priceCurrency" content="INR" />
 
-          <span itemProp="price">
-            ₹
-            {roomPrice.toLocaleString()}
-          </span>
+                      <div className="flex items-baseline gap-1">
+                        <span itemProp="price" content={roomTotal}>
+                          ₹{roomTotal.toLocaleString("en-IN")}
+                        </span>
+                        <span>/night</span>
+                      </div>
 
-          <span>
-            {" "}
-            /night
-          </span>
-        </div>
+                      <div className="mt-0.5 text-[0.7rem] italic text-[var(--gray-400)]">
+                        incl. GST (₹{roomPrice.toLocaleString("en-IN")} + ₹
+                        {(roomTotal - roomPrice).toLocaleString("en-IN")})
+                      </div>
 
-        <div className="font-body room-capacity">
-          <UserIcon
-            size={13}
-            color="var(--gray-400)"
-            aria-hidden="true"
-          />
+                      <div className="font-body room-capacity">
+                        <UserIcon
+                          size={13}
+                          color="var(--gray-400)"
+                          aria-hidden="true"
+                        />
 
-          <span>
-            {roomCapacity} Adults +
-            1 Child (Below 5 Years)
-          </span>
-        </div>
-      </div>
-    </div>
-  </Link>
+                        <span>
+                          {roomCapacity} Adults + 1 Child (Below 5 Years)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </Link>
 
-  {/* Booking button must stay outside Link */}
-  <div className="px-4 pb-4">
-    {isShowcase ? (
-      <p className="m-0 text-center text-[0.78rem] text-[#8A95A3]">
-        Search your dates above to check availability
-      </p>
-    ) : (
-    <button
-      className="book-btn"
-      onClick={(e) =>
-        handleBook(e, room)
-      }
-      disabled={isAdmin}
-      title={
-        isAdmin
-          ? "Admin cannot book from user room cards"
-          : ""
-      }
-      aria-label={
-        isAdmin
-          ? `Booking disabled for ${roomName}`
-          : `Book ${roomName} at VV Grand Park Residency`
-      }
-    >
-      {isAdmin
-        ? "Admin Booking Disabled"
-        : "Book Now"}
+                {/* Booking button must stay outside Link */}
+                <div className="px-4 pb-4">
+                  {isShowcase ? (
+                    <p className="m-0 text-center text-[0.78rem] text-[#8A95A3]">
+                      Search your dates above to check availability
+                    </p>
+                  ) : (
+                    <button
+                      className="book-btn"
+                      onClick={(e) => handleBook(e, room)}
+                      disabled={isAdmin}
+                      title={
+                        isAdmin ? "Admin cannot book from user room cards" : ""
+                      }
+                      aria-label={
+                        isAdmin
+                          ? `Booking disabled for ${roomName}`
+                          : `Book ${roomName} at VV Grand Park Residency`
+                      }
+                    >
+                      {isAdmin ? "Admin Booking Disabled" : "Book Now"}
 
-      {!isAdmin && (
-        <ArrowRightIcon
-          size={15}
-          color="#fff"
-        />
-      )}
-    </button>
-    )}
-  </div>
-</motion.article>
+                      {!isAdmin && <ArrowRightIcon size={15} color="#fff" />}
+                    </button>
+                  )}
+                </div>
+              </motion.article>
             );
           })
         )}
