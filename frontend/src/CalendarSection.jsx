@@ -127,6 +127,38 @@ function useFadeSlide(direction = "left") {
   }
 const leftRef  = useFadeSlide("left");
   const rightRef = useFadeSlide("right");
+  /*
+   * The availability panel is public, so it lists room TYPES rather than
+   * individual rooms — "Deluxe Room — Room 201" told any visitor exactly which
+   * rooms were free on which dates, which is the hotel's business, not the
+   * guest's.
+   *
+   * Grouping also fixes a display bug that removing the number would have
+   * exposed: with several free rooms of one type the panel repeated the same
+   * line over and over. One row per type with a count reads correctly and is
+   * what the guest actually needs to know.
+   */
+  const roomTypeSummary = [];
+  if (Array.isArray(results)) {
+    const byType = new Map();
+
+    results.forEach((room) => {
+      const type = room.room_type || "Room";
+      const price = Number(room.price_per_night) || 0;
+      const existing = byType.get(type);
+
+      if (existing) {
+        existing.count += 1;
+        // Show the cheapest room of the type — the guest can always be moved up.
+        if (price > 0 && price < existing.price) existing.price = price;
+      } else {
+        byType.set(type, { type, count: 1, price });
+      }
+    });
+
+    byType.forEach((entry) => roomTypeSummary.push(entry));
+  }
+
   return (
     <>
       <style>{`
@@ -349,33 +381,38 @@ const leftRef  = useFadeSlide("left");
                         {results.length > 1 ? "s" : ""} available
                       </div>
 
-                      {(showAllRooms ? results : results.slice(0, 2)).map((r) => (
+                      {(showAllRooms
+                        ? roomTypeSummary
+                        : roomTypeSummary.slice(0, 2)
+                      ).map((r) => (
                         <div
-                          key={r.room_id}
+                          key={r.type}
                           className="flex justify-between border-t border-white/5 py-1.5 text-[0.78rem] text-white/60"
                         >
                           <span>
-                            {r.room_type} — Room{" "}
-                            {r.room_number || r.room_id}
+                            {r.type}
+                            {r.count > 1 && (
+                              <span className="text-white/40">
+                                {" "}
+                                · {r.count} available
+                              </span>
+                            )}
                           </span>
 
                           <span className="font-semibold text-white">
-                            ₹
-                            {Number(
-                              r.price_per_night
-                            ).toLocaleString()}
+                            ₹{r.price.toLocaleString()}
                             /night
                           </span>
                         </div>
                       ))}
-                      {results.length > 2 && (
+                      {roomTypeSummary.length > 2 && (
                         <button
                           onClick={() => setShowAllRooms(!showAllRooms)}
                           className="mt-2 text-[0.72rem] text-[var(--gold)] underline underline-offset-2 cursor-pointer bg-transparent border-0 p-0 font-inherit hover:text-white transition"
                         >
                           {showAllRooms
                             ? "Show Less ↑"
-                            : `+${results.length - 2} more available — View More ↓`}
+                            : `+${roomTypeSummary.length - 2} more room types — View More ↓`}
                         </button>
                       )}
                     </>

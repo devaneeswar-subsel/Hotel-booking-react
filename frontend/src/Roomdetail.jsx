@@ -1309,9 +1309,7 @@ export default function RoomDetail({
                       sm:text-2xl
                     "
                   >
-                    Room{" "}
-                    {room.room_number || room.room_id}{" "}
-                    — {roomType}
+                    {roomType}
                   </h1>
                 </div>
 

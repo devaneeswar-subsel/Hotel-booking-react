@@ -796,7 +796,7 @@ function BookingModal({ room, user, onClose, showToast }) {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="font-display text-base font-semibold text-navy">
-            Book {room.room_type} — Room {room.room_number || room.room_id}
+            Book {room.room_type}
           </h2>
           <button
             onClick={onClose}
@@ -1435,10 +1435,8 @@ function BookingReceiptModal({ booking, onClose, onDownloadInvoice }) {
           <div className="bg-[var(--gray-50)] rounded-lg px-4 py-3">
             {[
               ["Booking ID", `#${booking.booking_id}`],
-              [
-                "Room",
-                `${booking.room_type} (Room ${booking.room_number || booking.room_id})`,
-              ],
+              // Type only — the room number is hotel-side information.
+              ["Room", booking.room_type],
               ["Check-in", booking.check_in_date?.slice(0, 10)],
               ["Check-out", booking.check_out_date?.slice(0, 10)],
               ["Nights", nights],
@@ -2210,11 +2208,6 @@ const [visibleBookings, setVisibleBookings] = useState(5);
                               {b.room_type}
                             </h3>
 
-                            {b.room_number && (
-                              <p className="mt-1 text-xs text-[#8A95A3]">
-                                Room {b.room_number}
-                              </p>
-                            )}
                           </div>
 
                           <span

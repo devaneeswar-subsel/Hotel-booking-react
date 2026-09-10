@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { printInvoicePdf } from "./invoicePdf";
+import { GSTIN_PATTERN } from "./utils/billing";
 
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.12;
@@ -357,6 +358,32 @@ export default function GuestCheckIn({
   const [checkoutDiscount, setCheckoutDiscount] = useState(0);
   const [discountSaving, setDiscountSaving] = useState(false);
 
+  /*
+   * Billing identity (GSTIN + address).
+   *
+   * Deliberately NOT covered by `locked`. A guest very often asks for a GST
+   * invoice at the desk, after check-in has already happened — if these
+   * followed the guest-detail lock, the only way to correct a GSTIN would be
+   * to edit the database by hand.
+   */
+  const [gstNumber, setGstNumber] = useState("");
+  const [billingAddress, setBillingAddress] = useState("");
+  const [billingSaving, setBillingSaving] = useState(false);
+  const [billingError, setBillingError] = useState("");
+  const [billingDirty, setBillingDirty] = useState(false);
+
+  /*
+   * A ref, not state, because fetchBooking reads it from inside a promise
+   * callback and needs the value as of right now — a state variable captured
+   * in that closure would be whatever it was when the fetch was fired.
+   */
+  const billingDirtyRef = useRef(false);
+
+  const markBillingDirty = () => {
+    billingDirtyRef.current = true;
+    setBillingDirty(true);
+  };
+
   // refresh elapsed-time readout
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
@@ -407,6 +434,16 @@ export default function GuestCheckIn({
             ? String(savedCheckoutDiscount)
             : "",
         );
+
+        /*
+         * Billing fields are re-read on every fetch, but only while the
+         * operator is not mid-edit — overwriting a half-typed GSTIN with the
+         * stored one on a background refresh would be maddening.
+         */
+        if (!billingDirtyRef.current) {
+          setGstNumber(data.gst_number || "");
+          setBillingAddress(data.customer_address || "");
+        }
 
         if (!hydrate) return;
 
@@ -560,6 +597,8 @@ export default function GuestCheckIn({
       adults_count: adults,
       children_count: children,
       payment_mode: payMethod,
+      gst_number: gstNumber.trim().toUpperCase(),
+      customer_address: billingAddress.trim(),
 
       guests: [
         ...adultRows
@@ -586,6 +625,15 @@ export default function GuestCheckIn({
   function validate() {
     if (!idNumber.trim()) {
       toast("Enter the ID proof number", "error");
+      return false;
+    }
+
+    // A malformed GSTIN is rejected by the API too, but catching it here means
+    // the operator is not told about it only after the check-in half-completes.
+    const gstError = getGstError();
+    if (gstError) {
+      setBillingError(gstError);
+      toast(gstError, "error");
       return false;
     }
 
@@ -909,6 +957,73 @@ export default function GuestCheckIn({
       toast(e.message, "error");
     } finally {
       setSaving(false);
+    }
+  }
+
+  /* ── billing details (GSTIN + address) ─────────────────────────────────── */
+
+  function getGstError(value = gstNumber) {
+    const text = String(value || "").trim().toUpperCase();
+    if (!text) return "";
+    if (!GSTIN_PATTERN.test(text)) {
+      return "Enter a valid 15-character GSTIN";
+    }
+    return "";
+  }
+
+  /*
+   * Saves only the billing fields. The backend treats gst_number and
+   * customer_address independently of the guest list, so this can run after
+   * check-in without disturbing anything that is locked.
+   */
+  async function saveBillingDetails() {
+    const error = getGstError();
+
+    if (error) {
+      setBillingError(error);
+      return toast(error, "error");
+    }
+
+    setBillingError("");
+    setBillingSaving(true);
+
+    try {
+      const res = await apiFetch(
+        `/api/bookings/${bookingId}/checkin-details`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            gst_number: gstNumber.trim().toUpperCase(),
+            customer_address: billingAddress.trim(),
+          }),
+        },
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(
+          data.error || "Unable to save the billing details",
+        );
+      }
+
+      billingDirtyRef.current = false;
+      setBillingDirty(false);
+
+      toast(
+        gstNumber.trim()
+          ? "Billing details saved — the GSTIN will appear on the invoice"
+          : "Billing details saved",
+        "success",
+      );
+
+      fetchBooking(false);
+      onRefresh && onRefresh();
+    } catch (e) {
+      setBillingError(e.message);
+      toast(e.message, "error");
+    } finally {
+      setBillingSaving(false);
     }
   }
 
@@ -1573,6 +1688,97 @@ export default function GuestCheckIn({
                 </span>
 
                 Enter the ID proof number manually.
+              </div>
+            </Card>
+
+            {/* Billing details — GSTIN and address for the invoice */}
+
+            <Card
+              icon={I.card}
+              title="Billing Details"
+              subtitle="Printed on the invoice — optional"
+            >
+              <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
+
+                <Field label="GST Number">
+                  <input
+                    value={gstNumber}
+                    maxLength={15}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e) => {
+                      setGstNumber(
+                        e.target.value
+                          .toUpperCase()
+                          .replace(/[^0-9A-Z]/g, ""),
+                      );
+
+                      markBillingDirty();
+
+                      if (billingError) setBillingError("");
+                    }}
+                    onBlur={() =>
+                      setBillingError(getGstError())
+                    }
+                    placeholder="33BRCPA1008G1ZQ"
+                    className={`${inputCls} font-mono tracking-[0.5px] ${
+                      billingError
+                        ? "border-red-400 focus:border-red-400 focus:ring-red-100"
+                        : ""
+                    }`}
+                  />
+
+                  {billingError ? (
+                    <div className="mt-1 text-[0.66rem] font-semibold text-red-600">
+                      {billingError}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[0.66rem] text-gray-400">
+                      15 characters. Leave blank for a non-GST invoice.
+                    </div>
+                  )}
+                </Field>
+
+                <Field label="Billing Address">
+                  <textarea
+                    value={billingAddress}
+                    rows={2}
+                    maxLength={255}
+                    onChange={(e) => {
+                      setBillingAddress(e.target.value);
+                      markBillingDirty();
+                    }}
+                    placeholder="Company or guest billing address"
+                    className={`${inputCls} resize-none leading-snug`}
+                  />
+
+                  <div className="mt-1 text-[0.66rem] text-gray-400">
+                    {billingAddress.length}/255
+                  </div>
+                </Field>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2.5">
+                <div className="flex items-start gap-2 text-[0.68rem] text-gray-500">
+                  <span className="mt-[1px] text-gray-400">
+                    {I.info}
+                  </span>
+
+                  Editable at check-in and at check-out.
+                </div>
+
+                <button
+                  type="button"
+                  onClick={saveBillingDetails}
+                  disabled={billingSaving || !!billingError || !billingDirty}
+                  className="rounded-lg bg-navy px-3.5 py-1.5 text-[0.72rem] font-bold text-white transition hover:bg-navy/90 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {billingSaving
+                    ? "Saving…"
+                    : billingDirty
+                      ? "Save Billing Details"
+                      : "Saved"}
+                </button>
               </div>
             </Card>
 

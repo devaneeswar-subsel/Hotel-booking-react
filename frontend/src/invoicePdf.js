@@ -14,6 +14,8 @@
 //  The invoice date is read at print time, so it is always today's date.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { HOTEL_GSTIN } from "./utils/billing";
+
 const GST_RATE = 0.12;
 
 // page geometry (A4, mm)
@@ -820,6 +822,21 @@ const co = b.check_out_date
     leftY += 4.5;
   }
 
+  /*
+   * Optional billing address, wrapped to the width of the BILL TO column so it
+   * can never run under the FROM block on the right.
+   */
+  if (b.customer_address) {
+    const addressLines = doc.splitTextToSize(
+      String(b.customer_address),
+      FX - (L + 13) - 6,
+    );
+
+    doc.text(addressLines, L + 13, leftY);
+
+    leftY += addressLines.length * 4.5;
+  }
+
   if (b.gst_number) {
     doc.setFont("helvetica", "bold");
 
@@ -848,10 +865,22 @@ const co = b.check_out_date
     y + 23,
   );
 
+  // The hotel's own GSTIN. Bold so it reads as a tax field rather than another
+  // contact line.
+  doc.setFont("helvetica", "bold");
+
+  doc.text(
+    `GSTIN: ${HOTEL_GSTIN}`,
+    FX,
+    y + 30,
+  );
+
+  doc.setFont("helvetica", "normal");
+
   y =
     Math.max(
       leftY,
-      y + 28,
+      y + 35,
     ) + 6;
 
   /* ── line-item table ─────────────────────────────────────────────────── */

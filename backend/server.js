@@ -171,6 +171,9 @@ async function runMigrations() {
       // booking with GST off. Defaults to 1 so nothing existing changes.
       "gst_enabled TINYINT DEFAULT 1",
       "gst_number VARCHAR(20) DEFAULT NULL",
+      // Billing address printed under BILL TO. Optional — a booking without one
+      // prints exactly as it did before.
+      "customer_address VARCHAR(255) DEFAULT NULL",
     ];
     for (const col of cols) {
       try {
@@ -813,6 +816,17 @@ app.get("/api/customers/lookup", requireManager, async (req, res) => {
   }
 });
 
+// ── hotel tax identity ───────────────────────────────────────────────────────
+// Single source of truth for the hotel's own GSTIN. Every invoice — the mailed
+// PDF, the admin PDF and the guest download — reads this constant, so the
+// number can never drift between documents.
+const HOTEL_GSTIN = "33BRCPA1008G1ZQ";
+
+// 15-character GSTIN: 2-digit state code, 5 letters + 4 digits + 1 letter of
+// the PAN, 1 entity code, literal Z, 1 checksum character.
+const GSTIN_REGEX =
+  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+
 // invoice numbers are year-prefixed, e.g. INV-2026-0037
 function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
@@ -955,8 +969,42 @@ async function generateAdvanceInvoicePdf(booking) {
       .fillColor("#495057")
       .font("Helvetica")
       .fontSize(9)
-      .text(booking.email || "", 50, 166);
-    if (booking.phone) doc.text(booking.phone, 50, 180);
+      // Width-capped: an unusually long address would otherwise run straight
+      // across the page and collide with the FROM block at x=350.
+      .text(booking.email || "", 50, 166, { width: 250, lineBreak: false });
+
+    /*
+     * BILL TO runs down the page instead of sitting on fixed rows, because the
+     * phone, GSTIN and address lines are each optional. Tracking the cursor
+     * here is what stopped the GSTIN from being printed on top of the address
+     * on bookings that carry both.
+     */
+    let billY = 179;
+    if (booking.phone) {
+      doc.text(booking.phone, 50, billY);
+      billY += 12;
+    }
+    if (booking.customer_address) {
+      // Kept to two lines so a long address cannot push the invoice onto a
+      // second page.
+      const address = doc.heightOfString(String(booking.customer_address), {
+        width: 250,
+      });
+      doc.text(String(booking.customer_address), 50, billY, {
+        width: 250,
+        height: 24,
+        ellipsis: true,
+      });
+      billY += Math.min(24, Math.max(12, address));
+    }
+    if (booking.gst_number) {
+      doc
+        .fillColor("#0F1923")
+        .font("Helvetica-Bold")
+        .fontSize(9)
+        .text(`GSTIN: ${booking.gst_number}`, 50, billY);
+      billY += 12;
+    }
 
     doc
       .fillColor("#868E96")
@@ -975,8 +1023,14 @@ async function generateAdvanceInvoicePdf(booking) {
       .text("3/4/D, Thanjai Saalai", 350, 166)
       .text("Thiruvarur - 610004", 350, 180)
       .text("+91 93849 82510, +91 90032 51115", 350, 194);
+    doc
+      .fillColor("#0F1923")
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .text(`GSTIN: ${HOTEL_GSTIN}`, 350, 208);
 
-    const tableTop = 230;
+    // The table starts below whichever column ran longer.
+    const tableTop = Math.max(230, billY + 6);
     doc.rect(50, tableTop, 495, 25).fill("#0F1923");
     doc
       .fillColor("#C9A84C")
@@ -1075,11 +1129,17 @@ async function generateAdvanceInvoicePdf(booking) {
       .stroke();
     y += 18;
     doc.fillColor("#666666").font("Helvetica").fontSize(6);
+    /*
+     * Height-capped to the space left above the footer. Without a cap, a
+     * booking with a discount (two extra summary rows) pushed the terms past
+     * the bottom margin and PDFKit silently started a second page — leaving
+     * page 1 with no footer and page 2 with nothing but stray text.
+     */
     doc.text(
       INVOICE_TERMS.map((term, i) => `${i + 1}. ${term}`).join("   "),
       50,
       y,
-      { width: 495, align: "justify" },
+      { width: 495, align: "justify", height: Math.max(60, 752 - y) },
     );
 
     const footerY = 762;
@@ -1168,6 +1228,7 @@ async function sendAdvanceInvoiceEmail(booking) {
               <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Payment Mode</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;color:#0F1923;">${escapeHtml(
                 booking.payment_method || "-",
               )}</td></tr>
+              ${booking.gst_number ? `<tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Your GSTIN</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#0F1923;">${escapeHtml(booking.gst_number)}</td></tr>` : ""}
               ${discountAmount > 0 ? `<tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Discount</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#C0392B;">-${formatInvoiceMoney(discountAmount)}</td></tr>` : ""}
               <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Advance Paid</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#2D9A6E;">${formatInvoiceMoney(
                 advancePaid,
@@ -1181,6 +1242,7 @@ async function sendAdvanceInvoiceEmail(booking) {
               <ol style="margin:0;padding-left:18px;font-size:12px;">${emailTermsHtml}</ol>
             </div>
             <p style="margin:20px 0 0;color:#868E96;font-size:12px;text-align:center;">VV Grand Park Residency | +91 93849 82510 | +91 90032 51115 | vvgrandpark@gmail.com</p>
+            <p style="margin:6px 0 0;color:#868E96;font-size:12px;text-align:center;">GSTIN: ${HOTEL_GSTIN}</p>
           </div>
         </div>
       </div>
@@ -1965,7 +2027,37 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
             .font("Helvetica")
             .fontSize(9)
             .text(booking.email || "", 50, 162);
-          if (booking.phone) doc.text(booking.phone, 50, 175);
+
+          let billY = 174;
+          if (booking.phone) {
+            doc.text(booking.phone, 50, billY);
+            billY += 12;
+          }
+          if (booking.customer_address) {
+            doc.text(String(booking.customer_address), 50, billY, {
+              width: 250,
+              height: 24,
+              ellipsis: true,
+            });
+            billY += Math.min(
+              24,
+              Math.max(
+                12,
+                doc.heightOfString(String(booking.customer_address), {
+                  width: 250,
+                }),
+              ),
+            );
+          }
+          if (booking.gst_number) {
+            doc
+              .fillColor("#0F1923")
+              .font("Helvetica-Bold")
+              .fontSize(9)
+              .text(`GSTIN: ${booking.gst_number}`, 50, billY);
+            billY += 12;
+          }
+
           doc
             .fillColor("#868E96")
             .font("Helvetica-Bold")
@@ -1986,8 +2078,13 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
               350,
               175,
             );
+          doc
+            .fillColor("#0F1923")
+            .font("Helvetica-Bold")
+            .fontSize(9)
+            .text(`GSTIN: ${HOTEL_GSTIN}`, 350, 188);
 
-          const tableTop = 210;
+          const tableTop = Math.max(210, billY + 6);
           doc.rect(50, tableTop, 495, 25).fill("#0F1923");
           doc
             .fillColor("#C9A84C")
@@ -3091,14 +3188,20 @@ app.post(
       const gstNumberRaw = String(customer?.gst_number || "")
         .trim()
         .toUpperCase();
-      const GSTIN_PATTERN =
-        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-      if (gstNumberRaw && !GSTIN_PATTERN.test(gstNumberRaw)) {
+      if (gstNumberRaw && !GSTIN_REGEX.test(gstNumberRaw)) {
         return res
           .status(400)
           .json({ error: "Enter a valid 15-character GSTIN" });
       }
       const gstNumber = gstNumberRaw || null;
+
+      // Optional billing address. Collapsed to single spaces so a pasted
+      // multi-line address prints as one clean block on the invoice.
+      const customerAddress =
+        String(customer?.customer_address || customer?.address || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 255) || null;
 
       const [result] = await db.query(
         `INSERT INTO bookings (
@@ -3108,8 +3211,9 @@ app.post(
         payment_status, payment_id, advance_payment_id, advance_order_id,
         payment_method, booking_source, vehicle_type, vehicle_price,
         vehicle_status, pickup_location, dropoff_location,
-        discount_applied, discount_amount, gst_enabled, gst_number, status
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        discount_applied, discount_amount, gst_enabled, gst_number,
+        customer_address, status
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
         [
           userId,
           room_id,
@@ -3140,6 +3244,7 @@ app.post(
           amounts.discountAmount,
           amounts.gstEnabled ? 1 : 0,
           gstNumber,
+          customerAddress,
         ],
       );
 
@@ -3254,14 +3359,20 @@ app.post(
       const gstNumberRaw = String(customer?.gst_number || "")
         .trim()
         .toUpperCase();
-      const GSTIN_PATTERN =
-        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-      if (gstNumberRaw && !GSTIN_PATTERN.test(gstNumberRaw)) {
+      if (gstNumberRaw && !GSTIN_REGEX.test(gstNumberRaw)) {
         return res
           .status(400)
           .json({ error: "Enter a valid 15-character GSTIN" });
       }
       const gstNumber = gstNumberRaw || null;
+
+      // Optional billing address. Collapsed to single spaces so a pasted
+      // multi-line address prints as one clean block on the invoice.
+      const customerAddress =
+        String(customer?.customer_address || customer?.address || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 255) || null;
 
       const [result] = await db.query(
         `INSERT INTO bookings (
@@ -3271,8 +3382,9 @@ app.post(
     advance_amount, advance_paid, balance_paid, remaining_amount,
     payment_status, payment_id, advance_payment_id, advance_order_id,
     payment_method, booking_source, vehicle_type, vehicle_price,
-    vehicle_status, pickup_location, dropoff_location, gst_enabled, gst_number, status
-  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+    vehicle_status, pickup_location, dropoff_location, gst_enabled, gst_number,
+    customer_address, status
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
         [
           userId,
           room_id,
@@ -3305,6 +3417,7 @@ app.post(
           dropoff_location || null,
           amounts.gstEnabled ? 1 : 0,
           gstNumber,
+          customerAddress,
         ],
       );
 
@@ -3895,6 +4008,41 @@ async function saveCheckinDetails(bookingId, body = {}) {
     guests = null,
   } = body || {};
 
+  /*
+   * Billing identity (GSTIN + address) is editable from the check-in and
+   * check-out screen, not only at booking time — a guest very often asks for a
+   * GST invoice at the desk, after the booking already exists.
+   *
+   * These two are handled apart from the COALESCE fields above because an
+   * empty string here means "clear it", while `undefined` means "the caller
+   * did not send this field, leave it alone". COALESCE cannot tell those
+   * apart.
+   */
+  const hasGstField = body && body.gst_number !== undefined;
+  const hasAddressField = body && body.customer_address !== undefined;
+
+  let gstNumber = null;
+  if (hasGstField) {
+    const raw = String(body.gst_number || "")
+      .trim()
+      .toUpperCase();
+    if (raw && !GSTIN_REGEX.test(raw)) {
+      const err = new Error("Enter a valid 15-character GSTIN");
+      err.status = 400;
+      throw err;
+    }
+    gstNumber = raw || null;
+  }
+
+  let customerAddress = null;
+  if (hasAddressField) {
+    customerAddress =
+      String(body.customer_address || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 255) || null;
+  }
+
   await db.query(
     `CREATE TABLE IF NOT EXISTS booking_guests (
       guest_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -3925,6 +4073,25 @@ async function saveCheckinDetails(bookingId, body = {}) {
       bookingId,
     ],
   );
+
+  // Written separately so a blank value genuinely clears the field.
+  if (hasGstField || hasAddressField) {
+    const sets = [];
+    const params = [];
+    if (hasGstField) {
+      sets.push("gst_number = ?");
+      params.push(gstNumber);
+    }
+    if (hasAddressField) {
+      sets.push("customer_address = ?");
+      params.push(customerAddress);
+    }
+    params.push(bookingId);
+    await db.query(
+      `UPDATE bookings SET ${sets.join(", ")} WHERE booking_id = ?`,
+      params,
+    );
+  }
 
   if (Array.isArray(guests)) {
     await db.query("DELETE FROM booking_guests WHERE booking_id=?", [
@@ -4007,7 +4174,9 @@ app.patch("/api/bookings/:id/checkin", requireAdmin, async (req, res) => {
       guests,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // A bad GSTIN is the operator's typo, not a server fault — 400 so the
+    // screen shows the real message instead of a generic failure.
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -4017,7 +4186,7 @@ app.put("/api/bookings/:id/checkin-details", requireAdmin, async (req, res) => {
     const guests = await saveCheckinDetails(req.params.id, req.body);
     res.json({ message: "Check-in details saved", guests });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

@@ -13,6 +13,7 @@ import {
   computeRoomBill,
   nightlyRate as resolveNightlyRate,
   money2,
+  GSTIN_PATTERN,
 } from "./utils/billing";
 
 const ADVANCE_RATE = 0.3;
@@ -126,6 +127,7 @@ export default function AdminBookingForUsers({
     customer_email: "",
     customer_phone: "",
     customer_gst: "",
+    customer_address: "",
     vehicle_type: "none",
     pickup_location: "",
     dropoff_location: "",
@@ -227,8 +229,6 @@ export default function AdminBookingForUsers({
       clearTimeout(timer);
     };
   }, [apiFetch, form.customer_phone]);
-  const GSTIN_PATTERN =
-    /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
     function getCustomerFieldError(name, value) {
       const text = String(value || "").trim();
       if (name === "customer_name") {
@@ -610,6 +610,8 @@ export default function AdminBookingForUsers({
                     email: customerEmail,
                     phone: customerPhone,
                     gst_number: form.customer_gst.trim() || null,
+                    customer_address:
+                      form.customer_address.trim() || null,
                   },
                   vehicle_type: form.vehicle_type,
                   advance_amount: totals.advanceAmount,
@@ -686,6 +688,7 @@ export default function AdminBookingForUsers({
           email: customerEmail,
           phone: customerPhone,
           gst_number: form.customer_gst.trim() || null,
+          customer_address: form.customer_address.trim() || null,
         },
         vehicle_type: form.vehicle_type,
         advance_amount: totals.advanceAmount,
@@ -884,12 +887,18 @@ export default function AdminBookingForUsers({
             <div className="mb-4 flex items-center gap-2 font-serif text-[1rem] font-bold text-[#0F1923]">
               <UserIcon size={18} color="#C9A84C" /> Customer Details
             </div>
-            <div className="grid grid-cols-1 gap-3">
+            {/*
+              Two columns from sm upward: the required pair (name, phone) sits
+              on the first row and the optional pair (email, GSTIN) on the
+              second, so the asterisks line up down the left of the block
+              instead of alternating.
+            */}
+            <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
               {[
                 ["customer_name", "Customer name", "text"],
+                ["customer_phone", "Phone number", "tel"],
                 ["customer_email", "Email address", "email"],
                 ["customer_gst", "GST number", "text"],
-                ["customer_phone", "Phone number", "tel"],
               ].map(([name, label, type]) => (
                 <div key={name}>
                   <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
@@ -964,6 +973,32 @@ export default function AdminBookingForUsers({
                     )}
                 </div>
               ))}
+
+              {/*
+                Billing address spans both columns — an address on a half-width
+                input wraps after three or four words and reads badly.
+              */}
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-[0.65rem] font-bold uppercase tracking-[1px] text-[#868E96]">
+                  Billing address (optional)
+                </label>
+                <textarea
+                  rows={2}
+                  maxLength={255}
+                  value={form.customer_address}
+                  autoComplete="street-address"
+                  onChange={(e) => update("customer_address", e.target.value)}
+                  onBlur={() =>
+                    update("customer_address", form.customer_address.trim())
+                  }
+                  placeholder="Company or guest billing address (optional)"
+                  className="w-full resize-none rounded-md border border-[#E9ECEF] px-3 py-2.5 text-sm leading-snug outline-none focus:border-[#C9A84C]"
+                />
+                <div className="mt-1 flex items-center justify-between text-[0.7rem] text-[#868E96]">
+                  <span>Printed under BILL TO on the invoice.</span>
+                  <span>{form.customer_address.length}/255</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

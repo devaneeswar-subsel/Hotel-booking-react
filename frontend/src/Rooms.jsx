@@ -229,6 +229,33 @@ export default function Rooms({
     : rooms;
 
   /*
+   * Public card labels.
+   *
+   * The guest is buying a room TYPE, not a specific room — which room they
+   * actually get is decided at the desk. Showing "Room 201" here leaked the
+   * hotel's inventory and let anyone map out which rooms were free on which
+   * dates, so the card is labelled by type instead.
+   *
+   * When a party needs more than one room of the same type the cards would
+   * otherwise be indistinguishable, so those are numbered within the search
+   * ("Room 1 of 2"). That is a position in this result list, not a real room
+   * number — nothing in it identifies a room in the hotel. The admin and
+   * manager screens still show the true room number, unchanged.
+   */
+  const searchRoomLabels = {};
+  if (search) {
+    usableGroups.forEach((g) => {
+      const offered = g.rooms.slice(0, g.needed);
+      offered.forEach((room, index) => {
+        searchRoomLabels[room.room_id] =
+          offered.length > 1
+            ? `${g.type} — Room ${index + 1} of ${offered.length}`
+            : g.type;
+      });
+    });
+  }
+
+  /*
    * Before the guest searches we show a showcase: one representative card per
    * room type, so they can see what is offered and at what price. Those cards
    * carry no room number and no Book button — a specific room can only be
@@ -560,13 +587,10 @@ export default function Rooms({
     </div>
 
     <div className="room-card-body">
-      <div
-        className="font-body font-bold"
-        itemProp="identifier"
-      >
+      <div className="font-body font-bold">
         {isShowcase
           ? roomName
-          : `Room ${room.room_number || `#${room.room_id}`}`}
+          : searchRoomLabels[room.room_id] || roomName}
       </div>
 
       <p

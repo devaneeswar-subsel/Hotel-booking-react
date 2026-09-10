@@ -208,7 +208,7 @@ export default function GuestBookingModal({
         {/* header */}
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <h2 className="font-display text-base font-semibold text-navy">
-            Book {room.room_type} — Room {room.room_number || room.room_id}
+            Book {room.room_type}
           </h2>
           <button
             onClick={onClose}
