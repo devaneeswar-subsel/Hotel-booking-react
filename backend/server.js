@@ -3125,6 +3125,7 @@ app.post(
         return res.status(400).json({
           error: "Missing required fields",
         });
+<<<<<<< HEAD
       }
 
       // ------------------------------------------------------------
@@ -3152,6 +3153,35 @@ app.post(
       }
 
       // ------------------------------------------------------------
+=======
+      }
+
+      // ------------------------------------------------------------
+      // 2. NORMALIZE ADVANCE AMOUNT
+      //
+      // Empty / null / undefined = Rs.0
+      // 0 = valid
+      // Positive number = valid
+      // Negative / NaN = invalid
+      // ------------------------------------------------------------
+      const normalizedAdvanceAmount =
+        advance_amount === undefined ||
+        advance_amount === null ||
+        String(advance_amount).trim() === ""
+          ? 0
+          : Number(advance_amount);
+
+      if (
+        !Number.isFinite(normalizedAdvanceAmount) ||
+        normalizedAdvanceAmount < 0
+      ) {
+        return res.status(400).json({
+          error: "Enter a valid advance amount",
+        });
+      }
+
+      // ------------------------------------------------------------
+>>>>>>> 8ded4ee38baad8a29a81dc9241bb8b8919b08d4c
       // 3. VERIFY RAZORPAY SIGNATURE
       // ------------------------------------------------------------
       const expectedSignature = crypto
@@ -3593,7 +3623,11 @@ app.post(
       if (!selectedPaymentMode) {
         return res.status(400).json({
           error:
+<<<<<<< HEAD
             "Select Cash, Online or Other payment mode",
+=======
+            "Select Cash or Online payment mode",
+>>>>>>> 8ded4ee38baad8a29a81dc9241bb8b8919b08d4c
         });
       }
 
