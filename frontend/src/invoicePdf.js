@@ -620,9 +620,28 @@ const co = b.check_out_date
 
     doc.line(
       tx + 1,
-      top + 18,
+      top + 18.5,
       tx + 55,
-      top + 18,
+      top + 18.5,
+    );
+
+    // Website sits with the hotel name in the letterhead rather than in the
+    // FROM block, so the address column reads as contact details only.
+    // Drawn above the gold rule with clearance — at top+22 it landed exactly
+    // on the rule and the descenders were cut through.
+    doc.setFont(
+      "helvetica",
+      "normal",
+    );
+
+    doc.setFontSize(7.5);
+
+    ink(GREY);
+
+    doc.text(
+      "vvgrandpark.com",
+      tx + 1,
+      top + 23,
     );
 
     doc.setFont(
@@ -678,8 +697,9 @@ const co = b.check_out_date
       );
     }
 
+    // Rule sits below the website line rather than through it.
     const rule =
-      top + 22;
+      top + 27;
 
     stroke(GOLD, 0.7);
 
@@ -708,7 +728,16 @@ const co = b.check_out_date
 
   /* ── bill to / from ──────────────────────────────────────────────────── */
 
+  /*
+   * FROM sits in the left column and BILL TO in the right.
+   *
+   * FX is the x position of the RIGHT column, so the guest block now uses it
+   * and the hotel block uses the left margin. The guest crest is drawn at
+   * GUEST_X, which is the same position minus the crest width, so the initial
+   * circle keeps its original offset from the name.
+   */
   const FX = 105;
+  const GUEST_X = FX + 13;
 
   doc.setFont(
     "helvetica",
@@ -720,14 +749,14 @@ const co = b.check_out_date
   ink(GOLD);
 
   doc.text(
-    "BILL TO",
-    L + 13,
+    "FROM",
+    L,
     y,
   );
 
   doc.text(
-    "FROM",
-    FX,
+    "BILL TO",
+    GUEST_X,
     y,
   );
 
@@ -742,7 +771,7 @@ const co = b.check_out_date
   );
 
   doc.circle(
-    L + 5,
+    FX + 5,
     y + 1,
     5.5,
     "FD",
@@ -764,7 +793,7 @@ const co = b.check_out_date
     )
       .charAt(0)
       .toUpperCase(),
-    L + 5,
+    FX + 5,
     y + 2.5,
     {
       align: "center",
@@ -783,13 +812,13 @@ const co = b.check_out_date
   doc.text(
     b.guest_name ||
       "Guest",
-    L + 13,
+    GUEST_X,
     y + 2,
   );
 
   doc.text(
     "VV Grand Park Residency",
-    FX,
+    L,
     y + 2,
   );
 
@@ -808,61 +837,71 @@ const co = b.check_out_date
       80,
     );
 
+  // Guest details now live in the right column, wrapped to the space between
+  // GUEST_X and the right margin so nothing can run off the page.
+  const GUEST_W = R - GUEST_X;
+
+  const emailWrapped = doc.splitTextToSize(b.email || "", GUEST_W);
+
   doc.text(
-    emailLines,
-    L + 13,
+    emailWrapped,
+    GUEST_X,
     y + 9,
   );
 
-  let leftY = y + 9 + emailLines.length * 4.5;
+  let guestY = y + 9 + emailWrapped.length * 4.5;
 
   if (b.phone) {
-    doc.text(String(b.phone), L + 13, leftY);
+    doc.text(String(b.phone), GUEST_X, guestY);
 
-    leftY += 4.5;
+    guestY += 4.5;
   }
 
-  /*
-   * Optional billing address, wrapped to the width of the BILL TO column so it
-   * can never run under the FROM block on the right.
-   */
+  // Optional billing address, wrapped to the BILL TO column width.
   if (b.customer_address) {
     const addressLines = doc.splitTextToSize(
       String(b.customer_address),
-      FX - (L + 13) - 6,
+      GUEST_W,
     );
 
-    doc.text(addressLines, L + 13, leftY);
+    doc.text(addressLines, GUEST_X, guestY);
 
-    leftY += addressLines.length * 4.5;
+    guestY += addressLines.length * 4.5;
   }
 
   if (b.gst_number) {
     doc.setFont("helvetica", "bold");
 
-    doc.text(`GSTIN: ${b.gst_number}`, L + 13, leftY);
+    doc.text(`GSTIN: ${b.gst_number}`, GUEST_X, guestY);
 
     doc.setFont("helvetica", "normal");
 
-    leftY += 4.5;
+    guestY += 4.5;
   }
 
+  // Hotel details in the left column, wrapped so the long phone/email line
+  // cannot reach across into the BILL TO block.
+  const FROM_W = FX - L - 8;
+
   doc.text(
-    "vvgrandpark.com",
-    FX,
+    doc.splitTextToSize("3/4/D, Thanjai Saalai, Thiruvarur - 610004", FROM_W),
+    L,
     y + 9,
   );
 
   doc.text(
-    "3/4/D, Thanjai Saalai, Thiruvarur - 610004",
-    FX,
+    doc.splitTextToSize(
+      "+91 93849 82510  |  +91 90032 51115",
+      FROM_W,
+    ),
+    L,
     y + 16,
   );
 
   doc.text(
-    "+91 93849 82510 |+91 90032 51115  |  vvgrandpark@gmail.com",
-    FX,
-    y + 23,
+    "vvgrandpark@gmail.com",
+    L,
+    y + 21,
   );
 
   // The hotel's own GSTIN. Bold so it reads as a tax field rather than another
@@ -871,16 +910,17 @@ const co = b.check_out_date
 
   doc.text(
     `GSTIN: ${HOTEL_GSTIN}`,
-    FX,
-    y + 30,
+    L,
+    y + 28,
   );
 
   doc.setFont("helvetica", "normal");
 
+  // Whichever column is taller decides where the table starts.
   y =
     Math.max(
-      leftY,
-      y + 35,
+      guestY,
+      y + 33,
     ) + 6;
 
   /* ── line-item table ─────────────────────────────────────────────────── */

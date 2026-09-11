@@ -1740,6 +1740,24 @@ tbody tr:hover td {
   color: #991b1b !important;
 }
 
+/*
+ * Nights already sold to a guest. Distinct from a manual block (red) so staff
+ * can tell "held by us" from "sold to a guest" at a glance. Disabled by
+ * filterDate, so this only has to read as unavailable.
+ */
+.react-datepicker__day.vv-room-date-booked,
+.react-datepicker__day--disabled.vv-room-date-booked {
+  background: #e2e8f0 !important;
+  color: #64748b !important;
+  font-weight: 700;
+  cursor: not-allowed;
+}
+
+.react-datepicker__day.vv-room-date-booked:hover {
+  background: #e2e8f0 !important;
+  color: #64748b !important;
+}
+
 .react-datepicker__day.vv-room-date-selected {
   background: #0f1923 !important;
   color: white !important;

@@ -23,10 +23,18 @@ const ALLOWED_ORIGINS = [
 app.use(
   cors({
     origin: function (origin, callback) {
+      /*
+       * origin.includes("vercel.app") used to be here. Combined with
+       * credentials:true it let ANY host whose name merely contains that
+       * string — a free *.vercel.app site, or evil-vercel.app.attacker.com —
+       * make authenticated requests with a signed-in user's cookie.
+       *
+       * Preview deployments are still supported: set FRONTEND_URL, or add the
+       * exact preview URL to ALLOWED_ORIGINS. Nothing else changes.
+       */
       if (
         !origin ||
-        ALLOWED_ORIGINS.some((o) => origin.startsWith(o)) ||
-        origin.includes("vercel.app")
+        ALLOWED_ORIGINS.some((o) => origin === o || origin.startsWith(o))
       ) {
         callback(null, true);
       } else {
@@ -42,6 +50,38 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 // cookieParser MUST run before any authenticated route is registered,
 // otherwise req.cookies is undefined and requireAuth rejects valid sessions.
 app.use(cookieParser());
+
+/*
+ * ── SQL DETAIL SHIELD ────────────────────────────────────────────────────
+ *
+ * Dozens of routes end with `res.status(500).json({ error: err.message })`.
+ * A raw MySQL message names our tables and columns, which hands anyone
+ * probing the API a free map of the schema.
+ *
+ * Rather than edit every route — and risk changing behaviour in any of them —
+ * this wraps res.json once. Only 5xx replies are touched, and only in
+ * production: every 2xx and 4xx body passes through untouched, so no working
+ * flow and no error message a user is meant to read is affected. The real
+ * message still goes to the server log.
+ */
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV !== "production") return next();
+
+  const originalJson = res.json.bind(res);
+
+  res.json = (body) => {
+    if (res.statusCode >= 500 && body && typeof body.error === "string") {
+      console.error(`[${req.method} ${req.originalUrl}] ${body.error}`);
+      return originalJson({
+        ...body,
+        error: "Something went wrong. Please try again.",
+      });
+    }
+    return originalJson(body);
+  };
+
+  next();
+});
 
 // ─── CLOUDINARY ───────────────────────────────────────────────────────────────
 const cloudinary = require("cloudinary").v2;
@@ -469,6 +509,73 @@ function loginRateLimit(req, res, next) {
     }
   }
   next();
+}
+
+/*
+ * ── OTP ATTEMPT LIMIT ────────────────────────────────────────────────────
+ *
+ * A password-reset OTP is six digits. Without a limit an attacker can try
+ * every combination inside the ten-minute window and take over any account
+ * whose email they know — including an admin's.
+ *
+ * Counted per email so the limit cannot be sidestepped by rotating IPs. A
+ * correct OTP clears the counter, so a guest who mistypes twice is unaffected.
+ */
+const otpAttempts = new Map();
+const OTP_WINDOW_MS = 15 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+
+function otpAttemptsExceeded(email) {
+  const key = String(email || "").toLowerCase();
+  const now = Date.now();
+  const hits = (otpAttempts.get(key) || []).filter(
+    (t) => now - t < OTP_WINDOW_MS,
+  );
+  otpAttempts.set(key, hits);
+  return hits.length >= OTP_MAX_ATTEMPTS;
+}
+
+function recordOtpAttempt(email) {
+  const key = String(email || "").toLowerCase();
+  const now = Date.now();
+  const hits = (otpAttempts.get(key) || []).filter(
+    (t) => now - t < OTP_WINDOW_MS,
+  );
+  hits.push(now);
+  otpAttempts.set(key, hits);
+
+  if (otpAttempts.size > 5000) {
+    for (const [k, times] of otpAttempts) {
+      if (!times.some((t) => now - t < OTP_WINDOW_MS)) otpAttempts.delete(k);
+    }
+  }
+}
+
+function clearOtpAttempts(email) {
+  otpAttempts.delete(String(email || "").toLowerCase());
+}
+
+/*
+ * ── OTP REQUEST LIMIT ────────────────────────────────────────────────────
+ *
+ * Stops one address being mailed an OTP over and over, which would flood the
+ * guest's inbox, burn the Resend quota and get the sending domain flagged.
+ */
+const otpRequests = new Map();
+const OTP_REQUEST_WINDOW_MS = 60 * 60 * 1000;
+const OTP_MAX_REQUESTS = 5;
+
+function otpRequestsExceeded(email) {
+  const key = String(email || "").toLowerCase();
+  const now = Date.now();
+  const hits = (otpRequests.get(key) || []).filter(
+    (t) => now - t < OTP_REQUEST_WINDOW_MS,
+  );
+  otpRequests.set(key, hits);
+  if (hits.length >= OTP_MAX_REQUESTS) return true;
+  hits.push(now);
+  otpRequests.set(key, hits);
+  return false;
 }
 
 // Clear an IP's failed attempts once it authenticates successfully, so a
@@ -1377,14 +1484,25 @@ app.post("/api/auth/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "Email required" });
+
+    /*
+     * Always answer the same way, whether or not the address is registered.
+     * The old 404 ("No account found with this email") let anyone test an
+     * address against the guest list.
+     */
+    const NEUTRAL = {
+      message: "If that email is registered, an OTP has been sent",
+    };
+
+    // One address cannot be mailed an OTP more than a handful of times an hour.
+    if (otpRequestsExceeded(email)) return res.json(NEUTRAL);
+
     const [users] = await db.query(
       "SELECT user_id, name FROM users WHERE email=?",
       [email],
     );
-    if (!users.length)
-      return res
-        .status(404)
-        .json({ error: "No account found with this email" });
+    if (!users.length) return res.json(NEUTRAL);
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db.query("DELETE FROM password_otps WHERE email=?", [email]);
@@ -1402,7 +1520,8 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       console.error("Resend error:", error);
       return res.status(500).json({ error: "Failed to send OTP. Try again." });
     }
-    res.json({ message: "OTP sent to your email" });
+    // Same wording as the not-registered path above.
+    res.json(NEUTRAL);
   } catch (err) {
     console.error("Forgot password error:", err.message);
     res.status(500).json({ error: "Failed to send OTP. Try again." });
@@ -1414,12 +1533,26 @@ app.post("/api/auth/verify-otp", async (req, res) => {
     const { email, otp } = req.body;
     if (!email || !otp)
       return res.status(400).json({ error: "Email and OTP required" });
+
+    // Five wrong guesses per address per fifteen minutes. Without this a
+    // six-digit code can be enumerated inside its ten-minute lifetime.
+    if (otpAttemptsExceeded(email)) {
+      return res.status(429).json({
+        error: "Too many incorrect attempts. Request a new OTP in 15 minutes.",
+      });
+    }
+
     const [rows] = await db.query(
       "SELECT * FROM password_otps WHERE email=? AND otp=? AND used=0 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
       [email, otp],
     );
-    if (!rows.length)
+    if (!rows.length) {
+      recordOtpAttempt(email);
       return res.status(400).json({ error: "Invalid or expired OTP" });
+    }
+
+    // A correct code clears the counter, so an honest mistype costs nothing.
+    clearOtpAttempts(email);
     res.json({ message: "OTP verified", valid: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1437,12 +1570,25 @@ app.post("/api/auth/reset-password", async (req, res) => {
       return res
         .status(400)
         .json({ error: "Password must be at least 6 characters" });
+
+    // Same limit as verify-otp — otherwise this route is an unguarded second
+    // door onto the same six-digit code.
+    if (otpAttemptsExceeded(email)) {
+      return res.status(429).json({
+        error: "Too many incorrect attempts. Request a new OTP in 15 minutes.",
+      });
+    }
+
     const [rows] = await db.query(
       "SELECT * FROM password_otps WHERE email=? AND otp=? AND used=0 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
       [email, otp],
     );
-    if (!rows.length)
+    if (!rows.length) {
+      recordOtpAttempt(email);
       return res.status(400).json({ error: "Invalid or expired OTP" });
+    }
+
+    clearOtpAttempts(email);
     const hashed = await bcrypt.hash(new_password, 12);
     await db.query("UPDATE users SET password=? WHERE email=?", [
       hashed,
@@ -2779,12 +2925,34 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/payment/failed", async (req, res) => {
+/*
+ * Called when a guest closes the Razorpay window, so it cannot require a
+ * login — guests check out without an account. It stays open, but is now
+ * narrowed so it can only ever do what it is meant to:
+ *
+ *   - only a booking still in 'pending' can be touched (already true)
+ *   - only within an hour of that booking being created, so an old pending
+ *     row cannot be cancelled later by anyone who guesses its id
+ *   - rate limited, so ids cannot be swept in bulk
+ *
+ * The guest-facing behaviour is unchanged.
+ */
+app.post("/api/payment/failed", guestRateLimit, async (req, res) => {
   try {
+    const bookingId = Number(req.body.booking_id);
+    if (!bookingId) return res.status(400).json({ error: "booking_id required" });
+
     await db.query(
-      "UPDATE bookings SET status='cancelled' WHERE booking_id=? AND status='pending'",
-      [req.body.booking_id],
+      `UPDATE bookings
+          SET status='cancelled'
+        WHERE booking_id = ?
+          AND status = 'pending'
+          AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+      [bookingId],
     );
+
+    // Always the same reply, so the endpoint cannot be used to discover which
+    // booking ids exist.
     res.json({ message: "Booking cancelled." });
   } catch (err) {
     res.status(500).json({ error: err.message });

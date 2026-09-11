@@ -38,12 +38,50 @@ const NO_VEHICLE_ID = "none";
 const FALLBACK_ROOM_IMAGE =
   "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=1200";
 
-const apiFetch = (url, options = {}) =>
-  fetch(`${API}${url}`, {
+const apiFetch = async (url, options = {}) => {
+  const res = await fetch(`${API}${url}`, {
     ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options.headers },
   });
+
+  /*
+   * Make res.json() safe for every caller.
+   *
+   * When a route is missing, or the server is restarting, Express replies
+   * with an HTML error page. res.json() then throws "Unexpected token '<',
+   * \"<!DOCTYPE\"... is not valid JSON", which tells the person at the desk
+   * nothing about what went wrong.
+   *
+   * Wrapping it here fixes every call site at once without touching any of
+   * them. A real JSON body is returned exactly as before — this only changes
+   * what happens on a response that was never JSON to begin with.
+   */
+  const originalJson = res.json.bind(res);
+
+  res.json = async () => {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (res.status === 404) {
+        return {
+          error:
+            "That feature is not available yet — the server may need to be restarted.",
+        };
+      }
+      if (res.status >= 500) {
+        return { error: "The server is not responding. Please try again." };
+      }
+      return { error: `Unexpected server response (${res.status}).` };
+    }
+  };
+
+  // kept so anything that deliberately reads the raw body still can
+  res.jsonStrict = originalJson;
+
+  return res;
+};
 function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
