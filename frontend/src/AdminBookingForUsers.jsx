@@ -20,11 +20,7 @@ import {
 } from "./utils/billing";
 
 const ADVANCE_RATE = 0.3;
-<<<<<<< HEAD
 const MANUAL_PAYMENT_MODES = ["Cash", "Online", "Other"];
-=======
-const MANUAL_PAYMENT_MODES = ["Cash", "Online"];
->>>>>>> 8ded4ee38baad8a29a81dc9241bb8b8919b08d4c
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CUSTOMER_NAME_PATTERN = /^[A-Za-z]+(?:\s+[A-Za-z]+)*$/;
@@ -638,11 +634,7 @@ const remainingAmount = Math.max(
       )
     ) {
       showToast(
-<<<<<<< HEAD
         "Select Cash, Online or Other payment mode",
-=======
-        "Select Cash or Online payment mode",
->>>>>>> 8ded4ee38baad8a29a81dc9241bb8b8919b08d4c
         "error",
       );
 
@@ -2011,7 +2003,6 @@ console.log("DEBUG advance:", JSON.stringify(form.advance_amount), typeof form.a
               Payment mode
             </div>
 
-<<<<<<< HEAD
             <select
               value={form.payment_mode}
               onChange={(e) =>
@@ -2034,39 +2025,6 @@ console.log("DEBUG advance:", JSON.stringify(form.advance_amount), typeof form.a
                 ),
               )}
             </select>
-=======
-            <div className="grid grid-cols-2 gap-2">
-
-              {MANUAL_PAYMENT_MODES.map(
-                (mode) => {
-                  const active =
-                    form.payment_mode ===
-                    mode;
-
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() =>
-                        update(
-                          "payment_mode",
-                          mode,
-                        )
-                      }
-                      disabled={paying}
-                      className={`rounded-md border px-3 py-2 text-[0.82rem] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                        active
-                          ? "border-[#0F1923] bg-[#0F1923] text-[#C9A84C]"
-                          : "border-[#E9ECEF] bg-white text-[#495057] hover:border-[#C9A84C]"
-                      }`}
-                    >
-                      {mode}
-                    </button>
-                  );
-                },
-              )}
-            </div>
->>>>>>> 8ded4ee38baad8a29a81dc9241bb8b8919b08d4c
           </div>
 
           {/* ADVANCE AMOUNT */}
@@ -2120,13 +2078,8 @@ console.log("DEBUG advance:", JSON.stringify(form.advance_amount), typeof form.a
                 )
               }
               placeholder={
-<<<<<<< HEAD
                 form.payment_mode !==
                 "Online"
-=======
-                form.payment_mode ===
-                "Cash"
->>>>>>> 8ded4ee38baad8a29a81dc9241bb8b8919b08d4c
                   ? "Enter amount or leave empty"
                   : "Enter advance amount"
               }
@@ -2153,13 +2106,8 @@ console.log("DEBUG advance:", JSON.stringify(form.advance_amount), typeof form.a
               </div>
             ) : (
               <div className="mt-1 text-[0.72rem] text-[#868E96]">
-<<<<<<< HEAD
                 {form.payment_mode !==
                 "Online"
-=======
-                {form.payment_mode ===
-                "Cash"
->>>>>>> 8ded4ee38baad8a29a81dc9241bb8b8919b08d4c
                   ? `Leave empty for Rs.0 advance. Suggested: ${money(
                       totals.suggestedAdvanceAmount,
                     )}`
@@ -2232,19 +2180,11 @@ console.log("DEBUG advance:", JSON.stringify(form.advance_amount), typeof form.a
             ) : String(
                 form.advance_amount,
               ).trim() ? (
-<<<<<<< HEAD
               `Confirm ${form.payment_mode} Advance ${money(
                 totals.advanceAmount,
               )}`
             ) : (
               `Confirm ${form.payment_mode} Booking`
-=======
-              `Confirm Cash Advance ${money(
-                totals.advanceAmount,
-              )}`
-            ) : (
-              "Confirm Cash Booking"
->>>>>>> 8ded4ee38baad8a29a81dc9241bb8b8919b08d4c
             )}
           </button>
 
@@ -2278,7 +2218,6 @@ console.log("DEBUG advance:", JSON.stringify(form.advance_amount), typeof form.a
                 full amount remaining.
               </p>
             )}
-<<<<<<< HEAD
 
           {/* OTHER MESSAGE */}
 
@@ -2307,8 +2246,6 @@ console.log("DEBUG advance:", JSON.stringify(form.advance_amount), typeof form.a
                 full amount remaining.
               </p>
             ))}
-=======
->>>>>>> 8ded4ee38baad8a29a81dc9241bb8b8919b08d4c
         </div>
       </div>
     </div>
