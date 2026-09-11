@@ -335,28 +335,43 @@ function normalizeCustomerPhone(value) {
   return phone;
 }
 
-function resolveAdvanceAmount(totalAmount, advanceAmount) {
-  const defaultAdvanceAmount = Math.floor(totalAmount * ADVANCE_RATE);
+function resolveAdvanceAmount(value, totalAmount = null) {
+  // Empty / null / undefined = ₹0
   if (
-    advanceAmount === undefined ||
-    advanceAmount === null ||
-    advanceAmount === ""
+    value === undefined ||
+    value === null ||
+    String(value).trim() === ""
   ) {
-    return defaultAdvanceAmount;
+    return 0;
   }
 
-  const requestedAdvance = Math.round(Number(advanceAmount) * 100) / 100;
-  if (!Number.isFinite(requestedAdvance) || requestedAdvance <= 0) {
-    const err = new Error("Enter a valid advance amount");
-    err.status = 400;
-    throw err;
+  const amount = Number(value);
+
+  // Negative / invalid only
+  if (!Number.isFinite(amount) || amount < 0) {
+    const error = new Error("Enter a valid advance amount");
+    error.status = 400;
+    throw error;
   }
-  if (requestedAdvance > totalAmount) {
-    const err = new Error("Advance amount cannot exceed full amount");
-    err.status = 400;
-    throw err;
+
+  const normalizedAmount = Math.round(amount * 100) / 100;
+
+  // Only validate against total when total is a valid positive number
+  const fullAmount = Number(totalAmount);
+
+  if (
+    Number.isFinite(fullAmount) &&
+    fullAmount > 0 &&
+    normalizedAmount > fullAmount
+  ) {
+    const error = new Error(
+      "Advance amount cannot exceed the full amount"
+    );
+    error.status = 400;
+    throw error;
   }
-  return requestedAdvance;
+
+  return normalizedAmount;
 }
 
 // ─── AUTH COOKIE ─────────────────────────────────────────────────────────────
@@ -697,7 +712,10 @@ async function calculateBookingAmounts({
     Math.round((taxableAmount + chargedGst) * 100) / 100,
   );
   const discountedRoomAmount = taxableAmount;
-  const advanceAmount = resolveAdvanceAmount(totalAmount, advance_amount);
+  const advanceAmount = resolveAdvanceAmount(
+  advance_amount,
+  totalAmount
+);
   const remainingAmount =
     Math.round(Math.max(0, totalAmount - advanceAmount) * 100) / 100;
 
@@ -3092,6 +3110,9 @@ app.post(
         gst_enabled = true,
       } = req.body;
 
+      // ------------------------------------------------------------
+      // 1. REQUIRED FIELDS
+      // ------------------------------------------------------------
       if (
         !room_id ||
         !check_in_date ||
@@ -3100,62 +3121,138 @@ app.post(
         !razorpay_payment_id ||
         !razorpay_signature
       ) {
-        return res.status(400).json({ error: "Missing required fields" });
+        return res.status(400).json({
+          error: "Missing required fields",
+        });
       }
 
+      // ------------------------------------------------------------
+      // 2. NORMALIZE ADVANCE AMOUNT
+      //
+      // Empty / null / undefined = Rs.0
+      // 0 = valid
+      // Positive number = valid
+      // Negative / NaN = invalid
+      // ------------------------------------------------------------
+      const normalizedAdvanceAmount =
+        advance_amount === undefined ||
+        advance_amount === null ||
+        String(advance_amount).trim() === ""
+          ? 0
+          : Number(advance_amount);
+
+      if (
+        !Number.isFinite(normalizedAdvanceAmount) ||
+        normalizedAdvanceAmount < 0
+      ) {
+        return res.status(400).json({
+          error: "Enter a valid advance amount",
+        });
+      }
+
+      // ------------------------------------------------------------
+      // 3. VERIFY RAZORPAY SIGNATURE
+      // ------------------------------------------------------------
       const expectedSignature = crypto
         .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
         .update(`${razorpay_order_id}|${razorpay_payment_id}`)
         .digest("hex");
+
       if (expectedSignature !== razorpay_signature) {
-        return res.status(400).json({ error: "Payment verification failed" });
+        return res.status(400).json({
+          error: "Payment verification failed",
+        });
       }
 
-      const validVehicleTypes = ["none", "4-seater", "7-seater", "12-seater"];
+      // ------------------------------------------------------------
+      // 4. VEHICLE VALIDATION
+      // ------------------------------------------------------------
+      const validVehicleTypes = [
+        "none",
+        "4-seater",
+        "7-seater",
+        "12-seater",
+      ];
+
       if (!validVehicleTypes.includes(vehicle_type)) {
-        return res.status(400).json({ error: "Invalid vehicle type" });
+        return res.status(400).json({
+          error: "Invalid vehicle type",
+        });
       }
 
+      // ------------------------------------------------------------
+      // 5. CALCULATE BOOKING AMOUNTS
+      // ------------------------------------------------------------
       const amounts = await calculateBookingAmounts({
         room_id,
         check_in_date,
         check_out_date,
-        advance_amount,
+        advance_amount: normalizedAdvanceAmount,
         guest_count,
         discount_applied,
         discount_amount,
-        gst_enabled,
+        gst_enabled: gst_enabled !== false,
         allowPastDates: true,
       });
-      const requestedGuests = Math.max(1, Number(guest_count) || 1);
-      if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
+
+      // ------------------------------------------------------------
+      // 6. GUEST COUNT VALIDATION
+      // ------------------------------------------------------------
+      const requestedGuests = Math.max(
+        1,
+        Number(guest_count) || 1,
+      );
+
+      if (
+        requestedGuests >
+        Number(amounts.room.capacity || requestedGuests)
+      ) {
         return res.status(400).json({
           error: `This room allows up to ${amounts.room.capacity} guests`,
         });
       }
 
-      const paidOrder = await razorpay.orders.fetch(razorpay_order_id);
+      // ------------------------------------------------------------
+      // 7. FETCH RAZORPAY ORDER
+      // ------------------------------------------------------------
+      const paidOrder = await razorpay.orders.fetch(
+        razorpay_order_id,
+      );
+
       const orderNotes = paidOrder.notes || {};
+
       if (
         String(orderNotes.room_id || "") !== String(room_id) ||
         orderNotes.check_in_date !== check_in_date ||
         orderNotes.check_out_date !== check_out_date
       ) {
-        return res
-          .status(400)
-          .json({ error: "Paid order does not match this booking" });
+        return res.status(400).json({
+          error: "Paid order does not match this booking",
+        });
       }
 
+      // ------------------------------------------------------------
+      // 8. CHECK PAYMENT STATUS
+      // ------------------------------------------------------------
       if (paidOrder.status !== "paid") {
-        return res
-          .status(400)
-          .json({ error: "This payment has not completed" });
+        return res.status(400).json({
+          error: "This payment has not completed",
+        });
       }
 
+      // ------------------------------------------------------------
+      // 9. DUPLICATE PAYMENT CHECK
+      // ------------------------------------------------------------
       const [dupe] = await db.query(
-        "SELECT booking_id FROM bookings WHERE advance_order_id=? LIMIT 1",
+        `
+          SELECT booking_id
+          FROM bookings
+          WHERE advance_order_id = ?
+          LIMIT 1
+        `,
         [razorpay_order_id],
       );
+
       if (dupe.length) {
         return res.json({
           message: "Booking already confirmed for this payment",
@@ -3164,114 +3261,783 @@ app.post(
         });
       }
 
+      // ------------------------------------------------------------
+      // 10. ROOM DATE CONFLICT CHECK
+      // ------------------------------------------------------------
       const conflict = await findDateConflict(db, {
         room_id,
         check_in_date,
         check_out_date,
       });
+
       if (conflict) {
         return res.status(409).json({
-          error: `${conflict}. The payment succeeded — refund it from the Razorpay dashboard.`,
+          error:
+            `${conflict}. The payment succeeded — refund it from the Razorpay dashboard.`,
           razorpay_payment_id,
         });
       }
+
+      // ------------------------------------------------------------
+      // 11. VERIFY RAZORPAY AMOUNT
+      // ------------------------------------------------------------
       if (
-        Number(paidOrder.amount) !== Math.round(amounts.advanceAmount * 100)
+        Number(paidOrder.amount) !==
+        Math.round(amounts.advanceAmount * 100)
       ) {
-        return res
-          .status(400)
-          .json({ error: "Advance amount does not match paid order" });
+        return res.status(400).json({
+          error: "Advance amount does not match paid order",
+        });
       }
 
-      const userId = await findOrCreateGuestUser(customer || {});
+      // ------------------------------------------------------------
+      // 12. CREATE / FIND GUEST
+      // ------------------------------------------------------------
+      const userId = await findOrCreateGuestUser(
+        customer || {},
+      );
 
-      const gstNumberRaw = String(customer?.gst_number || "")
+      // ------------------------------------------------------------
+      // 13. GST NUMBER
+      // ------------------------------------------------------------
+      const gstNumberRaw = String(
+        customer?.gst_number || "",
+      )
         .trim()
         .toUpperCase();
-      if (gstNumberRaw && !GSTIN_REGEX.test(gstNumberRaw)) {
-        return res
-          .status(400)
-          .json({ error: "Enter a valid 15-character GSTIN" });
+
+      if (
+        gstNumberRaw &&
+        !GSTIN_REGEX.test(gstNumberRaw)
+      ) {
+        return res.status(400).json({
+          error: "Enter a valid 15-character GSTIN",
+        });
       }
+
       const gstNumber = gstNumberRaw || null;
 
-      // Optional billing address. Collapsed to single spaces so a pasted
-      // multi-line address prints as one clean block on the invoice.
+      // ------------------------------------------------------------
+      // 14. CUSTOMER ADDRESS
+      // ------------------------------------------------------------
       const customerAddress =
-        String(customer?.customer_address || customer?.address || "")
+        String(
+          customer?.customer_address ||
+            customer?.address ||
+            "",
+        )
           .replace(/\s+/g, " ")
           .trim()
           .slice(0, 255) || null;
 
+      // ------------------------------------------------------------
+      // 15. INSERT BOOKING
+      // ------------------------------------------------------------
       const [result] = await db.query(
-        `INSERT INTO bookings (
-        user_id, room_id, check_in_date, check_out_date, guest_count,
-        total_price, taxable_amount, gst_amount, final_total, total_amount,
-        advance_amount, advance_paid, balance_paid, remaining_amount,
-        payment_status, payment_id, advance_payment_id, advance_order_id,
-        payment_method, booking_source, vehicle_type, vehicle_price,
-        vehicle_status, pickup_location, dropoff_location,
-        discount_applied, discount_amount, gst_enabled, gst_number,
-        customer_address, status
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        `
+          INSERT INTO bookings (
+            user_id,
+            room_id,
+            check_in_date,
+            check_out_date,
+            guest_count,
+
+            total_price,
+            taxable_amount,
+            gst_amount,
+            final_total,
+            total_amount,
+
+            advance_amount,
+            advance_paid,
+            balance_paid,
+            remaining_amount,
+
+            payment_status,
+            payment_id,
+            advance_payment_id,
+            advance_order_id,
+
+            payment_method,
+            booking_source,
+
+            vehicle_type,
+            vehicle_price,
+            vehicle_status,
+
+            pickup_location,
+            dropoff_location,
+
+            discount_applied,
+            discount_amount,
+
+            gst_enabled,
+            gst_number,
+
+            customer_address,
+            status
+          )
+          VALUES (
+            ?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,
+            ?,?,?,?,
+            ?,?,
+            ?,?,?,
+            ?,?,
+            ?,?,
+            ?,?,
+            ?,?,
+            ?,
+            'confirmed'
+          )
+        `,
         [
           userId,
           room_id,
           check_in_date,
           check_out_date,
           requestedGuests,
+
           amounts.roomSubtotal,
           amounts.taxableAmount,
           amounts.gstAmount,
           amounts.totalAmount,
           amounts.totalAmount,
+
           amounts.advanceAmount,
           amounts.advanceAmount,
           0,
           amounts.remainingAmount,
-          amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+
+          amounts.remainingAmount > 0
+            ? "PARTIALLY_PAID"
+            : "PAID",
+
           razorpay_payment_id,
           razorpay_payment_id,
           razorpay_order_id,
+
           "Razorpay Advance",
-          req.user.role === "admin" ? "ADMIN_ADVANCE" : "MANAGER_ADVANCE",
+
+          req.user.role === "admin"
+            ? "ADMIN_ADVANCE"
+            : "MANAGER_ADVANCE",
+
           vehicle_type,
           0,
-          vehicle_type === "none" ? "not_required" : "pending",
+
+          vehicle_type === "none"
+            ? "not_required"
+            : "pending",
+
           pickup_location || null,
           dropoff_location || null,
+
           amounts.discountAmount > 0 ? 1 : 0,
           amounts.discountAmount,
+
           amounts.gstEnabled ? 1 : 0,
           gstNumber,
+
           customerAddress,
         ],
       );
 
+      // ------------------------------------------------------------
+      // 16. INVOICE
+      // ------------------------------------------------------------
       const bookingId = result.insertId;
+
       loadBookingForInvoice(bookingId)
-        .then((booking) => booking && sendAdvanceInvoiceEmail(booking))
-        .catch((emailErr) =>
+        .then((booking) => {
+          if (booking) {
+            return sendAdvanceInvoiceEmail(booking);
+          }
+        })
+        .catch((emailErr) => {
           console.error(
             "Advance booking invoice email error:",
             emailErr.message,
-          ),
-        );
+          );
+        });
 
-      res.status(201).json({
+      // ------------------------------------------------------------
+      // 17. RESPONSE
+      // ------------------------------------------------------------
+      return res.status(201).json({
         message: "Booking confirmed with advance payment",
+
         booking_id: bookingId,
+
         totalAmount: amounts.totalAmount,
+
         advanceAmount: amounts.advanceAmount,
+
         advancePaid: amounts.advanceAmount,
+
         remainingAmount: amounts.remainingAmount,
-        paymentStatus: amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+
+        paymentStatus:
+          amounts.remainingAmount > 0
+            ? "PARTIALLY_PAID"
+            : "PAID",
+
         bookingStatus: "CONFIRMED",
       });
     } catch (err) {
-      res.status(err.status || 500).json({ error: err.message });
+      console.error(
+        "Advance booking error:",
+        err,
+      );
+
+      return res.status(err.status || 500).json({
+        error:
+          err.message ||
+          "Failed to confirm advance booking",
+      });
     }
   },
+);
+
+
+// ================================================================
+// MANUAL CASH / ONLINE ADVANCE CONFIRM
+// ================================================================
+
+app.post(
+  "/api/admin/bookings/manual-advance-confirm",
+  requireManager,
+  async (req, res) => {
+    try {
+      const {
+        room_id,
+        check_in_date,
+        check_out_date,
+        guest_count,
+        customer,
+        vehicle_type = "none",
+        advance_amount,
+        payment_mode,
+        discount_applied = false,
+        discount_amount = 0,
+        pickup_location,
+        dropoff_location,
+        gst_enabled = true,
+      } = req.body;
+
+      // ============================================================
+      // 1. REQUIRED BOOKING FIELDS
+      // ============================================================
+
+      if (
+        !room_id ||
+        !check_in_date ||
+        !check_out_date
+      ) {
+        return res.status(400).json({
+          error: "Missing required fields",
+        });
+      }
+
+      // ============================================================
+      // 2. ADVANCE AMOUNT
+      //
+      // Empty = 0
+      // null  = 0
+      // undefined = 0
+      // "0" = 0
+      // 0 = 0
+      // 403 = 403
+      // ============================================================
+
+      let normalizedAdvanceAmount = 0;
+
+      if (
+        advance_amount !== undefined &&
+        advance_amount !== null &&
+        String(advance_amount).trim() !== ""
+      ) {
+        normalizedAdvanceAmount = Number(
+          advance_amount
+        );
+      }
+
+      // Validate advance amount
+      if (
+        !Number.isFinite(normalizedAdvanceAmount) ||
+        normalizedAdvanceAmount < 0
+      ) {
+        return res.status(400).json({
+          error: "Enter a valid advance amount",
+        });
+      }
+
+      // Keep only 2 decimal places
+      normalizedAdvanceAmount =
+        Math.round(
+          normalizedAdvanceAmount * 100
+        ) / 100;
+
+      // ============================================================
+      // 3. PAYMENT MODE
+      // ============================================================
+
+      const selectedPaymentMode =
+        MANUAL_ADVANCE_PAYMENT_MODES[
+          String(payment_mode || "")
+            .trim()
+            .toLowerCase()
+        ];
+
+      if (!selectedPaymentMode) {
+        return res.status(400).json({
+          error:
+            "Select Cash or Online payment mode",
+        });
+      }
+
+      // ============================================================
+      // 4. ONLINE PAYMENT MUST HAVE ADVANCE
+      //
+      // Cash can be Rs.0
+      // Online cannot be Rs.0
+      // ============================================================
+
+      if (
+        selectedPaymentMode === "Online" &&
+        normalizedAdvanceAmount <= 0
+      ) {
+        return res.status(400).json({
+          error:
+            "Enter a valid advance amount",
+        });
+      }
+
+      // ============================================================
+      // 5. VEHICLE VALIDATION
+      // ============================================================
+
+      const validVehicleTypes = [
+        "none",
+        "4-seater",
+        "7-seater",
+        "12-seater",
+      ];
+
+      if (
+        !validVehicleTypes.includes(
+          vehicle_type
+        )
+      ) {
+        return res.status(400).json({
+          error: "Invalid vehicle type",
+        });
+      }
+
+      // ============================================================
+      // 6. CALCULATE BOOKING AMOUNTS
+      // ============================================================
+
+      const amounts =
+        await calculateBookingAmounts({
+          room_id,
+          check_in_date,
+          check_out_date,
+
+          // IMPORTANT
+          // Empty Cash = 0
+          advance_amount:
+            normalizedAdvanceAmount,
+
+          guest_count,
+
+          discount_applied,
+
+          discount_amount,
+
+          gst_enabled:
+            gst_enabled !== false,
+
+          // Admin / Manager can create
+          // booking with past dates
+          allowPastDates: true,
+        });
+
+      // ============================================================
+      // 7. GUEST COUNT
+      // ============================================================
+
+      const requestedGuests = Math.max(
+        1,
+        Number(guest_count) || 1
+      );
+
+      if (
+        requestedGuests >
+        Number(
+          amounts.room.capacity ||
+            requestedGuests
+        )
+      ) {
+        return res.status(400).json({
+          error: `This room allows up to ${amounts.room.capacity} guests`,
+        });
+      }
+
+      // ============================================================
+      // 8. ADVANCE CANNOT EXCEED TOTAL
+      //
+      // Extra safety check
+      // ============================================================
+
+      if (
+        normalizedAdvanceAmount >
+        Number(amounts.totalAmount || 0)
+      ) {
+        return res.status(400).json({
+          error:
+            "Advance amount cannot exceed the full amount",
+        });
+      }
+
+      // ============================================================
+      // 9. ROOM AVAILABILITY
+      // ============================================================
+
+      const conflict =
+        await findDateConflict(db, {
+          room_id,
+          check_in_date,
+          check_out_date,
+        });
+
+      if (conflict) {
+        return res.status(409).json({
+          error: conflict,
+        });
+      }
+
+      // ============================================================
+      // 10. FIND / CREATE CUSTOMER
+      // ============================================================
+
+      const userId =
+        await findOrCreateGuestUser(
+          customer || {}
+        );
+
+      // ============================================================
+      // 11. MANUAL PAYMENT ID
+      // ============================================================
+
+      const manualPaymentId =
+        `${selectedPaymentMode.toUpperCase()}-${Date.now()}-${req.user.user_id}`;
+
+      // ============================================================
+      // 12. GST NUMBER
+      // ============================================================
+
+      const gstNumberRaw = String(
+        customer?.gst_number || ""
+      )
+        .trim()
+        .toUpperCase();
+
+      if (
+        gstNumberRaw &&
+        !GSTIN_REGEX.test(gstNumberRaw)
+      ) {
+        return res.status(400).json({
+          error:
+            "Enter a valid 15-character GSTIN",
+        });
+      }
+
+      const gstNumber =
+        gstNumberRaw || null;
+
+      // ============================================================
+      // 13. CUSTOMER ADDRESS
+      // ============================================================
+
+      const customerAddress =
+        String(
+          customer?.customer_address ||
+            customer?.address ||
+            ""
+        )
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 255) || null;
+
+      // ============================================================
+      // 14. INSERT BOOKING
+      // ============================================================
+
+      const [result] =
+        await db.query(
+          `
+          INSERT INTO bookings (
+            user_id,
+            room_id,
+            check_in_date,
+            check_out_date,
+            guest_count,
+
+            total_price,
+            taxable_amount,
+            gst_amount,
+            final_total,
+            total_amount,
+
+            discount_applied,
+            discount_amount,
+
+            advance_amount,
+            advance_paid,
+            balance_paid,
+            remaining_amount,
+
+            payment_status,
+            payment_id,
+            advance_payment_id,
+            advance_order_id,
+
+            payment_method,
+            booking_source,
+
+            vehicle_type,
+            vehicle_price,
+            vehicle_status,
+
+            pickup_location,
+            dropoff_location,
+
+            gst_enabled,
+            gst_number,
+
+            customer_address,
+            status
+          )
+          VALUES (
+            ?, ?, ?, ?, ?,
+
+            ?, ?, ?, ?, ?,
+
+            ?, ?,
+
+            ?, ?, ?, ?,
+
+            ?, ?, ?, ?,
+
+            ?, ?,
+
+            ?, ?, ?,
+
+            ?, ?,
+
+            ?, ?,
+
+            ?,
+            'confirmed'
+          )
+          `,
+          [
+            // ------------------------------------------------------
+            // BOOKING
+            // ------------------------------------------------------
+
+            userId,
+            room_id,
+            check_in_date,
+            check_out_date,
+            requestedGuests,
+
+            // ------------------------------------------------------
+            // AMOUNTS
+            // ------------------------------------------------------
+
+            amounts.roomSubtotal,
+            amounts.taxableAmount,
+            amounts.gstAmount,
+            amounts.totalAmount,
+            amounts.totalAmount,
+
+            // ------------------------------------------------------
+            // DISCOUNT
+            // ------------------------------------------------------
+
+            amounts.discountApplied
+              ? 1
+              : 0,
+
+            amounts.discountAmount,
+
+            // ------------------------------------------------------
+            // ADVANCE
+            //
+            // IMPORTANT:
+            // Use normalizedAdvanceAmount
+            // ------------------------------------------------------
+
+            normalizedAdvanceAmount,
+            normalizedAdvanceAmount,
+
+            // Balance paid initially 0
+            0,
+
+            // Remaining balance
+            amounts.remainingAmount,
+
+            // ------------------------------------------------------
+            // PAYMENT
+            // ------------------------------------------------------
+
+            amounts.remainingAmount > 0
+              ? "PARTIALLY_PAID"
+              : "PAID",
+
+            manualPaymentId,
+            manualPaymentId,
+            null,
+
+            `${selectedPaymentMode} Advance`,
+
+            // ------------------------------------------------------
+            // BOOKING SOURCE
+            // ------------------------------------------------------
+
+            req.user.role === "admin"
+              ? "ADMIN_MANUAL_ADVANCE"
+              : "MANAGER_MANUAL_ADVANCE",
+
+            // ------------------------------------------------------
+            // VEHICLE
+            // ------------------------------------------------------
+
+            vehicle_type,
+            0,
+
+            vehicle_type === "none"
+              ? "not_required"
+              : "pending",
+
+            // ------------------------------------------------------
+            // LOCATIONS
+            // ------------------------------------------------------
+
+            pickup_location || null,
+            dropoff_location || null,
+
+            // ------------------------------------------------------
+            // GST
+            // ------------------------------------------------------
+
+            amounts.gstEnabled
+              ? 1
+              : 0,
+
+            gstNumber,
+
+            // ------------------------------------------------------
+            // ADDRESS
+            // ------------------------------------------------------
+
+            customerAddress,
+          ]
+        );
+
+      // ============================================================
+      // 15. BOOKING ID
+      // ============================================================
+
+      const bookingId =
+        result.insertId;
+
+      // ============================================================
+      // 16. SEND INVOICE EMAIL
+      // ============================================================
+
+      loadBookingForInvoice(
+        bookingId
+      )
+        .then((booking) => {
+          if (booking) {
+            return sendAdvanceInvoiceEmail(
+              booking
+            );
+          }
+        })
+        .catch((emailErr) => {
+          console.error(
+            "Manual booking invoice email error:",
+            emailErr.message
+          );
+        });
+
+      // ============================================================
+      // 17. SUCCESS RESPONSE
+      // ============================================================
+
+      return res.status(201).json({
+        message:
+          "Booking confirmed with manual advance payment",
+
+        booking_id:
+          bookingId,
+
+        totalAmount:
+          amounts.totalAmount,
+
+        discountApplied:
+          amounts.discountApplied,
+
+        discountAmount:
+          amounts.discountAmount,
+
+        discountedRoomAmount:
+          amounts.discountedRoomAmount,
+
+        // IMPORTANT
+        // This will be 0 when Cash advance is empty
+        advanceAmount:
+          normalizedAdvanceAmount,
+
+        advancePaid:
+          normalizedAdvanceAmount,
+
+        remainingAmount:
+          amounts.remainingAmount,
+
+        invoiceEmail:
+          customer?.email || null,
+
+        paymentMode:
+          selectedPaymentMode,
+
+        paymentStatus:
+          amounts.remainingAmount > 0
+            ? "PARTIALLY_PAID"
+            : "PAID",
+
+        bookingStatus:
+          "CONFIRMED",
+      });
+    } catch (err) {
+      console.error(
+        "Manual advance booking error:",
+        err
+      );
+
+      return res.status(
+        err.status || 500
+      ).json({
+        error:
+          err.message ||
+          "Failed to confirm manual booking",
+      });
+    }
+  }
 );
 
 app.post(
@@ -3322,18 +4088,30 @@ app.post(
         return res.status(400).json({ error: "Invalid vehicle type" });
       }
 
-      const amounts = await calculateBookingAmounts({
-        room_id,
-        check_in_date,
-        check_out_date,
-        advance_amount,
-        guest_count,
-        discount_applied,
-        discount_amount,
-        gst_enabled: req.body.gst_enabled !== false,
-        // staff route — walk-ins and late paperwork need past check-in dates
-        allowPastDates: true,
-      });
+     const normalizedAdvanceAmount =
+  advance_amount === undefined ||
+  advance_amount === null ||
+  String(advance_amount).trim() === ""
+    ? 0
+    : Number(advance_amount);
+
+if (!Number.isFinite(normalizedAdvanceAmount) || normalizedAdvanceAmount < 0) {
+  return res.status(400).json({
+    error: "Enter a valid advance amount",
+  });
+}
+
+const amounts = await calculateBookingAmounts({
+  room_id,
+  check_in_date,
+  check_out_date,
+  advance_amount: normalizedAdvanceAmount,
+  guest_count,
+  discount_applied,
+  discount_amount,
+  gst_enabled: req.body.gst_enabled !== false,
+  allowPastDates: true,
+});
       const requestedGuests = Math.max(1, Number(guest_count) || 1);
       if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
         return res.status(400).json({
@@ -3604,33 +4382,175 @@ app.post(
   async (req, res, next) => {
     try {
       await ensurePaymentColumns();
+
       const [rows] = await db.query(
         "SELECT * FROM bookings WHERE booking_id=?",
         [req.params.id],
       );
-      if (!rows.length)
+
+      if (!rows.length) {
         return res.status(404).json({ error: "Booking not found" });
+      }
+
       const booking = rows[0];
 
       if (booking.status === "cancelled") {
-        return res
-          .status(400)
-          .json({ error: "Cannot collect payment on a cancelled booking" });
+        return res.status(400).json({
+          error: "Cannot collect payment on a cancelled booking",
+        });
       }
 
-      const { remaining } = outstandingBalance(booking);
-      if (remaining <= 0) {
-        return res.status(400).json({ error: "Nothing left to pay" });
+      // -----------------------------
+      // Same calculation as frontend
+      // -----------------------------
+      const GST_RATE = 0.12;
+
+      const roomCharges = Number(booking.total_price || 0);
+
+      const discountAmount =
+        Number(
+          booking.discount_applied
+            ? booking.discount_amount
+            : 0,
+        ) || 0;
+
+      const vehiclePrice = Number(booking.vehicle_price || 0);
+      const addonTotal = Number(booking.addon_charges || 0);
+
+      const taxableRoom = Math.max(
+        0,
+        Math.round((roomCharges - discountAmount) * 100) / 100,
+      );
+
+      const gstEnabled =
+        Number(booking.gst_enabled ?? 1) !== 0;
+
+      const taxes =
+        Math.round(
+          (taxableRoom + addonTotal) * GST_RATE * 100,
+        ) / 100;
+
+      const chargedTaxes = gstEnabled ? taxes : 0;
+
+      const totalAmount = Math.max(
+        0,
+        Math.round(
+          (
+            taxableRoom +
+            addonTotal +
+            vehiclePrice +
+            chargedTaxes
+          ) * 100,
+        ) / 100,
+      );
+
+      const advancePaid = Math.max(
+        0,
+        Number(booking.advance_paid) || 0,
+      );
+
+      const balancePaid = Math.max(
+        0,
+        Number(booking.balance_paid) || 0,
+      );
+
+      const alreadyPaid =
+        Math.round(
+          (advancePaid + balancePaid) * 100,
+        ) / 100;
+
+      const roomRemaining = Math.max(
+        0,
+        Math.round(
+          (totalAmount - alreadyPaid) * 100,
+        ) / 100,
+      );
+
+      // Checkout discount
+      const checkoutDiscount = Math.min(
+        Math.max(
+          0,
+          Number(booking.checkout_discount_amount) || 0,
+        ),
+        gstEnabled
+          ? Math.round(
+              (roomRemaining / (1 + GST_RATE)) * 100,
+            ) / 100
+          : roomRemaining,
+      );
+
+      const checkoutDiscountGst = gstEnabled
+        ? Math.round(
+            checkoutDiscount * GST_RATE * 100,
+          ) / 100
+        : 0;
+
+      const checkoutDiscountTotalImpact =
+        Math.round(
+          (
+            checkoutDiscount +
+            checkoutDiscountGst
+          ) * 100,
+        ) / 100;
+
+      const finalRoomRemaining = Math.max(
+        0,
+        Math.round(
+          (
+            roomRemaining -
+            checkoutDiscountTotalImpact
+          ) * 100,
+        ) / 100,
+      );
+
+      // Unpaid addons
+      let unpaidAddonTotal = 0;
+
+      try {
+        const [addons] = await db.query(
+          "SELECT amount, paid FROM booking_addons WHERE booking_id=?",
+          [req.params.id],
+        );
+
+        unpaidAddonTotal = addons
+          .filter((a) => Number(a.paid) !== 1)
+          .reduce(
+            (sum, a) => sum + Number(a.amount || 0),
+            0,
+          );
+      } catch {
+        unpaidAddonTotal = 0;
       }
 
+      const unpaidAddonGst = gstEnabled
+        ? Math.round(
+            unpaidAddonTotal * GST_RATE * 100,
+          ) / 100
+        : 0;
+
+     const finalRemaining = Math.max(
+  0,
+  Math.round(finalRoomRemaining * 100) / 100
+);
+
+      if (finalRemaining <= 0) {
+        return res.status(400).json({
+          error: "Nothing left to pay",
+        });
+      }
+
+      // -----------------------------
+      // Razorpay amount = FINAL BALANCE
+      // -----------------------------
       const order = await razorpay.orders.create({
-        amount: Math.round(remaining * 100),
+        amount: Math.round(finalRemaining * 100),
         currency: "INR",
         receipt: `BAL-${req.params.id}-${Date.now()}`,
         notes: {
           booking_id: String(req.params.id),
           purpose: "balance",
           collected_by: String(req.user.user_id),
+          final_amount: String(finalRemaining),
         },
       });
 
@@ -3638,7 +4558,7 @@ app.post(
         razorpay_key: process.env.RAZORPAY_KEY_ID,
         order_id: order.id,
         currency: order.currency,
-        amount: remaining,
+        amount: finalRemaining,
       });
     } catch (err) {
       next(err);

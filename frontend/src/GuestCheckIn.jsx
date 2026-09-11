@@ -342,9 +342,8 @@ export default function GuestCheckIn({
   const [children, setChildren] = useState(0);
   const [childRows, setChildRows] = useState([]);
 
-  const [payMethod, setPayMethod] = useState("Online Payment");
-  const [now, setNow] = useState(Date.now());
-
+const [payMethod, setPayMethod] = useState("Online Payment");
+const [now, setNow] = useState(Date.now());
   /*
    * Checkout / final discount.
    *
@@ -1277,34 +1276,39 @@ export default function GuestCheckIn({
 
   const grossTotal = totalAmount;
 
-  const advancePaid =
-    Number(b.advance_paid || 0);
+const advancePaid =
+  Math.max(0, Number(b.advance_paid) || 0);
 
-  const balancePaid =
-    Number(b.balance_paid || 0);
+const balancePaid =
+  Math.max(0, Number(b.balance_paid) || 0);
 
-  const paymentStatus = String(
-    b.payment_status || "",
-  ).toUpperCase();
+const paymentStatus = String(
+  b.payment_status || "",
+).toUpperCase();
 
-  const roomTotalWithGst = Math.max(
-    0,
-    gstEnabled
-      ? Math.round(taxableRoom * (1 + GST_RATE) * 100) / 100
-      : Math.round(taxableRoom * 100) / 100,
-  );
+const roomTotalWithGst = Math.max(
+  0,
+  gstEnabled
+    ? Math.round(
+        taxableRoom * (1 + GST_RATE) * 100,
+      ) / 100
+    : Math.round(taxableRoom * 100) / 100,
+);
 
   const paymentTotal = Number(
-    b.total_amount ||
-      b.final_total ||
-      roomTotalWithGst,
+     b.total_amount ||
+    b.final_total ||
+    roomTotalWithGst ||
+    0,
   );
 
   const alreadyPaid =
-    paymentStatus === "PAID" &&
-    advancePaid + balancePaid === 0
-      ? paymentTotal
-      : advancePaid + balancePaid;
+    Math.max(
+    0,
+    Math.round(
+      (advancePaid + balancePaid) * 100,
+    ) / 100,
+  );
 
   const addonsList = b.addons || [];
 
@@ -1343,19 +1347,15 @@ export default function GuestCheckIn({
    * totalAmount above is computed from the tariff and the booking discount
    * only, which is exactly the "before" figure this preview needs.
    */
-  const roomRemaining =
-    paymentStatus === "PAID"
-      ? 0
-      : Math.max(
-          0,
-          Math.round(
-            (totalAmount -
-              advancePaid -
-              balancePaid) *
-              100,
-          ) / 100,
-        );
-
+  const roomRemaining = Math.max(
+  0,
+  Math.round(
+    (totalAmount -
+      advancePaid -
+      balancePaid) *
+      100,
+  ) / 100,
+);
   /*
    * Checkout discount is applied PRE-TAX against the room's taxable
    * value — GST recalculates on the lower amount, so the guest's real
@@ -1392,13 +1392,10 @@ export default function GuestCheckIn({
   /*
    * Add-ons stay separate.
    */
-  const finalRemaining =
-    Math.round(
-      (finalRoomRemaining +
-        unpaidAddonTotal +
-        unpaidAddonGst) *
-        100,
-    ) / 100;
+ const finalRemaining = Math.max(
+  0,
+  Math.round(finalRoomRemaining * 100) / 100
+);
 
   const isCheckedIn =
     !!b.actual_checkin;
@@ -2716,34 +2713,41 @@ export default function GuestCheckIn({
               title="Payment Summary"
               subtitle="Advance and balance"
             >
-              <div className="rounded-lg bg-gray-50 px-3.5 py-2.5">
-                <Row
-                  label="Total Paid Amount"
-                  value={money(
-                    alreadyPaid,
-                  )}
-                  strong
-                />
+   <div className="rounded-lg bg-gray-50 px-3.5 py-2.5">
+  <Row
+    label="Total Bill"
+    value={money(totalAmount)}
+  />
 
-                <Row
-                  label="Balance (Remaining)"
-                  value={money(
-                    finalRemaining,
-                  )}
-                  strong
-                />
+  <Row
+    label="Already Paid"
+    value={money(alreadyPaid)}
+  />
 
-                {appliedCheckoutDiscount >
-                  0 && (
-                  <Row
-                    label="Checkout Discount"
-                    value={`- ${money(
-                      appliedCheckoutDiscount,
-                    )}`}
-                  />
-                )}
-              </div>
+  {appliedCheckoutDiscount > 0 && (
+    <>
+      <Row
+        label="Checkout Discount"
+        value={`- ${money(appliedCheckoutDiscount)}`}
+      />
 
+      {gstEnabled && checkoutDiscountGst > 0 && (
+        <Row
+          label="GST Saved on Discount"
+          value={`- ${money(checkoutDiscountGst)}`}
+        />
+      )}
+    </>
+  )}
+
+  <div className="mt-1 border-t border-gray-200 pt-1">
+    <Row
+      label="Final Amount to Pay"
+      value={money(finalRemaining)}
+      strong
+    />
+  </div>
+</div>
               {/* Advance */}
 
               <div className="mt-3 rounded-lg border border-gray-200 px-3.5 py-2.5">
