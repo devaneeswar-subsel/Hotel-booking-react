@@ -1,15 +1,54 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { printInvoicePdf } from "./invoicePdf";
+import { GSTIN_PATTERN } from "./utils/billing";
 
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.12;
 
-const apiFetch = (url, options = {}) =>
-  fetch(`${API}${url}`, {
+const apiFetch = async (url, options = {}) => {
+  const res = await fetch(`${API}${url}`, {
     ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options.headers },
   });
+
+  /*
+   * Make res.json() safe for every caller.
+   *
+   * When a route is missing, or the server is restarting, Express replies
+   * with an HTML error page. res.json() then throws "Unexpected token '<',
+   * \"<!DOCTYPE\"... is not valid JSON", which tells the person at the desk
+   * nothing about what went wrong.
+   *
+   * Wrapping it here fixes every call site at once without touching any of
+   * them. A real JSON body is returned exactly as before — this only changes
+   * what happens on a response that was never JSON to begin with.
+   */
+  const originalJson = res.json.bind(res);
+
+  res.json = async () => {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (res.status === 404) {
+        return {
+          error:
+            "That feature is not available yet — the server may need to be restarted.",
+        };
+      }
+      if (res.status >= 500) {
+        return { error: "The server is not responding. Please try again." };
+      }
+      return { error: `Unexpected server response (${res.status}).` };
+    }
+  };
+
+  // kept so anything that deliberately reads the raw body still can
+  res.jsonStrict = originalJson;
+
+  return res;
+};
 
 const ID_PROOF_TYPES = [
   "Aadhaar Card",
@@ -341,9 +380,8 @@ export default function GuestCheckIn({
   const [children, setChildren] = useState(0);
   const [childRows, setChildRows] = useState([]);
 
-  const [payMethod, setPayMethod] = useState("Online Payment");
-  const [now, setNow] = useState(Date.now());
-
+const [payMethod, setPayMethod] = useState("Online Payment");
+const [now, setNow] = useState(Date.now());
   /*
    * Checkout / final discount.
    *
@@ -356,6 +394,32 @@ export default function GuestCheckIn({
   const [checkoutDiscountInput, setCheckoutDiscountInput] = useState("");
   const [checkoutDiscount, setCheckoutDiscount] = useState(0);
   const [discountSaving, setDiscountSaving] = useState(false);
+
+  /*
+   * Billing identity (GSTIN + address).
+   *
+   * Deliberately NOT covered by `locked`. A guest very often asks for a GST
+   * invoice at the desk, after check-in has already happened — if these
+   * followed the guest-detail lock, the only way to correct a GSTIN would be
+   * to edit the database by hand.
+   */
+  const [gstNumber, setGstNumber] = useState("");
+  const [billingAddress, setBillingAddress] = useState("");
+  const [billingSaving, setBillingSaving] = useState(false);
+  const [billingError, setBillingError] = useState("");
+  const [billingDirty, setBillingDirty] = useState(false);
+
+  /*
+   * A ref, not state, because fetchBooking reads it from inside a promise
+   * callback and needs the value as of right now — a state variable captured
+   * in that closure would be whatever it was when the fetch was fired.
+   */
+  const billingDirtyRef = useRef(false);
+
+  const markBillingDirty = () => {
+    billingDirtyRef.current = true;
+    setBillingDirty(true);
+  };
 
   // refresh elapsed-time readout
   useEffect(() => {
@@ -407,6 +471,16 @@ export default function GuestCheckIn({
             ? String(savedCheckoutDiscount)
             : "",
         );
+
+        /*
+         * Billing fields are re-read on every fetch, but only while the
+         * operator is not mid-edit — overwriting a half-typed GSTIN with the
+         * stored one on a background refresh would be maddening.
+         */
+        if (!billingDirtyRef.current) {
+          setGstNumber(data.gst_number || "");
+          setBillingAddress(data.customer_address || "");
+        }
 
         if (!hydrate) return;
 
@@ -560,6 +634,8 @@ export default function GuestCheckIn({
       adults_count: adults,
       children_count: children,
       payment_mode: payMethod,
+      gst_number: gstNumber.trim().toUpperCase(),
+      customer_address: billingAddress.trim(),
 
       guests: [
         ...adultRows
@@ -586,6 +662,15 @@ export default function GuestCheckIn({
   function validate() {
     if (!idNumber.trim()) {
       toast("Enter the ID proof number", "error");
+      return false;
+    }
+
+    // A malformed GSTIN is rejected by the API too, but catching it here means
+    // the operator is not told about it only after the check-in half-completes.
+    const gstError = getGstError();
+    if (gstError) {
+      setBillingError(gstError);
+      toast(gstError, "error");
       return false;
     }
 
@@ -912,6 +997,73 @@ export default function GuestCheckIn({
     }
   }
 
+  /* ── billing details (GSTIN + address) ─────────────────────────────────── */
+
+  function getGstError(value = gstNumber) {
+    const text = String(value || "").trim().toUpperCase();
+    if (!text) return "";
+    if (!GSTIN_PATTERN.test(text)) {
+      return "Enter a valid 15-character GSTIN";
+    }
+    return "";
+  }
+
+  /*
+   * Saves only the billing fields. The backend treats gst_number and
+   * customer_address independently of the guest list, so this can run after
+   * check-in without disturbing anything that is locked.
+   */
+  async function saveBillingDetails() {
+    const error = getGstError();
+
+    if (error) {
+      setBillingError(error);
+      return toast(error, "error");
+    }
+
+    setBillingError("");
+    setBillingSaving(true);
+
+    try {
+      const res = await apiFetch(
+        `/api/bookings/${bookingId}/checkin-details`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            gst_number: gstNumber.trim().toUpperCase(),
+            customer_address: billingAddress.trim(),
+          }),
+        },
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(
+          data.error || "Unable to save the billing details",
+        );
+      }
+
+      billingDirtyRef.current = false;
+      setBillingDirty(false);
+
+      toast(
+        gstNumber.trim()
+          ? "Billing details saved — the GSTIN will appear on the invoice"
+          : "Billing details saved",
+        "success",
+      );
+
+      fetchBooking(false);
+      onRefresh && onRefresh();
+    } catch (e) {
+      setBillingError(e.message);
+      toast(e.message, "error");
+    } finally {
+      setBillingSaving(false);
+    }
+  }
+
   /* ── apply checkout discount ───────────────────────────────────────────── */
 
   async function applyCheckoutDiscount() {
@@ -1162,34 +1314,39 @@ export default function GuestCheckIn({
 
   const grossTotal = totalAmount;
 
-  const advancePaid =
-    Number(b.advance_paid || 0);
+const advancePaid =
+  Math.max(0, Number(b.advance_paid) || 0);
 
-  const balancePaid =
-    Number(b.balance_paid || 0);
+const balancePaid =
+  Math.max(0, Number(b.balance_paid) || 0);
 
-  const paymentStatus = String(
-    b.payment_status || "",
-  ).toUpperCase();
+const paymentStatus = String(
+  b.payment_status || "",
+).toUpperCase();
 
-  const roomTotalWithGst = Math.max(
-    0,
-    gstEnabled
-      ? Math.round(taxableRoom * (1 + GST_RATE) * 100) / 100
-      : Math.round(taxableRoom * 100) / 100,
-  );
+const roomTotalWithGst = Math.max(
+  0,
+  gstEnabled
+    ? Math.round(
+        taxableRoom * (1 + GST_RATE) * 100,
+      ) / 100
+    : Math.round(taxableRoom * 100) / 100,
+);
 
   const paymentTotal = Number(
-    b.total_amount ||
-      b.final_total ||
-      roomTotalWithGst,
+     b.total_amount ||
+    b.final_total ||
+    roomTotalWithGst ||
+    0,
   );
 
   const alreadyPaid =
-    paymentStatus === "PAID" &&
-    advancePaid + balancePaid === 0
-      ? paymentTotal
-      : advancePaid + balancePaid;
+    Math.max(
+    0,
+    Math.round(
+      (advancePaid + balancePaid) * 100,
+    ) / 100,
+  );
 
   const addonsList = b.addons || [];
 
@@ -1228,19 +1385,15 @@ export default function GuestCheckIn({
    * totalAmount above is computed from the tariff and the booking discount
    * only, which is exactly the "before" figure this preview needs.
    */
-  const roomRemaining =
-    paymentStatus === "PAID"
-      ? 0
-      : Math.max(
-          0,
-          Math.round(
-            (totalAmount -
-              advancePaid -
-              balancePaid) *
-              100,
-          ) / 100,
-        );
-
+  const roomRemaining = Math.max(
+  0,
+  Math.round(
+    (totalAmount -
+      advancePaid -
+      balancePaid) *
+      100,
+  ) / 100,
+);
   /*
    * Checkout discount is applied PRE-TAX against the room's taxable
    * value — GST recalculates on the lower amount, so the guest's real
@@ -1277,13 +1430,10 @@ export default function GuestCheckIn({
   /*
    * Add-ons stay separate.
    */
-  const finalRemaining =
-    Math.round(
-      (finalRoomRemaining +
-        unpaidAddonTotal +
-        unpaidAddonGst) *
-        100,
-    ) / 100;
+ const finalRemaining = Math.max(
+  0,
+  Math.round(finalRoomRemaining * 100) / 100
+);
 
   const isCheckedIn =
     !!b.actual_checkin;
@@ -1573,6 +1723,97 @@ export default function GuestCheckIn({
                 </span>
 
                 Enter the ID proof number manually.
+              </div>
+            </Card>
+
+            {/* Billing details — GSTIN and address for the invoice */}
+
+            <Card
+              icon={I.card}
+              title="Billing Details"
+              subtitle="Printed on the invoice — optional"
+            >
+              <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
+
+                <Field label="GST Number">
+                  <input
+                    value={gstNumber}
+                    maxLength={15}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e) => {
+                      setGstNumber(
+                        e.target.value
+                          .toUpperCase()
+                          .replace(/[^0-9A-Z]/g, ""),
+                      );
+
+                      markBillingDirty();
+
+                      if (billingError) setBillingError("");
+                    }}
+                    onBlur={() =>
+                      setBillingError(getGstError())
+                    }
+                    placeholder="33BRCPA1008G1ZQ"
+                    className={`${inputCls} font-mono tracking-[0.5px] ${
+                      billingError
+                        ? "border-red-400 focus:border-red-400 focus:ring-red-100"
+                        : ""
+                    }`}
+                  />
+
+                  {billingError ? (
+                    <div className="mt-1 text-[0.66rem] font-semibold text-red-600">
+                      {billingError}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[0.66rem] text-gray-400">
+                      15 characters. Leave blank for a non-GST invoice.
+                    </div>
+                  )}
+                </Field>
+
+                <Field label="Billing Address">
+                  <textarea
+                    value={billingAddress}
+                    rows={2}
+                    maxLength={255}
+                    onChange={(e) => {
+                      setBillingAddress(e.target.value);
+                      markBillingDirty();
+                    }}
+                    placeholder="Company or guest billing address"
+                    className={`${inputCls} resize-none leading-snug`}
+                  />
+
+                  <div className="mt-1 text-[0.66rem] text-gray-400">
+                    {billingAddress.length}/255
+                  </div>
+                </Field>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2.5">
+                <div className="flex items-start gap-2 text-[0.68rem] text-gray-500">
+                  <span className="mt-[1px] text-gray-400">
+                    {I.info}
+                  </span>
+
+                  Editable at check-in and at check-out.
+                </div>
+
+                <button
+                  type="button"
+                  onClick={saveBillingDetails}
+                  disabled={billingSaving || !!billingError || !billingDirty}
+                  className="rounded-lg bg-navy px-3.5 py-1.5 text-[0.72rem] font-bold text-white transition hover:bg-navy/90 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {billingSaving
+                    ? "Saving…"
+                    : billingDirty
+                      ? "Save Billing Details"
+                      : "Saved"}
+                </button>
               </div>
             </Card>
 
@@ -2145,39 +2386,43 @@ export default function GuestCheckIn({
               icon={I.card}
               title="Payment"
             >
-              <Field label="Payment Method">
-                {locked ? (
-                  <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5">
-                    <span className="text-[0.8rem] font-semibold text-navy">
-                      {payMethod}
-                    </span>
+<Field label="Payment Method">
+  {/*
+    Payment method stays editable after check-in (same idea as
+    billing details). Only lock it once the stay is closed.
+  */}
+  {isCancelled || isCheckedOut ? (
+    <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5">
+      <span className="text-[0.8rem] font-semibold text-navy">
+        {payMethod}
+      </span>
 
-                    <span className="text-[0.66rem] text-gray-400">
-                      Locked
-                    </span>
-                  </div>
-                ) : (
-                  <select
-                    value={payMethod}
-                    onChange={(e) =>
-                      setPayMethod(
-                        e.target.value,
-                      )
-                    }
-                    className={inputCls}
-                  >
-                    {PAYMENT_METHODS.map(
-                      (m) => (
-                        <option
-                          key={m}
-                        >
-                          {m}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                )}
-              </Field>
+      <span className="text-[0.66rem] text-gray-400">
+        Locked
+      </span>
+    </div>
+  ) : (
+    <select
+      value={payMethod}
+      onChange={(e) =>
+        setPayMethod(
+          e.target.value,
+        )
+      }
+      className={inputCls}
+    >
+      {PAYMENT_METHODS.map(
+        (m) => (
+          <option
+            key={m}
+          >
+            {m}
+          </option>
+        ),
+      )}
+    </select>
+  )}
+</Field>
 
               {/* ── ORIGINAL BOOKING AMOUNT SUMMARY ───────────────────── */}
 
@@ -2510,34 +2755,41 @@ export default function GuestCheckIn({
               title="Payment Summary"
               subtitle="Advance and balance"
             >
-              <div className="rounded-lg bg-gray-50 px-3.5 py-2.5">
-                <Row
-                  label="Total Paid Amount"
-                  value={money(
-                    alreadyPaid,
-                  )}
-                  strong
-                />
+   <div className="rounded-lg bg-gray-50 px-3.5 py-2.5">
+  <Row
+    label="Total Bill"
+    value={money(totalAmount)}
+  />
 
-                <Row
-                  label="Balance (Remaining)"
-                  value={money(
-                    finalRemaining,
-                  )}
-                  strong
-                />
+  <Row
+    label="Already Paid"
+    value={money(alreadyPaid)}
+  />
 
-                {appliedCheckoutDiscount >
-                  0 && (
-                  <Row
-                    label="Checkout Discount"
-                    value={`- ${money(
-                      appliedCheckoutDiscount,
-                    )}`}
-                  />
-                )}
-              </div>
+  {appliedCheckoutDiscount > 0 && (
+    <>
+      <Row
+        label="Checkout Discount"
+        value={`- ${money(appliedCheckoutDiscount)}`}
+      />
 
+      {gstEnabled && checkoutDiscountGst > 0 && (
+        <Row
+          label="GST Saved on Discount"
+          value={`- ${money(checkoutDiscountGst)}`}
+        />
+      )}
+    </>
+  )}
+
+  <div className="mt-1 border-t border-gray-200 pt-1">
+    <Row
+      label="Final Amount to Pay"
+      value={money(finalRemaining)}
+      strong
+    />
+  </div>
+</div>
               {/* Advance */}
 
               <div className="mt-3 rounded-lg border border-gray-200 px-3.5 py-2.5">

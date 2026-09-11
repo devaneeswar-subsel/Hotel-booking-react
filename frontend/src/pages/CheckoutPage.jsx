@@ -10,6 +10,7 @@ import {
   ShieldIcon,
   UserIcon,
 } from "../Icons";
+import { HOTEL_GSTIN } from "../utils/billing";
 
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.12;
@@ -37,12 +38,50 @@ const NO_VEHICLE_ID = "none";
 const FALLBACK_ROOM_IMAGE =
   "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=1200";
 
-const apiFetch = (url, options = {}) =>
-  fetch(`${API}${url}`, {
+const apiFetch = async (url, options = {}) => {
+  const res = await fetch(`${API}${url}`, {
     ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options.headers },
   });
+
+  /*
+   * Make res.json() safe for every caller.
+   *
+   * When a route is missing, or the server is restarting, Express replies
+   * with an HTML error page. res.json() then throws "Unexpected token '<',
+   * \"<!DOCTYPE\"... is not valid JSON", which tells the person at the desk
+   * nothing about what went wrong.
+   *
+   * Wrapping it here fixes every call site at once without touching any of
+   * them. A real JSON body is returned exactly as before — this only changes
+   * what happens on a response that was never JSON to begin with.
+   */
+  const originalJson = res.json.bind(res);
+
+  res.json = async () => {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (res.status === 404) {
+        return {
+          error:
+            "That feature is not available yet — the server may need to be restarted.",
+        };
+      }
+      if (res.status >= 500) {
+        return { error: "The server is not responding. Please try again." };
+      }
+      return { error: `Unexpected server response (${res.status}).` };
+    }
+  };
+
+  // kept so anything that deliberately reads the raw body still can
+  res.jsonStrict = originalJson;
+
+  return res;
+};
 function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
@@ -409,7 +448,38 @@ export default function CheckoutPage({ user, showToast }) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     textTop(booking.email || user.email || "", 50, 162);
-    if (booking.phone || user.phone) textTop(booking.phone || user.phone, 50, 175);
+
+    /*
+     * BILL TO is drawn with a running cursor rather than fixed rows, because
+     * the phone, address and GSTIN lines are each optional. Fixed rows meant
+     * the GSTIN printed on top of the address whenever a booking carried both.
+     */
+    let billY = 175;
+    const phone = booking.phone || user.phone;
+    if (phone) {
+      textTop(String(phone), 50, billY);
+      billY += 13;
+    }
+    if (booking.customer_address) {
+      const addressLines = doc.splitTextToSize(
+        String(booking.customer_address),
+        250,
+      );
+      // Two lines maximum so a long address cannot push the invoice onto a
+      // second page.
+      addressLines.slice(0, 2).forEach((line, index) => {
+        textTop(line, 50, billY + index * 11);
+      });
+      billY += Math.min(2, addressLines.length) * 11 + 2;
+    }
+    if (booking.gst_number) {
+      doc.setTextColor("#0F1923");
+      doc.setFont("helvetica", "bold");
+      textTop(`GSTIN: ${booking.gst_number}`, 50, billY);
+      doc.setTextColor("#495057");
+      doc.setFont("helvetica", "normal");
+      billY += 13;
+    }
 
     doc.setTextColor("#868E96");
     doc.setFont("helvetica", "bold");
@@ -423,8 +493,13 @@ export default function CheckoutPage({ user, showToast }) {
     doc.setFontSize(9);
     textTop("3/4/D, Thanjai Saalai, Thiruvarur - 610004", 350, 162);
     textTop("+91 93849 82510 |+91 90032 51115 | vvgrandpark@gmail.com", 350, 175);
+    doc.setTextColor("#0F1923");
+    doc.setFont("helvetica", "bold");
+    textTop(`GSTIN: ${HOTEL_GSTIN}`, 350, 188);
+    doc.setFont("helvetica", "normal");
 
-    const tableTop = 210;
+    // Start the table below whichever of the two columns ran longer.
+    const tableTop = Math.max(210, billY + 6);
     doc.setFillColor("#0F1923");
     doc.rect(50, tableTop, 495, 25, "F");
     doc.setTextColor("#C9A84C");
@@ -596,7 +671,6 @@ export default function CheckoutPage({ user, showToast }) {
 
   const room = checkout.room || {};
   const form = checkout.form || {};
-  const roomNumber = room.room_number || room.room_id || "-";
   const guestCount = form.guest_count || 1;
   const nights = checkout.nights || 1;
   const vehicleOptions = [
@@ -641,10 +715,15 @@ export default function CheckoutPage({ user, showToast }) {
               </h1>
               <div className="my-5 h-px bg-[#D8D3CA]" />
               <div className="grid gap-5 border-b border-[#D8D3CA] pb-5 sm:grid-cols-2 sm:gap-10">
+                {/*
+                  Room TYPE, not the room number. The specific room is assigned
+                  at the desk, so a number here would be both meaningless to the
+                  guest before check-in and a leak of the hotel's inventory.
+                */}
                 <StayMetric
                   icon={<BedIcon size={19} />}
                   label="Room"
-                  value={roomNumber}
+                  value={room.room_type || "Room"}
                 />
                 <StayMetric
                   icon={<UserIcon size={19} />}

@@ -36,12 +36,50 @@ function getBookingCreatedTime(booking) {
   const timestamp = new Date(booking.created_at || booking.createdAt || 0).getTime();
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
-const apiFetch = (url, options = {}) =>
-  fetch(`${API}${url}`, {
+const apiFetch = async (url, options = {}) => {
+  const res = await fetch(`${API}${url}`, {
     ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options.headers },
   });
+
+  /*
+   * Make res.json() safe for every caller.
+   *
+   * When a route is missing, or the server is restarting, Express replies
+   * with an HTML error page. res.json() then throws "Unexpected token '<',
+   * \"<!DOCTYPE\"... is not valid JSON", which tells the person at the desk
+   * nothing about what went wrong.
+   *
+   * Wrapping it here fixes every call site at once without touching any of
+   * them. A real JSON body is returned exactly as before — this only changes
+   * what happens on a response that was never JSON to begin with.
+   */
+  const originalJson = res.json.bind(res);
+
+  res.json = async () => {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (res.status === 404) {
+        return {
+          error:
+            "That feature is not available yet — the server may need to be restarted.",
+        };
+      }
+      if (res.status >= 500) {
+        return { error: "The server is not responding. Please try again." };
+      }
+      return { error: `Unexpected server response (${res.status}).` };
+    }
+  };
+
+  // kept so anything that deliberately reads the raw body still can
+  res.jsonStrict = originalJson;
+
+  return res;
+};
 
 /* ── LIVE TIMER ── */
 function formatLocalDate(date) {
@@ -1746,6 +1784,10 @@ function ResetPasswordModal({ user, onClose, showToast }) {
 }
 function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
   const [blockedDates, setBlockedDates] = useState([]);
+  // Nights already sold to a guest. Loaded separately from blocked dates:
+  // the calendar previously showed only manual blocks, so a night with a
+  // real booking on it still looked free and could be blocked or double-sold.
+  const [bookedDates, setBookedDates] = useState([]);
   const [selectedDates, setSelectedDates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1763,11 +1805,22 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
 
   useEffect(() => {
     let active = true;
-    apiFetch(`/api/rooms/${room.room_id}/blocked-dates`)
-      .then((res) => res.json().then((data) => ({ res, data })))
-      .then(({ res, data }) => {
-        if (!res.ok) throw new Error(data.error || "Unable to load blocked dates");
-        if (active) setBlockedDates(Array.isArray(data) ? data : []);
+
+    Promise.all([
+      apiFetch(`/api/rooms/${room.room_id}/blocked-dates`)
+        .then((res) => res.json().then((data) => ({ res, data }))),
+      // Booked nights are read-only here — shown so staff can see what is
+      // already sold, but never blockable.
+      apiFetch(`/api/rooms/${room.room_id}/booked-dates`)
+        .then((res) => res.json().then((data) => ({ res, data })))
+        .catch(() => ({ res: { ok: true }, data: [] })),
+    ])
+      .then(([blocked, booked]) => {
+        if (!blocked.res.ok)
+          throw new Error(blocked.data.error || "Unable to load blocked dates");
+        if (!active) return;
+        setBlockedDates(Array.isArray(blocked.data) ? blocked.data : []);
+        setBookedDates(Array.isArray(booked.data) ? booked.data : []);
       })
       .catch((err) => {
         if (active) showToast(err.message, "error");
@@ -1784,6 +1837,31 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
   const blockedDateSet = new Set(
     blockedDates.map((b) => (typeof b === "string" ? b : b.blocked_date)),
   );
+
+  /*
+   * Nights already sold to a guest.
+   *
+   * /booked-dates returns RANGES ({ booking_id, check_in_date, check_out_date })
+   * and also includes the manual blocks with booking_id null, so only rows
+   * carrying a booking_id are real guest stays. Each range is expanded night
+   * by night; check-out day is excluded because that room is free again that
+   * night.
+   */
+  const bookedDateSet = new Set();
+  bookedDates
+    .filter((r) => r && r.booking_id != null)
+    .forEach((r) => {
+      const start = new Date(r.check_in_date);
+      const end = new Date(r.check_out_date);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
+      for (
+        let d = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        d < new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        d.setDate(d.getDate() + 1)
+      ) {
+        bookedDateSet.add(formatLocalDate(d));
+      }
+    });
   const reasonByDate = new Map(
     blockedDates
       .filter((b) => typeof b !== "string")
@@ -1793,6 +1871,14 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
 
   function toggleDate(date) {
     const dateKey = formatLocalDate(date);
+
+    // A night sold to a guest cannot be blocked — doing so would hide a real
+    // booking behind a maintenance hold.
+    if (bookedDateSet.has(dateKey)) {
+      showToast("That night is already booked for this room", "error");
+      return;
+    }
+
     setSelectedDates((current) =>
       current.some((selectedDate) => formatLocalDate(selectedDate) === dateKey)
         ? current.filter((selectedDate) => formatLocalDate(selectedDate) !== dateKey)
@@ -1881,9 +1967,13 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
                   inline
                   selected={selectedDates[selectedDates.length - 1] || null}
                   onChange={toggleDate}
+                  // Booked nights are greyed out and unclickable, so the
+                  // calendar shows what is genuinely available.
+                  filterDate={(date) => !bookedDateSet.has(formatLocalDate(date))}
                   dayClassName={(date) => {
                     const dateKey = formatLocalDate(date);
                     const classes = [];
+                    if (bookedDateSet.has(dateKey)) classes.push("vv-room-date-booked");
                     if (blockedDateSet.has(dateKey)) classes.push("vv-room-date-blocked");
                     if (selectedDateKeys.includes(dateKey)) classes.push("vv-room-date-selected");
                     return classes.join(" ") || undefined;
@@ -1891,7 +1981,22 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
                   calendarClassName="vv-calendar"
                 />
               </div>
-              <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-[0.72rem] text-gray-500">
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.7rem] text-gray-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-2.5 w-2.5 rounded-[3px] bg-[#E9ECEF]" />
+                  Available
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-2.5 w-2.5 rounded-[3px] bg-[#fecaca]" />
+                  Blocked
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-2.5 w-2.5 rounded-[3px] bg-[#e2e8f0]" />
+                  Booked
+                </span>
+              </div>
+
+              <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-[0.72rem] text-gray-500">
                 <span className="font-semibold text-gray-600">Selected:</span>{" "}
                 {selectedDateKeys.length
                   ? `${selectedDateKeys.length} night${

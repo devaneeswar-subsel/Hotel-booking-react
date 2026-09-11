@@ -38,12 +38,50 @@ function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
 }
-const apiFetch = (url, options = {}) =>
-  fetch(`${API}${url}`, {
+const apiFetch = async (url, options = {}) => {
+  const res = await fetch(`${API}${url}`, {
     ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options.headers },
   });
+
+  /*
+   * Make res.json() safe for every caller.
+   *
+   * When a route is missing, or the server is restarting, Express replies
+   * with an HTML error page. res.json() then throws "Unexpected token '<',
+   * \"<!DOCTYPE\"... is not valid JSON", which tells the person at the desk
+   * nothing about what went wrong.
+   *
+   * Wrapping it here fixes every call site at once without touching any of
+   * them. A real JSON body is returned exactly as before — this only changes
+   * what happens on a response that was never JSON to begin with.
+   */
+  const originalJson = res.json.bind(res);
+
+  res.json = async () => {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (res.status === 404) {
+        return {
+          error:
+            "That feature is not available yet — the server may need to be restarted.",
+        };
+      }
+      if (res.status >= 500) {
+        return { error: "The server is not responding. Please try again." };
+      }
+      return { error: `Unexpected server response (${res.status}).` };
+    }
+  };
+
+  // kept so anything that deliberately reads the raw body still can
+  res.jsonStrict = originalJson;
+
+  return res;
+};
 
 function Toast({ msg, type, onHide }) {
   useEffect(() => {
@@ -796,7 +834,7 @@ function BookingModal({ room, user, onClose, showToast }) {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="font-display text-base font-semibold text-navy">
-            Book {room.room_type} — Room {room.room_number || room.room_id}
+            Book {room.room_type}
           </h2>
           <button
             onClick={onClose}
@@ -1435,10 +1473,8 @@ function BookingReceiptModal({ booking, onClose, onDownloadInvoice }) {
           <div className="bg-[var(--gray-50)] rounded-lg px-4 py-3">
             {[
               ["Booking ID", `#${booking.booking_id}`],
-              [
-                "Room",
-                `${booking.room_type} (Room ${booking.room_number || booking.room_id})`,
-              ],
+              // Type only — the room number is hotel-side information.
+              ["Room", booking.room_type],
               ["Check-in", booking.check_in_date?.slice(0, 10)],
               ["Check-out", booking.check_out_date?.slice(0, 10)],
               ["Nights", nights],
@@ -2210,11 +2246,6 @@ const [visibleBookings, setVisibleBookings] = useState(5);
                               {b.room_type}
                             </h3>
 
-                            {b.room_number && (
-                              <p className="mt-1 text-xs text-[#8A95A3]">
-                                Room {b.room_number}
-                              </p>
-                            )}
                           </div>
 
                           <span

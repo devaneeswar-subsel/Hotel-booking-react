@@ -27,6 +27,22 @@
 
 export const GST_RATE = 0.12;
 
+/**
+ * The hotel's own GSTIN. Every invoice and PDF reads this constant so the
+ * number can never differ between the admin copy, the guest download and the
+ * mailed attachment. Mirrors HOTEL_GSTIN in backend/server.js.
+ */
+export const HOTEL_GSTIN = "33BRCPA1008G1ZQ";
+
+/**
+ * 15-character GSTIN: 2-digit state code, 5 letters + 4 digits + 1 letter of
+ * the PAN, 1 entity code, literal Z, 1 checksum character. Mirrors
+ * GSTIN_REGEX in backend/server.js — validate with the same rule on both
+ * sides so a value that passes the form cannot be rejected by the API.
+ */
+export const GSTIN_PATTERN =
+  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+
 /** Round to 2 decimal places (paise). Every money value goes through this. */
 export const money2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 

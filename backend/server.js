@@ -23,10 +23,18 @@ const ALLOWED_ORIGINS = [
 app.use(
   cors({
     origin: function (origin, callback) {
+      /*
+       * origin.includes("vercel.app") used to be here. Combined with
+       * credentials:true it let ANY host whose name merely contains that
+       * string — a free *.vercel.app site, or evil-vercel.app.attacker.com —
+       * make authenticated requests with a signed-in user's cookie.
+       *
+       * Preview deployments are still supported: set FRONTEND_URL, or add the
+       * exact preview URL to ALLOWED_ORIGINS. Nothing else changes.
+       */
       if (
         !origin ||
-        ALLOWED_ORIGINS.some((o) => origin.startsWith(o)) ||
-        origin.includes("vercel.app")
+        ALLOWED_ORIGINS.some((o) => origin === o || origin.startsWith(o))
       ) {
         callback(null, true);
       } else {
@@ -42,6 +50,38 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 // cookieParser MUST run before any authenticated route is registered,
 // otherwise req.cookies is undefined and requireAuth rejects valid sessions.
 app.use(cookieParser());
+
+/*
+ * ── SQL DETAIL SHIELD ────────────────────────────────────────────────────
+ *
+ * Dozens of routes end with `res.status(500).json({ error: err.message })`.
+ * A raw MySQL message names our tables and columns, which hands anyone
+ * probing the API a free map of the schema.
+ *
+ * Rather than edit every route — and risk changing behaviour in any of them —
+ * this wraps res.json once. Only 5xx replies are touched, and only in
+ * production: every 2xx and 4xx body passes through untouched, so no working
+ * flow and no error message a user is meant to read is affected. The real
+ * message still goes to the server log.
+ */
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV !== "production") return next();
+
+  const originalJson = res.json.bind(res);
+
+  res.json = (body) => {
+    if (res.statusCode >= 500 && body && typeof body.error === "string") {
+      console.error(`[${req.method} ${req.originalUrl}] ${body.error}`);
+      return originalJson({
+        ...body,
+        error: "Something went wrong. Please try again.",
+      });
+    }
+    return originalJson(body);
+  };
+
+  next();
+});
 
 // ─── CLOUDINARY ───────────────────────────────────────────────────────────────
 const cloudinary = require("cloudinary").v2;
@@ -171,6 +211,9 @@ async function runMigrations() {
       // booking with GST off. Defaults to 1 so nothing existing changes.
       "gst_enabled TINYINT DEFAULT 1",
       "gst_number VARCHAR(20) DEFAULT NULL",
+      // Billing address printed under BILL TO. Optional — a booking without one
+      // prints exactly as it did before.
+      "customer_address VARCHAR(255) DEFAULT NULL",
     ];
     for (const col of cols) {
       try {
@@ -317,6 +360,7 @@ const ADVANCE_RATE = 0.3;
 const MANUAL_ADVANCE_PAYMENT_MODES = {
   cash: "Cash",
   online: "Online",
+  other: "Other",
 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CUSTOMER_NAME_PATTERN = /^[A-Za-z]+(?:\s+[A-Za-z]+)*$/;
@@ -332,28 +376,43 @@ function normalizeCustomerPhone(value) {
   return phone;
 }
 
-function resolveAdvanceAmount(totalAmount, advanceAmount) {
-  const defaultAdvanceAmount = Math.floor(totalAmount * ADVANCE_RATE);
+function resolveAdvanceAmount(value, totalAmount = null) {
+  // Empty / null / undefined = ₹0
   if (
-    advanceAmount === undefined ||
-    advanceAmount === null ||
-    advanceAmount === ""
+    value === undefined ||
+    value === null ||
+    String(value).trim() === ""
   ) {
-    return defaultAdvanceAmount;
+    return 0;
   }
 
-  const requestedAdvance = Math.round(Number(advanceAmount) * 100) / 100;
-  if (!Number.isFinite(requestedAdvance) || requestedAdvance <= 0) {
-    const err = new Error("Enter a valid advance amount");
-    err.status = 400;
-    throw err;
+  const amount = Number(value);
+
+  // Negative / invalid only
+  if (!Number.isFinite(amount) || amount < 0) {
+    const error = new Error("Enter a valid advance amount");
+    error.status = 400;
+    throw error;
   }
-  if (requestedAdvance > totalAmount) {
-    const err = new Error("Advance amount cannot exceed full amount");
-    err.status = 400;
-    throw err;
+
+  const normalizedAmount = Math.round(amount * 100) / 100;
+
+  // Only validate against total when total is a valid positive number
+  const fullAmount = Number(totalAmount);
+
+  if (
+    Number.isFinite(fullAmount) &&
+    fullAmount > 0 &&
+    normalizedAmount > fullAmount
+  ) {
+    const error = new Error(
+      "Advance amount cannot exceed the full amount"
+    );
+    error.status = 400;
+    throw error;
   }
-  return requestedAdvance;
+
+  return normalizedAmount;
 }
 
 // ─── AUTH COOKIE ─────────────────────────────────────────────────────────────
@@ -450,6 +509,73 @@ function loginRateLimit(req, res, next) {
     }
   }
   next();
+}
+
+/*
+ * ── OTP ATTEMPT LIMIT ────────────────────────────────────────────────────
+ *
+ * A password-reset OTP is six digits. Without a limit an attacker can try
+ * every combination inside the ten-minute window and take over any account
+ * whose email they know — including an admin's.
+ *
+ * Counted per email so the limit cannot be sidestepped by rotating IPs. A
+ * correct OTP clears the counter, so a guest who mistypes twice is unaffected.
+ */
+const otpAttempts = new Map();
+const OTP_WINDOW_MS = 15 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+
+function otpAttemptsExceeded(email) {
+  const key = String(email || "").toLowerCase();
+  const now = Date.now();
+  const hits = (otpAttempts.get(key) || []).filter(
+    (t) => now - t < OTP_WINDOW_MS,
+  );
+  otpAttempts.set(key, hits);
+  return hits.length >= OTP_MAX_ATTEMPTS;
+}
+
+function recordOtpAttempt(email) {
+  const key = String(email || "").toLowerCase();
+  const now = Date.now();
+  const hits = (otpAttempts.get(key) || []).filter(
+    (t) => now - t < OTP_WINDOW_MS,
+  );
+  hits.push(now);
+  otpAttempts.set(key, hits);
+
+  if (otpAttempts.size > 5000) {
+    for (const [k, times] of otpAttempts) {
+      if (!times.some((t) => now - t < OTP_WINDOW_MS)) otpAttempts.delete(k);
+    }
+  }
+}
+
+function clearOtpAttempts(email) {
+  otpAttempts.delete(String(email || "").toLowerCase());
+}
+
+/*
+ * ── OTP REQUEST LIMIT ────────────────────────────────────────────────────
+ *
+ * Stops one address being mailed an OTP over and over, which would flood the
+ * guest's inbox, burn the Resend quota and get the sending domain flagged.
+ */
+const otpRequests = new Map();
+const OTP_REQUEST_WINDOW_MS = 60 * 60 * 1000;
+const OTP_MAX_REQUESTS = 5;
+
+function otpRequestsExceeded(email) {
+  const key = String(email || "").toLowerCase();
+  const now = Date.now();
+  const hits = (otpRequests.get(key) || []).filter(
+    (t) => now - t < OTP_REQUEST_WINDOW_MS,
+  );
+  otpRequests.set(key, hits);
+  if (hits.length >= OTP_MAX_REQUESTS) return true;
+  hits.push(now);
+  otpRequests.set(key, hits);
+  return false;
 }
 
 // Clear an IP's failed attempts once it authenticates successfully, so a
@@ -694,7 +820,10 @@ async function calculateBookingAmounts({
     Math.round((taxableAmount + chargedGst) * 100) / 100,
   );
   const discountedRoomAmount = taxableAmount;
-  const advanceAmount = resolveAdvanceAmount(totalAmount, advance_amount);
+  const advanceAmount = resolveAdvanceAmount(
+  advance_amount,
+  totalAmount
+);
   const remainingAmount =
     Math.round(Math.max(0, totalAmount - advanceAmount) * 100) / 100;
 
@@ -812,6 +941,17 @@ app.get("/api/customers/lookup", requireManager, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── hotel tax identity ───────────────────────────────────────────────────────
+// Single source of truth for the hotel's own GSTIN. Every invoice — the mailed
+// PDF, the admin PDF and the guest download — reads this constant, so the
+// number can never drift between documents.
+const HOTEL_GSTIN = "33BRCPA1008G1ZQ";
+
+// 15-character GSTIN: 2-digit state code, 5 letters + 4 digits + 1 letter of
+// the PAN, 1 entity code, literal Z, 1 checksum character.
+const GSTIN_REGEX =
+  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
 // invoice numbers are year-prefixed, e.g. INV-2026-0037
 function formatBookingId(booking) {
@@ -955,8 +1095,42 @@ async function generateAdvanceInvoicePdf(booking) {
       .fillColor("#495057")
       .font("Helvetica")
       .fontSize(9)
-      .text(booking.email || "", 50, 166);
-    if (booking.phone) doc.text(booking.phone, 50, 180);
+      // Width-capped: an unusually long address would otherwise run straight
+      // across the page and collide with the FROM block at x=350.
+      .text(booking.email || "", 50, 166, { width: 250, lineBreak: false });
+
+    /*
+     * BILL TO runs down the page instead of sitting on fixed rows, because the
+     * phone, GSTIN and address lines are each optional. Tracking the cursor
+     * here is what stopped the GSTIN from being printed on top of the address
+     * on bookings that carry both.
+     */
+    let billY = 179;
+    if (booking.phone) {
+      doc.text(booking.phone, 50, billY);
+      billY += 12;
+    }
+    if (booking.customer_address) {
+      // Kept to two lines so a long address cannot push the invoice onto a
+      // second page.
+      const address = doc.heightOfString(String(booking.customer_address), {
+        width: 250,
+      });
+      doc.text(String(booking.customer_address), 50, billY, {
+        width: 250,
+        height: 24,
+        ellipsis: true,
+      });
+      billY += Math.min(24, Math.max(12, address));
+    }
+    if (booking.gst_number) {
+      doc
+        .fillColor("#0F1923")
+        .font("Helvetica-Bold")
+        .fontSize(9)
+        .text(`GSTIN: ${booking.gst_number}`, 50, billY);
+      billY += 12;
+    }
 
     doc
       .fillColor("#868E96")
@@ -975,8 +1149,14 @@ async function generateAdvanceInvoicePdf(booking) {
       .text("3/4/D, Thanjai Saalai", 350, 166)
       .text("Thiruvarur - 610004", 350, 180)
       .text("+91 93849 82510, +91 90032 51115", 350, 194);
+    doc
+      .fillColor("#0F1923")
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .text(`GSTIN: ${HOTEL_GSTIN}`, 350, 208);
 
-    const tableTop = 230;
+    // The table starts below whichever column ran longer.
+    const tableTop = Math.max(230, billY + 6);
     doc.rect(50, tableTop, 495, 25).fill("#0F1923");
     doc
       .fillColor("#C9A84C")
@@ -1075,11 +1255,17 @@ async function generateAdvanceInvoicePdf(booking) {
       .stroke();
     y += 18;
     doc.fillColor("#666666").font("Helvetica").fontSize(6);
+    /*
+     * Height-capped to the space left above the footer. Without a cap, a
+     * booking with a discount (two extra summary rows) pushed the terms past
+     * the bottom margin and PDFKit silently started a second page — leaving
+     * page 1 with no footer and page 2 with nothing but stray text.
+     */
     doc.text(
       INVOICE_TERMS.map((term, i) => `${i + 1}. ${term}`).join("   "),
       50,
       y,
-      { width: 495, align: "justify" },
+      { width: 495, align: "justify", height: Math.max(60, 752 - y) },
     );
 
     const footerY = 762;
@@ -1168,6 +1354,7 @@ async function sendAdvanceInvoiceEmail(booking) {
               <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Payment Mode</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;color:#0F1923;">${escapeHtml(
                 booking.payment_method || "-",
               )}</td></tr>
+              ${booking.gst_number ? `<tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Your GSTIN</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#0F1923;">${escapeHtml(booking.gst_number)}</td></tr>` : ""}
               ${discountAmount > 0 ? `<tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Discount</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#C0392B;">-${formatInvoiceMoney(discountAmount)}</td></tr>` : ""}
               <tr><td style="padding:10px 14px;border-top:1px solid #E9ECEF;color:#868E96;">Advance Paid</td><td style="padding:10px 14px;border-top:1px solid #E9ECEF;text-align:right;font-weight:700;color:#2D9A6E;">${formatInvoiceMoney(
                 advancePaid,
@@ -1181,6 +1368,7 @@ async function sendAdvanceInvoiceEmail(booking) {
               <ol style="margin:0;padding-left:18px;font-size:12px;">${emailTermsHtml}</ol>
             </div>
             <p style="margin:20px 0 0;color:#868E96;font-size:12px;text-align:center;">VV Grand Park Residency | +91 93849 82510 | +91 90032 51115 | vvgrandpark@gmail.com</p>
+            <p style="margin:6px 0 0;color:#868E96;font-size:12px;text-align:center;">GSTIN: ${HOTEL_GSTIN}</p>
           </div>
         </div>
       </div>
@@ -1296,14 +1484,25 @@ app.post("/api/auth/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "Email required" });
+
+    /*
+     * Always answer the same way, whether or not the address is registered.
+     * The old 404 ("No account found with this email") let anyone test an
+     * address against the guest list.
+     */
+    const NEUTRAL = {
+      message: "If that email is registered, an OTP has been sent",
+    };
+
+    // One address cannot be mailed an OTP more than a handful of times an hour.
+    if (otpRequestsExceeded(email)) return res.json(NEUTRAL);
+
     const [users] = await db.query(
       "SELECT user_id, name FROM users WHERE email=?",
       [email],
     );
-    if (!users.length)
-      return res
-        .status(404)
-        .json({ error: "No account found with this email" });
+    if (!users.length) return res.json(NEUTRAL);
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db.query("DELETE FROM password_otps WHERE email=?", [email]);
@@ -1321,7 +1520,8 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       console.error("Resend error:", error);
       return res.status(500).json({ error: "Failed to send OTP. Try again." });
     }
-    res.json({ message: "OTP sent to your email" });
+    // Same wording as the not-registered path above.
+    res.json(NEUTRAL);
   } catch (err) {
     console.error("Forgot password error:", err.message);
     res.status(500).json({ error: "Failed to send OTP. Try again." });
@@ -1333,12 +1533,26 @@ app.post("/api/auth/verify-otp", async (req, res) => {
     const { email, otp } = req.body;
     if (!email || !otp)
       return res.status(400).json({ error: "Email and OTP required" });
+
+    // Five wrong guesses per address per fifteen minutes. Without this a
+    // six-digit code can be enumerated inside its ten-minute lifetime.
+    if (otpAttemptsExceeded(email)) {
+      return res.status(429).json({
+        error: "Too many incorrect attempts. Request a new OTP in 15 minutes.",
+      });
+    }
+
     const [rows] = await db.query(
       "SELECT * FROM password_otps WHERE email=? AND otp=? AND used=0 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
       [email, otp],
     );
-    if (!rows.length)
+    if (!rows.length) {
+      recordOtpAttempt(email);
       return res.status(400).json({ error: "Invalid or expired OTP" });
+    }
+
+    // A correct code clears the counter, so an honest mistype costs nothing.
+    clearOtpAttempts(email);
     res.json({ message: "OTP verified", valid: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1356,12 +1570,25 @@ app.post("/api/auth/reset-password", async (req, res) => {
       return res
         .status(400)
         .json({ error: "Password must be at least 6 characters" });
+
+    // Same limit as verify-otp — otherwise this route is an unguarded second
+    // door onto the same six-digit code.
+    if (otpAttemptsExceeded(email)) {
+      return res.status(429).json({
+        error: "Too many incorrect attempts. Request a new OTP in 15 minutes.",
+      });
+    }
+
     const [rows] = await db.query(
       "SELECT * FROM password_otps WHERE email=? AND otp=? AND used=0 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
       [email, otp],
     );
-    if (!rows.length)
+    if (!rows.length) {
+      recordOtpAttempt(email);
       return res.status(400).json({ error: "Invalid or expired OTP" });
+    }
+
+    clearOtpAttempts(email);
     const hashed = await bcrypt.hash(new_password, 12);
     await db.query("UPDATE users SET password=? WHERE email=?", [
       hashed,
@@ -1965,7 +2192,37 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
             .font("Helvetica")
             .fontSize(9)
             .text(booking.email || "", 50, 162);
-          if (booking.phone) doc.text(booking.phone, 50, 175);
+
+          let billY = 174;
+          if (booking.phone) {
+            doc.text(booking.phone, 50, billY);
+            billY += 12;
+          }
+          if (booking.customer_address) {
+            doc.text(String(booking.customer_address), 50, billY, {
+              width: 250,
+              height: 24,
+              ellipsis: true,
+            });
+            billY += Math.min(
+              24,
+              Math.max(
+                12,
+                doc.heightOfString(String(booking.customer_address), {
+                  width: 250,
+                }),
+              ),
+            );
+          }
+          if (booking.gst_number) {
+            doc
+              .fillColor("#0F1923")
+              .font("Helvetica-Bold")
+              .fontSize(9)
+              .text(`GSTIN: ${booking.gst_number}`, 50, billY);
+            billY += 12;
+          }
+
           doc
             .fillColor("#868E96")
             .font("Helvetica-Bold")
@@ -1986,8 +2243,13 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
               350,
               175,
             );
+          doc
+            .fillColor("#0F1923")
+            .font("Helvetica-Bold")
+            .fontSize(9)
+            .text(`GSTIN: ${HOTEL_GSTIN}`, 350, 188);
 
-          const tableTop = 210;
+          const tableTop = Math.max(210, billY + 6);
           doc.rect(50, tableTop, 495, 25).fill("#0F1923");
           doc
             .fillColor("#C9A84C")
@@ -2663,12 +2925,34 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/payment/failed", async (req, res) => {
+/*
+ * Called when a guest closes the Razorpay window, so it cannot require a
+ * login — guests check out without an account. It stays open, but is now
+ * narrowed so it can only ever do what it is meant to:
+ *
+ *   - only a booking still in 'pending' can be touched (already true)
+ *   - only within an hour of that booking being created, so an old pending
+ *     row cannot be cancelled later by anyone who guesses its id
+ *   - rate limited, so ids cannot be swept in bulk
+ *
+ * The guest-facing behaviour is unchanged.
+ */
+app.post("/api/payment/failed", guestRateLimit, async (req, res) => {
   try {
+    const bookingId = Number(req.body.booking_id);
+    if (!bookingId) return res.status(400).json({ error: "booking_id required" });
+
     await db.query(
-      "UPDATE bookings SET status='cancelled' WHERE booking_id=? AND status='pending'",
-      [req.body.booking_id],
+      `UPDATE bookings
+          SET status='cancelled'
+        WHERE booking_id = ?
+          AND status = 'pending'
+          AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+      [bookingId],
     );
+
+    // Always the same reply, so the endpoint cannot be used to discover which
+    // booking ids exist.
     res.json({ message: "Booking cancelled." });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2995,6 +3279,9 @@ app.post(
         gst_enabled = true,
       } = req.body;
 
+      // ------------------------------------------------------------
+      // 1. REQUIRED FIELDS
+      // ------------------------------------------------------------
       if (
         !room_id ||
         !check_in_date ||
@@ -3003,62 +3290,138 @@ app.post(
         !razorpay_payment_id ||
         !razorpay_signature
       ) {
-        return res.status(400).json({ error: "Missing required fields" });
+        return res.status(400).json({
+          error: "Missing required fields",
+        });
       }
 
+      // ------------------------------------------------------------
+      // 2. NORMALIZE ADVANCE AMOUNT
+      //
+      // Empty / null / undefined = Rs.0
+      // 0 = valid
+      // Positive number = valid
+      // Negative / NaN = invalid
+      // ------------------------------------------------------------
+      const normalizedAdvanceAmount =
+        advance_amount === undefined ||
+        advance_amount === null ||
+        String(advance_amount).trim() === ""
+          ? 0
+          : Number(advance_amount);
+
+      if (
+        !Number.isFinite(normalizedAdvanceAmount) ||
+        normalizedAdvanceAmount < 0
+      ) {
+        return res.status(400).json({
+          error: "Enter a valid advance amount",
+        });
+      }
+
+      // ------------------------------------------------------------
+      // 3. VERIFY RAZORPAY SIGNATURE
+      // ------------------------------------------------------------
       const expectedSignature = crypto
         .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
         .update(`${razorpay_order_id}|${razorpay_payment_id}`)
         .digest("hex");
+
       if (expectedSignature !== razorpay_signature) {
-        return res.status(400).json({ error: "Payment verification failed" });
+        return res.status(400).json({
+          error: "Payment verification failed",
+        });
       }
 
-      const validVehicleTypes = ["none", "4-seater", "7-seater", "12-seater"];
+      // ------------------------------------------------------------
+      // 4. VEHICLE VALIDATION
+      // ------------------------------------------------------------
+      const validVehicleTypes = [
+        "none",
+        "4-seater",
+        "7-seater",
+        "12-seater",
+      ];
+
       if (!validVehicleTypes.includes(vehicle_type)) {
-        return res.status(400).json({ error: "Invalid vehicle type" });
+        return res.status(400).json({
+          error: "Invalid vehicle type",
+        });
       }
 
+      // ------------------------------------------------------------
+      // 5. CALCULATE BOOKING AMOUNTS
+      // ------------------------------------------------------------
       const amounts = await calculateBookingAmounts({
         room_id,
         check_in_date,
         check_out_date,
-        advance_amount,
+        advance_amount: normalizedAdvanceAmount,
         guest_count,
         discount_applied,
         discount_amount,
-        gst_enabled,
+        gst_enabled: gst_enabled !== false,
         allowPastDates: true,
       });
-      const requestedGuests = Math.max(1, Number(guest_count) || 1);
-      if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
+
+      // ------------------------------------------------------------
+      // 6. GUEST COUNT VALIDATION
+      // ------------------------------------------------------------
+      const requestedGuests = Math.max(
+        1,
+        Number(guest_count) || 1,
+      );
+
+      if (
+        requestedGuests >
+        Number(amounts.room.capacity || requestedGuests)
+      ) {
         return res.status(400).json({
           error: `This room allows up to ${amounts.room.capacity} guests`,
         });
       }
 
-      const paidOrder = await razorpay.orders.fetch(razorpay_order_id);
+      // ------------------------------------------------------------
+      // 7. FETCH RAZORPAY ORDER
+      // ------------------------------------------------------------
+      const paidOrder = await razorpay.orders.fetch(
+        razorpay_order_id,
+      );
+
       const orderNotes = paidOrder.notes || {};
+
       if (
         String(orderNotes.room_id || "") !== String(room_id) ||
         orderNotes.check_in_date !== check_in_date ||
         orderNotes.check_out_date !== check_out_date
       ) {
-        return res
-          .status(400)
-          .json({ error: "Paid order does not match this booking" });
+        return res.status(400).json({
+          error: "Paid order does not match this booking",
+        });
       }
 
+      // ------------------------------------------------------------
+      // 8. CHECK PAYMENT STATUS
+      // ------------------------------------------------------------
       if (paidOrder.status !== "paid") {
-        return res
-          .status(400)
-          .json({ error: "This payment has not completed" });
+        return res.status(400).json({
+          error: "This payment has not completed",
+        });
       }
 
+      // ------------------------------------------------------------
+      // 9. DUPLICATE PAYMENT CHECK
+      // ------------------------------------------------------------
       const [dupe] = await db.query(
-        "SELECT booking_id FROM bookings WHERE advance_order_id=? LIMIT 1",
+        `
+          SELECT booking_id
+          FROM bookings
+          WHERE advance_order_id = ?
+          LIMIT 1
+        `,
         [razorpay_order_id],
       );
+
       if (dupe.length) {
         return res.json({
           message: "Booking already confirmed for this payment",
@@ -3067,106 +3430,783 @@ app.post(
         });
       }
 
+      // ------------------------------------------------------------
+      // 10. ROOM DATE CONFLICT CHECK
+      // ------------------------------------------------------------
       const conflict = await findDateConflict(db, {
         room_id,
         check_in_date,
         check_out_date,
       });
+
       if (conflict) {
         return res.status(409).json({
-          error: `${conflict}. The payment succeeded — refund it from the Razorpay dashboard.`,
+          error:
+            `${conflict}. The payment succeeded — refund it from the Razorpay dashboard.`,
           razorpay_payment_id,
         });
       }
+
+      // ------------------------------------------------------------
+      // 11. VERIFY RAZORPAY AMOUNT
+      // ------------------------------------------------------------
       if (
-        Number(paidOrder.amount) !== Math.round(amounts.advanceAmount * 100)
+        Number(paidOrder.amount) !==
+        Math.round(amounts.advanceAmount * 100)
       ) {
-        return res
-          .status(400)
-          .json({ error: "Advance amount does not match paid order" });
+        return res.status(400).json({
+          error: "Advance amount does not match paid order",
+        });
       }
 
-      const userId = await findOrCreateGuestUser(customer || {});
+      // ------------------------------------------------------------
+      // 12. CREATE / FIND GUEST
+      // ------------------------------------------------------------
+      const userId = await findOrCreateGuestUser(
+        customer || {},
+      );
 
-      const gstNumberRaw = String(customer?.gst_number || "")
+      // ------------------------------------------------------------
+      // 13. GST NUMBER
+      // ------------------------------------------------------------
+      const gstNumberRaw = String(
+        customer?.gst_number || "",
+      )
         .trim()
         .toUpperCase();
-      const GSTIN_PATTERN =
-        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-      if (gstNumberRaw && !GSTIN_PATTERN.test(gstNumberRaw)) {
-        return res
-          .status(400)
-          .json({ error: "Enter a valid 15-character GSTIN" });
+
+      if (
+        gstNumberRaw &&
+        !GSTIN_REGEX.test(gstNumberRaw)
+      ) {
+        return res.status(400).json({
+          error: "Enter a valid 15-character GSTIN",
+        });
       }
+
       const gstNumber = gstNumberRaw || null;
 
+      // ------------------------------------------------------------
+      // 14. CUSTOMER ADDRESS
+      // ------------------------------------------------------------
+      const customerAddress =
+        String(
+          customer?.customer_address ||
+            customer?.address ||
+            "",
+        )
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 255) || null;
+
+      // ------------------------------------------------------------
+      // 15. INSERT BOOKING
+      // ------------------------------------------------------------
       const [result] = await db.query(
-        `INSERT INTO bookings (
-        user_id, room_id, check_in_date, check_out_date, guest_count,
-        total_price, taxable_amount, gst_amount, final_total, total_amount,
-        advance_amount, advance_paid, balance_paid, remaining_amount,
-        payment_status, payment_id, advance_payment_id, advance_order_id,
-        payment_method, booking_source, vehicle_type, vehicle_price,
-        vehicle_status, pickup_location, dropoff_location,
-        discount_applied, discount_amount, gst_enabled, gst_number, status
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+        `
+          INSERT INTO bookings (
+            user_id,
+            room_id,
+            check_in_date,
+            check_out_date,
+            guest_count,
+
+            total_price,
+            taxable_amount,
+            gst_amount,
+            final_total,
+            total_amount,
+
+            advance_amount,
+            advance_paid,
+            balance_paid,
+            remaining_amount,
+
+            payment_status,
+            payment_id,
+            advance_payment_id,
+            advance_order_id,
+
+            payment_method,
+            booking_source,
+
+            vehicle_type,
+            vehicle_price,
+            vehicle_status,
+
+            pickup_location,
+            dropoff_location,
+
+            discount_applied,
+            discount_amount,
+
+            gst_enabled,
+            gst_number,
+
+            customer_address,
+            status
+          )
+          VALUES (
+            ?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,
+            ?,?,?,?,
+            ?,?,
+            ?,?,?,
+            ?,?,
+            ?,?,
+            ?,?,
+            ?,?,
+            ?,
+            'confirmed'
+          )
+        `,
         [
           userId,
           room_id,
           check_in_date,
           check_out_date,
           requestedGuests,
+
           amounts.roomSubtotal,
           amounts.taxableAmount,
           amounts.gstAmount,
           amounts.totalAmount,
           amounts.totalAmount,
+
           amounts.advanceAmount,
           amounts.advanceAmount,
           0,
           amounts.remainingAmount,
-          amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+
+          amounts.remainingAmount > 0
+            ? "PARTIALLY_PAID"
+            : "PAID",
+
           razorpay_payment_id,
           razorpay_payment_id,
           razorpay_order_id,
+
           "Razorpay Advance",
-          req.user.role === "admin" ? "ADMIN_ADVANCE" : "MANAGER_ADVANCE",
+
+          req.user.role === "admin"
+            ? "ADMIN_ADVANCE"
+            : "MANAGER_ADVANCE",
+
           vehicle_type,
           0,
-          vehicle_type === "none" ? "not_required" : "pending",
+
+          vehicle_type === "none"
+            ? "not_required"
+            : "pending",
+
           pickup_location || null,
           dropoff_location || null,
+
           amounts.discountAmount > 0 ? 1 : 0,
           amounts.discountAmount,
+
           amounts.gstEnabled ? 1 : 0,
           gstNumber,
+
+          customerAddress,
         ],
       );
 
+      // ------------------------------------------------------------
+      // 16. INVOICE
+      // ------------------------------------------------------------
       const bookingId = result.insertId;
+
       loadBookingForInvoice(bookingId)
-        .then((booking) => booking && sendAdvanceInvoiceEmail(booking))
-        .catch((emailErr) =>
+        .then((booking) => {
+          if (booking) {
+            return sendAdvanceInvoiceEmail(booking);
+          }
+        })
+        .catch((emailErr) => {
           console.error(
             "Advance booking invoice email error:",
             emailErr.message,
-          ),
-        );
+          );
+        });
 
-      res.status(201).json({
+      // ------------------------------------------------------------
+      // 17. RESPONSE
+      // ------------------------------------------------------------
+      return res.status(201).json({
         message: "Booking confirmed with advance payment",
+
         booking_id: bookingId,
+
         totalAmount: amounts.totalAmount,
+
         advanceAmount: amounts.advanceAmount,
+
         advancePaid: amounts.advanceAmount,
+
         remainingAmount: amounts.remainingAmount,
-        paymentStatus: amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
+
+        paymentStatus:
+          amounts.remainingAmount > 0
+            ? "PARTIALLY_PAID"
+            : "PAID",
+
         bookingStatus: "CONFIRMED",
       });
     } catch (err) {
-      res.status(err.status || 500).json({ error: err.message });
+      console.error(
+        "Advance booking error:",
+        err,
+      );
+
+      return res.status(err.status || 500).json({
+        error:
+          err.message ||
+          "Failed to confirm advance booking",
+      });
     }
   },
+);
+
+
+// ================================================================
+// MANUAL CASH / ONLINE ADVANCE CONFIRM
+// ================================================================
+
+app.post(
+  "/api/admin/bookings/manual-advance-confirm",
+  requireManager,
+  async (req, res) => {
+    try {
+      const {
+        room_id,
+        check_in_date,
+        check_out_date,
+        guest_count,
+        customer,
+        vehicle_type = "none",
+        advance_amount,
+        payment_mode,
+        discount_applied = false,
+        discount_amount = 0,
+        pickup_location,
+        dropoff_location,
+        gst_enabled = true,
+      } = req.body;
+
+      // ============================================================
+      // 1. REQUIRED BOOKING FIELDS
+      // ============================================================
+
+      if (
+        !room_id ||
+        !check_in_date ||
+        !check_out_date
+      ) {
+        return res.status(400).json({
+          error: "Missing required fields",
+        });
+      }
+
+      // ============================================================
+      // 2. ADVANCE AMOUNT
+      //
+      // Empty = 0
+      // null  = 0
+      // undefined = 0
+      // "0" = 0
+      // 0 = 0
+      // 403 = 403
+      // ============================================================
+
+      let normalizedAdvanceAmount = 0;
+
+      if (
+        advance_amount !== undefined &&
+        advance_amount !== null &&
+        String(advance_amount).trim() !== ""
+      ) {
+        normalizedAdvanceAmount = Number(
+          advance_amount
+        );
+      }
+
+      // Validate advance amount
+      if (
+        !Number.isFinite(normalizedAdvanceAmount) ||
+        normalizedAdvanceAmount < 0
+      ) {
+        return res.status(400).json({
+          error: "Enter a valid advance amount",
+        });
+      }
+
+      // Keep only 2 decimal places
+      normalizedAdvanceAmount =
+        Math.round(
+          normalizedAdvanceAmount * 100
+        ) / 100;
+
+      // ============================================================
+      // 3. PAYMENT MODE
+      // ============================================================
+
+      const selectedPaymentMode =
+        MANUAL_ADVANCE_PAYMENT_MODES[
+          String(payment_mode || "")
+            .trim()
+            .toLowerCase()
+        ];
+
+      if (!selectedPaymentMode) {
+        return res.status(400).json({
+          error:
+            "Select Cash, Online or Other payment mode",
+        });
+      }
+
+      // ============================================================
+      // 4. ONLINE PAYMENT MUST HAVE ADVANCE
+      //
+      // Cash can be Rs.0
+      // Online cannot be Rs.0
+      // ============================================================
+
+      if (
+        selectedPaymentMode === "Online" &&
+        normalizedAdvanceAmount <= 0
+      ) {
+        return res.status(400).json({
+          error:
+            "Enter a valid advance amount",
+        });
+      }
+
+      // ============================================================
+      // 5. VEHICLE VALIDATION
+      // ============================================================
+
+      const validVehicleTypes = [
+        "none",
+        "4-seater",
+        "7-seater",
+        "12-seater",
+      ];
+
+      if (
+        !validVehicleTypes.includes(
+          vehicle_type
+        )
+      ) {
+        return res.status(400).json({
+          error: "Invalid vehicle type",
+        });
+      }
+
+      // ============================================================
+      // 6. CALCULATE BOOKING AMOUNTS
+      // ============================================================
+
+      const amounts =
+        await calculateBookingAmounts({
+          room_id,
+          check_in_date,
+          check_out_date,
+
+          // IMPORTANT
+          // Empty Cash = 0
+          advance_amount:
+            normalizedAdvanceAmount,
+
+          guest_count,
+
+          discount_applied,
+
+          discount_amount,
+
+          gst_enabled:
+            gst_enabled !== false,
+
+          // Admin / Manager can create
+          // booking with past dates
+          allowPastDates: true,
+        });
+
+      // ============================================================
+      // 7. GUEST COUNT
+      // ============================================================
+
+      const requestedGuests = Math.max(
+        1,
+        Number(guest_count) || 1
+      );
+
+      if (
+        requestedGuests >
+        Number(
+          amounts.room.capacity ||
+            requestedGuests
+        )
+      ) {
+        return res.status(400).json({
+          error: `This room allows up to ${amounts.room.capacity} guests`,
+        });
+      }
+
+      // ============================================================
+      // 8. ADVANCE CANNOT EXCEED TOTAL
+      //
+      // Extra safety check
+      // ============================================================
+
+      if (
+        normalizedAdvanceAmount >
+        Number(amounts.totalAmount || 0)
+      ) {
+        return res.status(400).json({
+          error:
+            "Advance amount cannot exceed the full amount",
+        });
+      }
+
+      // ============================================================
+      // 9. ROOM AVAILABILITY
+      // ============================================================
+
+      const conflict =
+        await findDateConflict(db, {
+          room_id,
+          check_in_date,
+          check_out_date,
+        });
+
+      if (conflict) {
+        return res.status(409).json({
+          error: conflict,
+        });
+      }
+
+      // ============================================================
+      // 10. FIND / CREATE CUSTOMER
+      // ============================================================
+
+      const userId =
+        await findOrCreateGuestUser(
+          customer || {}
+        );
+
+      // ============================================================
+      // 11. MANUAL PAYMENT ID
+      // ============================================================
+
+      const manualPaymentId =
+        `${selectedPaymentMode.toUpperCase()}-${Date.now()}-${req.user.user_id}`;
+
+      // ============================================================
+      // 12. GST NUMBER
+      // ============================================================
+
+      const gstNumberRaw = String(
+        customer?.gst_number || ""
+      )
+        .trim()
+        .toUpperCase();
+
+      if (
+        gstNumberRaw &&
+        !GSTIN_REGEX.test(gstNumberRaw)
+      ) {
+        return res.status(400).json({
+          error:
+            "Enter a valid 15-character GSTIN",
+        });
+      }
+
+      const gstNumber =
+        gstNumberRaw || null;
+
+      // ============================================================
+      // 13. CUSTOMER ADDRESS
+      // ============================================================
+
+      const customerAddress =
+        String(
+          customer?.customer_address ||
+            customer?.address ||
+            ""
+        )
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 255) || null;
+
+      // ============================================================
+      // 14. INSERT BOOKING
+      // ============================================================
+
+      const [result] =
+        await db.query(
+          `
+          INSERT INTO bookings (
+            user_id,
+            room_id,
+            check_in_date,
+            check_out_date,
+            guest_count,
+
+            total_price,
+            taxable_amount,
+            gst_amount,
+            final_total,
+            total_amount,
+
+            discount_applied,
+            discount_amount,
+
+            advance_amount,
+            advance_paid,
+            balance_paid,
+            remaining_amount,
+
+            payment_status,
+            payment_id,
+            advance_payment_id,
+            advance_order_id,
+
+            payment_method,
+            booking_source,
+
+            vehicle_type,
+            vehicle_price,
+            vehicle_status,
+
+            pickup_location,
+            dropoff_location,
+
+            gst_enabled,
+            gst_number,
+
+            customer_address,
+            status
+          )
+          VALUES (
+            ?, ?, ?, ?, ?,
+
+            ?, ?, ?, ?, ?,
+
+            ?, ?,
+
+            ?, ?, ?, ?,
+
+            ?, ?, ?, ?,
+
+            ?, ?,
+
+            ?, ?, ?,
+
+            ?, ?,
+
+            ?, ?,
+
+            ?,
+            'confirmed'
+          )
+          `,
+          [
+            // ------------------------------------------------------
+            // BOOKING
+            // ------------------------------------------------------
+
+            userId,
+            room_id,
+            check_in_date,
+            check_out_date,
+            requestedGuests,
+
+            // ------------------------------------------------------
+            // AMOUNTS
+            // ------------------------------------------------------
+
+            amounts.roomSubtotal,
+            amounts.taxableAmount,
+            amounts.gstAmount,
+            amounts.totalAmount,
+            amounts.totalAmount,
+
+            // ------------------------------------------------------
+            // DISCOUNT
+            // ------------------------------------------------------
+
+            amounts.discountApplied
+              ? 1
+              : 0,
+
+            amounts.discountAmount,
+
+            // ------------------------------------------------------
+            // ADVANCE
+            //
+            // IMPORTANT:
+            // Use normalizedAdvanceAmount
+            // ------------------------------------------------------
+
+            normalizedAdvanceAmount,
+            normalizedAdvanceAmount,
+
+            // Balance paid initially 0
+            0,
+
+            // Remaining balance
+            amounts.remainingAmount,
+
+            // ------------------------------------------------------
+            // PAYMENT
+            // ------------------------------------------------------
+
+            amounts.remainingAmount > 0
+              ? "PARTIALLY_PAID"
+              : "PAID",
+
+            manualPaymentId,
+            manualPaymentId,
+            null,
+
+            `${selectedPaymentMode} Advance`,
+
+            // ------------------------------------------------------
+            // BOOKING SOURCE
+            // ------------------------------------------------------
+
+            req.user.role === "admin"
+              ? "ADMIN_MANUAL_ADVANCE"
+              : "MANAGER_MANUAL_ADVANCE",
+
+            // ------------------------------------------------------
+            // VEHICLE
+            // ------------------------------------------------------
+
+            vehicle_type,
+            0,
+
+            vehicle_type === "none"
+              ? "not_required"
+              : "pending",
+
+            // ------------------------------------------------------
+            // LOCATIONS
+            // ------------------------------------------------------
+
+            pickup_location || null,
+            dropoff_location || null,
+
+            // ------------------------------------------------------
+            // GST
+            // ------------------------------------------------------
+
+            amounts.gstEnabled
+              ? 1
+              : 0,
+
+            gstNumber,
+
+            // ------------------------------------------------------
+            // ADDRESS
+            // ------------------------------------------------------
+
+            customerAddress,
+          ]
+        );
+
+      // ============================================================
+      // 15. BOOKING ID
+      // ============================================================
+
+      const bookingId =
+        result.insertId;
+
+      // ============================================================
+      // 16. SEND INVOICE EMAIL
+      // ============================================================
+
+      loadBookingForInvoice(
+        bookingId
+      )
+        .then((booking) => {
+          if (booking) {
+            return sendAdvanceInvoiceEmail(
+              booking
+            );
+          }
+        })
+        .catch((emailErr) => {
+          console.error(
+            "Manual booking invoice email error:",
+            emailErr.message
+          );
+        });
+
+      // ============================================================
+      // 17. SUCCESS RESPONSE
+      // ============================================================
+
+      return res.status(201).json({
+        message:
+          "Booking confirmed with manual advance payment",
+
+        booking_id:
+          bookingId,
+
+        totalAmount:
+          amounts.totalAmount,
+
+        discountApplied:
+          amounts.discountApplied,
+
+        discountAmount:
+          amounts.discountAmount,
+
+        discountedRoomAmount:
+          amounts.discountedRoomAmount,
+
+        // IMPORTANT
+        // This will be 0 when Cash advance is empty
+        advanceAmount:
+          normalizedAdvanceAmount,
+
+        advancePaid:
+          normalizedAdvanceAmount,
+
+        remainingAmount:
+          amounts.remainingAmount,
+
+        invoiceEmail:
+          customer?.email || null,
+
+        paymentMode:
+          selectedPaymentMode,
+
+        paymentStatus:
+          amounts.remainingAmount > 0
+            ? "PARTIALLY_PAID"
+            : "PAID",
+
+        bookingStatus:
+          "CONFIRMED",
+      });
+    } catch (err) {
+      console.error(
+        "Manual advance booking error:",
+        err
+      );
+
+      return res.status(
+        err.status || 500
+      ).json({
+        error:
+          err.message ||
+          "Failed to confirm manual booking",
+      });
+    }
+  }
 );
 
 app.post(
@@ -3209,7 +4249,7 @@ app.post(
       if (!selectedPaymentMode) {
         return res
           .status(400)
-          .json({ error: "Select Cash or Online payment mode" });
+          .json({ error: "Select Cash, Online or Other payment mode" });
       }
 
       const validVehicleTypes = ["none", "4-seater", "7-seater", "12-seater"];
@@ -3217,18 +4257,30 @@ app.post(
         return res.status(400).json({ error: "Invalid vehicle type" });
       }
 
-      const amounts = await calculateBookingAmounts({
-        room_id,
-        check_in_date,
-        check_out_date,
-        advance_amount,
-        guest_count,
-        discount_applied,
-        discount_amount,
-        gst_enabled: req.body.gst_enabled !== false,
-        // staff route — walk-ins and late paperwork need past check-in dates
-        allowPastDates: true,
-      });
+     const normalizedAdvanceAmount =
+  advance_amount === undefined ||
+  advance_amount === null ||
+  String(advance_amount).trim() === ""
+    ? 0
+    : Number(advance_amount);
+
+if (!Number.isFinite(normalizedAdvanceAmount) || normalizedAdvanceAmount < 0) {
+  return res.status(400).json({
+    error: "Enter a valid advance amount",
+  });
+}
+
+const amounts = await calculateBookingAmounts({
+  room_id,
+  check_in_date,
+  check_out_date,
+  advance_amount: normalizedAdvanceAmount,
+  guest_count,
+  discount_applied,
+  discount_amount,
+  gst_enabled: req.body.gst_enabled !== false,
+  allowPastDates: true,
+});
       const requestedGuests = Math.max(1, Number(guest_count) || 1);
       if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
         return res.status(400).json({
@@ -3254,14 +4306,20 @@ app.post(
       const gstNumberRaw = String(customer?.gst_number || "")
         .trim()
         .toUpperCase();
-      const GSTIN_PATTERN =
-        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-      if (gstNumberRaw && !GSTIN_PATTERN.test(gstNumberRaw)) {
+      if (gstNumberRaw && !GSTIN_REGEX.test(gstNumberRaw)) {
         return res
           .status(400)
           .json({ error: "Enter a valid 15-character GSTIN" });
       }
       const gstNumber = gstNumberRaw || null;
+
+      // Optional billing address. Collapsed to single spaces so a pasted
+      // multi-line address prints as one clean block on the invoice.
+      const customerAddress =
+        String(customer?.customer_address || customer?.address || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 255) || null;
 
       const [result] = await db.query(
         `INSERT INTO bookings (
@@ -3271,8 +4329,9 @@ app.post(
     advance_amount, advance_paid, balance_paid, remaining_amount,
     payment_status, payment_id, advance_payment_id, advance_order_id,
     payment_method, booking_source, vehicle_type, vehicle_price,
-    vehicle_status, pickup_location, dropoff_location, gst_enabled, gst_number, status
-  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
+    vehicle_status, pickup_location, dropoff_location, gst_enabled, gst_number,
+    customer_address, status
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
         [
           userId,
           room_id,
@@ -3305,6 +4364,7 @@ app.post(
           dropoff_location || null,
           amounts.gstEnabled ? 1 : 0,
           gstNumber,
+          customerAddress,
         ],
       );
 
@@ -3491,33 +4551,175 @@ app.post(
   async (req, res, next) => {
     try {
       await ensurePaymentColumns();
+
       const [rows] = await db.query(
         "SELECT * FROM bookings WHERE booking_id=?",
         [req.params.id],
       );
-      if (!rows.length)
+
+      if (!rows.length) {
         return res.status(404).json({ error: "Booking not found" });
+      }
+
       const booking = rows[0];
 
       if (booking.status === "cancelled") {
-        return res
-          .status(400)
-          .json({ error: "Cannot collect payment on a cancelled booking" });
+        return res.status(400).json({
+          error: "Cannot collect payment on a cancelled booking",
+        });
       }
 
-      const { remaining } = outstandingBalance(booking);
-      if (remaining <= 0) {
-        return res.status(400).json({ error: "Nothing left to pay" });
+      // -----------------------------
+      // Same calculation as frontend
+      // -----------------------------
+      const GST_RATE = 0.12;
+
+      const roomCharges = Number(booking.total_price || 0);
+
+      const discountAmount =
+        Number(
+          booking.discount_applied
+            ? booking.discount_amount
+            : 0,
+        ) || 0;
+
+      const vehiclePrice = Number(booking.vehicle_price || 0);
+      const addonTotal = Number(booking.addon_charges || 0);
+
+      const taxableRoom = Math.max(
+        0,
+        Math.round((roomCharges - discountAmount) * 100) / 100,
+      );
+
+      const gstEnabled =
+        Number(booking.gst_enabled ?? 1) !== 0;
+
+      const taxes =
+        Math.round(
+          (taxableRoom + addonTotal) * GST_RATE * 100,
+        ) / 100;
+
+      const chargedTaxes = gstEnabled ? taxes : 0;
+
+      const totalAmount = Math.max(
+        0,
+        Math.round(
+          (
+            taxableRoom +
+            addonTotal +
+            vehiclePrice +
+            chargedTaxes
+          ) * 100,
+        ) / 100,
+      );
+
+      const advancePaid = Math.max(
+        0,
+        Number(booking.advance_paid) || 0,
+      );
+
+      const balancePaid = Math.max(
+        0,
+        Number(booking.balance_paid) || 0,
+      );
+
+      const alreadyPaid =
+        Math.round(
+          (advancePaid + balancePaid) * 100,
+        ) / 100;
+
+      const roomRemaining = Math.max(
+        0,
+        Math.round(
+          (totalAmount - alreadyPaid) * 100,
+        ) / 100,
+      );
+
+      // Checkout discount
+      const checkoutDiscount = Math.min(
+        Math.max(
+          0,
+          Number(booking.checkout_discount_amount) || 0,
+        ),
+        gstEnabled
+          ? Math.round(
+              (roomRemaining / (1 + GST_RATE)) * 100,
+            ) / 100
+          : roomRemaining,
+      );
+
+      const checkoutDiscountGst = gstEnabled
+        ? Math.round(
+            checkoutDiscount * GST_RATE * 100,
+          ) / 100
+        : 0;
+
+      const checkoutDiscountTotalImpact =
+        Math.round(
+          (
+            checkoutDiscount +
+            checkoutDiscountGst
+          ) * 100,
+        ) / 100;
+
+      const finalRoomRemaining = Math.max(
+        0,
+        Math.round(
+          (
+            roomRemaining -
+            checkoutDiscountTotalImpact
+          ) * 100,
+        ) / 100,
+      );
+
+      // Unpaid addons
+      let unpaidAddonTotal = 0;
+
+      try {
+        const [addons] = await db.query(
+          "SELECT amount, paid FROM booking_addons WHERE booking_id=?",
+          [req.params.id],
+        );
+
+        unpaidAddonTotal = addons
+          .filter((a) => Number(a.paid) !== 1)
+          .reduce(
+            (sum, a) => sum + Number(a.amount || 0),
+            0,
+          );
+      } catch {
+        unpaidAddonTotal = 0;
       }
 
+      const unpaidAddonGst = gstEnabled
+        ? Math.round(
+            unpaidAddonTotal * GST_RATE * 100,
+          ) / 100
+        : 0;
+
+     const finalRemaining = Math.max(
+  0,
+  Math.round(finalRoomRemaining * 100) / 100
+);
+
+      if (finalRemaining <= 0) {
+        return res.status(400).json({
+          error: "Nothing left to pay",
+        });
+      }
+
+      // -----------------------------
+      // Razorpay amount = FINAL BALANCE
+      // -----------------------------
       const order = await razorpay.orders.create({
-        amount: Math.round(remaining * 100),
+        amount: Math.round(finalRemaining * 100),
         currency: "INR",
         receipt: `BAL-${req.params.id}-${Date.now()}`,
         notes: {
           booking_id: String(req.params.id),
           purpose: "balance",
           collected_by: String(req.user.user_id),
+          final_amount: String(finalRemaining),
         },
       });
 
@@ -3525,7 +4727,7 @@ app.post(
         razorpay_key: process.env.RAZORPAY_KEY_ID,
         order_id: order.id,
         currency: order.currency,
-        amount: remaining,
+        amount: finalRemaining,
       });
     } catch (err) {
       next(err);
@@ -3895,6 +5097,41 @@ async function saveCheckinDetails(bookingId, body = {}) {
     guests = null,
   } = body || {};
 
+  /*
+   * Billing identity (GSTIN + address) is editable from the check-in and
+   * check-out screen, not only at booking time — a guest very often asks for a
+   * GST invoice at the desk, after the booking already exists.
+   *
+   * These two are handled apart from the COALESCE fields above because an
+   * empty string here means "clear it", while `undefined` means "the caller
+   * did not send this field, leave it alone". COALESCE cannot tell those
+   * apart.
+   */
+  const hasGstField = body && body.gst_number !== undefined;
+  const hasAddressField = body && body.customer_address !== undefined;
+
+  let gstNumber = null;
+  if (hasGstField) {
+    const raw = String(body.gst_number || "")
+      .trim()
+      .toUpperCase();
+    if (raw && !GSTIN_REGEX.test(raw)) {
+      const err = new Error("Enter a valid 15-character GSTIN");
+      err.status = 400;
+      throw err;
+    }
+    gstNumber = raw || null;
+  }
+
+  let customerAddress = null;
+  if (hasAddressField) {
+    customerAddress =
+      String(body.customer_address || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 255) || null;
+  }
+
   await db.query(
     `CREATE TABLE IF NOT EXISTS booking_guests (
       guest_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -3925,6 +5162,25 @@ async function saveCheckinDetails(bookingId, body = {}) {
       bookingId,
     ],
   );
+
+  // Written separately so a blank value genuinely clears the field.
+  if (hasGstField || hasAddressField) {
+    const sets = [];
+    const params = [];
+    if (hasGstField) {
+      sets.push("gst_number = ?");
+      params.push(gstNumber);
+    }
+    if (hasAddressField) {
+      sets.push("customer_address = ?");
+      params.push(customerAddress);
+    }
+    params.push(bookingId);
+    await db.query(
+      `UPDATE bookings SET ${sets.join(", ")} WHERE booking_id = ?`,
+      params,
+    );
+  }
 
   if (Array.isArray(guests)) {
     await db.query("DELETE FROM booking_guests WHERE booking_id=?", [
@@ -4007,7 +5263,9 @@ app.patch("/api/bookings/:id/checkin", requireAdmin, async (req, res) => {
       guests,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // A bad GSTIN is the operator's typo, not a server fault — 400 so the
+    // screen shows the real message instead of a generic failure.
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -4017,7 +5275,7 @@ app.put("/api/bookings/:id/checkin-details", requireAdmin, async (req, res) => {
     const guests = await saveCheckinDetails(req.params.id, req.body);
     res.json({ message: "Check-in details saved", guests });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
