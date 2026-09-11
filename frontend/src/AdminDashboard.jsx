@@ -2482,11 +2482,14 @@ export default function AdminDashboard({
   const paidBookings = bookings.filter(
     (b) => b.status === "confirmed" || b.status === "completed",
   );
-  const derivedRevenue = paidBookings.reduce(
-    (sum, b) => sum + Number(b.final_total || b.total_price || 0),
-    0,
-  );
-  const derivedStats = {
+ const derivedRevenue = paidBookings.reduce(
+  (sum, b) =>
+    sum +
+    Number(b.advance_paid || 0) +
+    Number(b.balance_paid || 0),
+  0,
+);  
+const derivedStats = {
     total_bookings: bookings.length || Number(stats?.total_bookings || 0),
     total_users: users.length || Number(stats?.total_users || 0),
     total_revenue: derivedRevenue || Number(stats?.total_revenue || 0),
@@ -2519,7 +2522,8 @@ export default function AdminDashboard({
       const key = booking.room_type || "Room";
       acc[key] =
         (acc[key] || 0) +
-        Number(booking.final_total || booking.total_price || 0);
+        Number(booking.advance_paid || 0) +
+Number(booking.balance_paid || 0)
       return acc;
     }, {}),
   )

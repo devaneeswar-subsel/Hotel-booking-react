@@ -2085,9 +2085,22 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Payment verification failed." });
     }
     const [ownedBooking] = await db.query(
-      "SELECT booking_id, status FROM bookings WHERE booking_id=? AND user_id=? AND status IN ('pending','cancelled')",
-      [booking_id, req.user.user_id],
-    );
+  `SELECT
+     booking_id,
+     status,
+     final_total,
+     total_price,
+     advance_amount,
+     advance_paid,
+     balance_paid,
+     remaining_amount,
+     payment_status
+   FROM bookings
+   WHERE booking_id=?
+     AND user_id=?
+     AND status IN ('pending','cancelled')`,
+  [booking_id, req.user.user_id],
+);
     if (!ownedBooking.length) {
       const [already] = await db.query(
         "SELECT status FROM bookings WHERE booking_id=? AND user_id=?",
@@ -2103,10 +2116,52 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
         .status(403)
         .json({ error: "Booking not found or already processed" });
     }
-    await db.query(
-      "UPDATE bookings SET status='confirmed', payment_id=? WHERE booking_id=?",
-      [razorpay_payment_id, booking_id],
-    );
+  const bookingTotal = Number(
+  ownedBooking[0].final_total ||
+    ownedBooking[0].total_price ||
+    0
+);
+
+if (!Number.isFinite(bookingTotal) || bookingTotal <= 0) {
+  return res.status(400).json({
+    error: "Invalid booking total.",
+  });
+}
+
+await db.query(
+  `UPDATE bookings
+   SET
+     status='confirmed',
+     payment_id=?,
+
+     advance_amount=?,
+     advance_paid=?,
+
+     balance_paid=0,
+     remaining_amount=0,
+
+     payment_status='PAID',
+
+     advance_payment_id=?,
+     advance_order_id=?,
+     advance_payment_mode='Online',
+     advance_paid_at=NOW()
+
+   WHERE booking_id=?
+     AND user_id=?`,
+  [
+    razorpay_payment_id,
+
+    bookingTotal,
+    bookingTotal,
+
+    razorpay_payment_id,
+    razorpay_order_id,
+
+    booking_id,
+    req.user.user_id,
+  ],
+);
     const [rows] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number, r.price_per_night, r.image_url FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.booking_id=?`,
       [booking_id],
@@ -5480,8 +5535,16 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
       "SELECT COUNT(*) AS total_users FROM users",
     );
     const [[{ total_revenue }]] = await db.query(
-      "SELECT COALESCE(SUM(COALESCE(final_total, total_price)),0) AS total_revenue FROM bookings WHERE status IN ('confirmed','completed')",
-    );
+  `SELECT COALESCE(
+     SUM(
+       COALESCE(advance_paid, 0) +
+       COALESCE(balance_paid, 0)
+     ),
+     0
+   ) AS total_revenue
+   FROM bookings
+   WHERE status IN ('confirmed','completed')`,
+);
     const [recent_bookings] = await db.query(
       `SELECT b.booking_id, u.name AS guest_name, r.room_type, b.check_in_date, b.check_out_date, b.total_price, b.final_total, b.status, b.actual_checkin, b.actual_checkout FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.status NOT IN ('pending') ORDER BY b.created_at DESC LIMIT 5`,
     );
@@ -6247,9 +6310,21 @@ app.get("/api/manager/reports", requireManager, async (req, res) => {
       [startDate, endDate],
     );
     const [[summary]] = await db.query(
-      `SELECT COUNT(*) as total_bookings, SUM(COALESCE(final_total, total_price)) as total_revenue, SUM(gst_amount) as total_gst, SUM(COALESCE(addon_charges, 0)) as total_addons, COUNT(CASE WHEN status='completed' THEN 1 END) as completed, COUNT(CASE WHEN status='confirmed' THEN 1 END) as confirmed FROM bookings WHERE status NOT IN ('pending','cancelled') AND DATE(created_at) BETWEEN ? AND ?`,
-      [startDate, endDate],
-    );
+  `SELECT
+     COUNT(*) AS total_bookings,
+     SUM(
+       COALESCE(advance_paid, 0) +
+       COALESCE(balance_paid, 0)
+     ) AS total_revenue,
+     SUM(gst_amount) AS total_gst,
+     SUM(COALESCE(addon_charges, 0)) AS total_addons,
+     COUNT(CASE WHEN status='completed' THEN 1 END) AS completed,
+     COUNT(CASE WHEN status='confirmed' THEN 1 END) AS confirmed
+   FROM bookings
+   WHERE status NOT IN ('pending','cancelled')
+     AND DATE(created_at) BETWEEN ? AND ?`,
+  [startDate, endDate],
+);
     res.json({ bookings, summary, startDate, endDate, type: type || "custom" });
   } catch (err) {
     res.status(500).json({ error: err.message });
