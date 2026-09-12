@@ -81,6 +81,12 @@ export async function printInvoicePdf(
     paymentMode = "Online",
     showToast = () => {},
     checkoutDiscount = 0,
+    /*
+     * Signature block at the bottom right. Off by default, so the guest-facing
+     * copy printed from the check-in screen is unchanged; only the admin
+     * dashboard passes true.
+     */
+    showSignature = false,
   } = {},
 ) {
   if (!booking) return;
@@ -1571,8 +1577,22 @@ if (addons.length) {
 
   y += 9;
 
+  /*
+   * Signature geometry, needed here as well as below: if the signature will
+   * not fit beneath the GRAND TOTAL box, the box moves to the next page too,
+   * so the two stay together instead of the signature going over alone.
+   */
+  const SIG_W = 55;
+  const SIG_H = 18;
+  const SIG_GAP = 6;
+  const SIG_CLEARANCE = 4;
+
   // the box is 20mm tall — if it will not clear the footer, move it over
-  if (y + 22 > BOTTOM) {
+  const signatureFits =
+    !showSignature ||
+    y + 20 + SIG_CLEARANCE + SIG_H <= FOOTER_TOP - SIG_GAP;
+
+  if (y + 22 > BOTTOM || !signatureFits) {
     newPage();
   }
 
@@ -1625,6 +1645,73 @@ if (addons.length) {
       align: "center",
     },
   );
+
+  /* ── authorised signatory (admin copy only) ──────────────────────────── */
+
+  if (showSignature) {
+    /*
+     * Sits under the GRAND TOTAL box, right aligned with it.
+     *
+     * If the totals ran long enough that there is no room left above the
+     * footer bar, the block moves to a new page rather than printing on top
+     * of it.
+     */
+    /*
+     * Sit just above the footer bar, in the white space the totals leave
+     * behind, rather than immediately under the GRAND TOTAL box.
+     *
+     * Anchoring it to the box needed ~50mm of clear space below the totals,
+     * so on an ordinary invoice with no add-ons the block was pushed onto a
+     * second page while most of page one sat empty. Anchoring it to the
+     * bottom uses that space and keeps the whole invoice on one page.
+     *
+     * minTop still keeps it clear of the GRAND TOTAL box; only when the
+     * totals genuinely run down that far does it move to a new page.
+     */
+    const preferredTop = FOOTER_TOP - SIG_GAP - SIG_H;
+    const minTop = y + 20 + SIG_CLEARANCE;
+    let sigTop = Math.max(minTop, preferredTop);
+
+    if (sigTop + SIG_H > FOOTER_TOP - SIG_GAP) {
+      watermark();
+      footerBar();
+      doc.addPage();
+      pageHeader(true);
+      sigTop = 60;
+    }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    ink(GREY);
+
+    doc.text(
+      "For VV Grand Park Residency",
+      R,
+      sigTop,
+      { align: "right" },
+    );
+
+    // space left blank for a physical signature
+    stroke(GREY, 0.4);
+
+    doc.line(
+      R - SIG_W,
+      sigTop + 13,
+      R,
+      sigTop + 13,
+    );
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    ink(NAVY);
+
+    doc.text(
+      "Authorised Signatory",
+      R,
+      sigTop + SIG_H,
+      { align: "right" },
+    );
+  }
 
   watermark();
   footerBar();

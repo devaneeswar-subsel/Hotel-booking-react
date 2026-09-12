@@ -3001,6 +3001,9 @@ const roomTotalWithGst = Math.max(
                   showToast: toast,
                   checkoutDiscount:
                     appliedCheckoutDiscount,
+                  // Staff copy — carries the signature block. The guest's own
+                  // download from the checkout page does not.
+                  showSignature: true,
                 },
               )
             }
