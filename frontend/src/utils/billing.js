@@ -25,7 +25,63 @@
    and overcharges the guest by the GST on the discount.
    ═══════════════════════════════════════════════════════════════════════ */
 
+/**
+ * The DEFAULT room GST rate — what a room is taxed at when the admin has not
+ * set a rate for it.
+ *
+ * This used to be *the* rate for everything. It is now only a fallback: the
+ * room's rate is configured per room (Admin -> Rooms -> Edit) and frozen onto
+ * each booking as `room_gst_rate`, and add-ons carry their own rates from the
+ * GST Configuration screen.
+ *
+ * Read a booking's actual rate with roomGstRate() below, never this constant.
+ * Mirrors DEFAULT_ROOM_GST_PERCENT / 100 in backend/server.js.
+ */
 export const GST_RATE = 0.12;
+
+/**
+ * The room GST rate that applies to a given booking, as a multiplier.
+ *
+ * Under Indian GST, hotel accommodation is slab-based — 12% up to Rs.7,500 a
+ * night, 18% above — so two bookings on the same bill run can legitimately
+ * carry different room rates.
+ *
+ * Always read from the BOOKING, never from the room. The rate is stamped onto
+ * the booking when it is created and frozen there: repricing a room, or
+ * moving it across the slab, changes what the next booking is taxed at and
+ * never one already sold. A booking written before the column existed returns
+ * the 12% default, which is what it was charged.
+ */
+export function roomGstRate(booking = {}) {
+  const pct = booking?.room_gst_rate;
+  return pct == null ? GST_RATE : Number(pct) / 100;
+}
+
+/** The same rate as a percentage, for labels like "GST on Room (18%)". */
+export function roomGstPercent(booking = {}) {
+  const pct = booking?.room_gst_rate;
+  return pct == null ? GST_RATE * 100 : Number(pct);
+}
+
+/**
+ * The rate on a ROOM record (`gst_rate`), as a multiplier.
+ *
+ * Only for quoting a booking that does not exist yet — a price preview on the
+ * New Booking form, or the room form's own "price incl. GST" line. Once a
+ * booking exists, read roomGstRate(booking) instead: the room may have been
+ * repriced since, and the booking's own frozen rate is the one that governs
+ * what the guest owes.
+ */
+export function roomRateFromRoom(room = {}) {
+  const pct = room?.gst_rate;
+  return pct == null || pct === "" ? GST_RATE : Number(pct) / 100;
+}
+
+/** That rate as a percentage, for labels on the same preview screens. */
+export function roomPercentFromRoom(room = {}) {
+  const pct = room?.gst_rate;
+  return pct == null || pct === "" ? GST_RATE * 100 : Number(pct);
+}
 
 /**
  * The hotel's own GSTIN. Every invoice and PDF reads this constant so the
@@ -81,6 +137,30 @@ export function computeRoomBill({
   checkoutDiscount = 0,
   // ADDITIONAL: defaults to true, so every existing caller is unaffected.
   gstEnabled = true,
+  /*
+   * ── PER-SERVICE ADD-ON GST ──────────────────────────────────────────────
+   * The tax actually charged on the add-ons, summed line by line at each
+   * service's own configured rate (5% for Food & Beverage, Laundry, Extra
+   * Bed and Room Service).
+   *
+   * Leave it out and the add-ons are taxed at GST_RATE, exactly as this
+   * function has always done — so every existing caller that has not been
+   * updated still produces the number it produced before.
+   *
+   * Compute it with summariseAddons() from ./addonGst, or read
+   * booking.addon_gst_amount, which is what the backend stored.
+   */
+  addonGst = null,
+  /*
+   * ── PER-ROOM GST ────────────────────────────────────────────────────────
+   * The room's tax rate as a multiplier, e.g. 0.12 or 0.18. Read it from the
+   * booking with roomGstRate(booking) — never hardcode it, and never take it
+   * from the room, which may have been repriced since the stay was sold.
+   *
+   * Omitted, it falls back to GST_RATE, so every caller not yet updated keeps
+   * producing the number it always did.
+   */
+  roomRate = GST_RATE,
 } = {}) {
   const roomTariff = money2(tariff);
   const bookingDiscount = money2(discount);
@@ -95,7 +175,18 @@ export function computeRoomBill({
 
   const roomTaxable = money2(roomTariff - totalDiscount);
   const taxable = money2(roomTaxable + addonCharges);
-  const gst = money2(taxable * GST_RATE);
+
+  /*
+   * Room and add-ons are taxed separately and then added, rather than taxed
+   * together at one rate. With addonGst omitted the two are arithmetically
+   * the same thing; with it supplied, each part carries its own rate. The
+   * backend rounds the same way round — per part, then summed — so a screen
+   * can never be a paisa off the server.
+   */
+  const roomGst = money2(roomTaxable * roomRate);
+  const addonGstCharged =
+    addonGst == null ? money2(addonCharges * GST_RATE) : money2(addonGst);
+  const gst = money2(roomGst + addonGstCharged);
 
   // ADDITIONAL: the GST calculation above is unchanged. It is dropped only
   // when the admin issued this booking with GST off (gstEnabled false), in
@@ -110,8 +201,11 @@ export function computeRoomBill({
     checkoutDiscount: coDiscount,
     totalDiscount,     // 500
     roomTaxable,       // 2500 — room value GST is charged on
-    addonCharges,      // add-ons, taxed separately but at the same rate
+    addonCharges,      // add-ons, each taxed at its own configured rate
     taxable,           // 2500 + add-ons
+    roomGst: gstEnabled ? roomGst : 0,          // 300 — room at its own rate
+    roomRate,                                   // 0.12 / 0.18 — for labels
+    addonGst: gstEnabled ? addonGstCharged : 0, // add-ons at 5% (or their own)
     gst: chargedGst,   // 450, or 0 when GST is off for this booking
     gstEnabled: Boolean(gstEnabled),
     total,             // 2950
@@ -137,12 +231,23 @@ export function billFromBooking(b = {}) {
   );
   const addons = money2(b.addon_charges);
 
+  /*
+   * ADDITIONAL: the per-service add-on tax the backend computed and stored.
+   * NULL on a booking last written before that column existed — passing null
+   * makes computeRoomBill fall back to GST_RATE, which is precisely what
+   * those bookings were charged, so no historical total moves.
+   */
+  const addonGst = b.addon_gst_amount != null ? money2(b.addon_gst_amount) : null;
+
   const computed = computeRoomBill({
     tariff,
     discount: bookingDiscount,
     addons,
     checkoutDiscount: coDiscount,
     gstEnabled,
+    addonGst,
+    // the rate frozen onto this booking; 12% for rows that predate the column
+    roomRate: roomGstRate(b),
   });
 
   // Trust the stored columns when the backend has written them.
@@ -190,13 +295,18 @@ export function paymentSplit(b = {}) {
  * Because the discount is pre-tax, the guest also stops paying the GST that
  * was charged on it — so a Rs.500 discount reduces the bill by Rs.590.
  */
-export function checkoutDiscountImpact(amount) {
+export function checkoutDiscountImpact(amount, booking = null) {
   const base = money2(amount);
-  const gst = money2(base * GST_RATE);
+  // A checkout discount comes off the ROOM, so it reverses the room's tax.
+  // Pass the booking to use its frozen rate; without one this is the 12%
+  // default, exactly as before.
+  const rate = booking ? roomGstRate(booking) : GST_RATE;
+  const gst = money2(base * rate);
   return { base, gst, total: money2(base + gst) };
 }
 
 /** Largest checkout discount that fits inside an outstanding balance. */
-export function maxCheckoutDiscount(remaining) {
-  return Math.max(0, money2(money2(remaining) / (1 + GST_RATE)));
+export function maxCheckoutDiscount(remaining, booking = null) {
+  const rate = booking ? roomGstRate(booking) : GST_RATE;
+  return Math.max(0, money2(money2(remaining) / (1 + rate)));
 }

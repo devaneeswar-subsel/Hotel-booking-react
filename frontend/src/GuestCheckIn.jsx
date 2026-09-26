@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
 import { printInvoicePdf } from "./invoicePdf";
 import { GSTIN_PATTERN } from "./utils/billing";
+import {
+  useAddonCatalog,
+  AddonComposer,
+  AddonLineRow,
+  GstRateSummary,
+} from "./Components/AddonEntry";
+import { summariseAddons } from "./utils/addonGst";
+import { roomGstRate, roomGstPercent } from "./utils/billing";
+import FolioPanel from "./Components/FolioPanel";
 
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.12;
@@ -69,12 +78,12 @@ const PAYMENT_METHODS = [
 const MAX_ADULTS = 4;
 const MAX_CHILDREN = 2;
 
-const PRESET_ADDONS = [
-  "Food & Beverages",
-  "Laundry",
-  "Extra Bed",
-  "Room Service",
-];
+/*
+ * The add-on services and their GST rates now come from the admin's GST
+ * Configuration screen, not from a hardcoded list here — a list of names
+ * could not carry a rate, and adding a service meant editing this file.
+ * See useAddonCatalog / AddonComposer in ./Components/AddonEntry.
+ */
 
 const money = (v) =>
   `₹ ${Math.round(Number(v) || 0).toLocaleString("en-IN")}`;
@@ -444,9 +453,11 @@ const [now, setNow] = useState(Date.now());
   }, []);
 
   /* add-on state */
-  const [addonLabel, setAddonLabel] = useState("");
-  const [addonAmount, setAddonAmount] = useState("");
   const [addonMode, setAddonMode] = useState("Cash");
+  const [addonSubmitting, setAddonSubmitting] = useState(false);
+
+  /* the admin's configured services and their GST rates */
+  const { catalog: addonCatalog } = useAddonCatalog(apiFetch);
 
   const toast = showToast || (() => {});
 
@@ -1181,48 +1192,52 @@ const [now, setNow] = useState(Date.now());
 
   /* ── add-on ────────────────────────────────────────────────────────────── */
 
-  async function addAddon() {
-    if (!addonLabel || !addonAmount) {
-      return toast(
-        "Enter label and amount",
-        "error",
+  /*
+   * Post a charge. The composer supplies { catalog_id, label, quantity,
+   * unit_price }; the backend resolves the GST rate from the catalog and
+   * freezes it onto the line, so the browser never decides the tax.
+   */
+  async function addAddon(payload) {
+    setAddonSubmitting(true);
+    try {
+      const res = await apiFetch(
+        `/api/bookings/${bookingId}/addons`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
       );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        return toast(data.error, "error");
+      }
+
+      toast("Add-on added", "success");
+
+      fetchBooking(false);
+
+      onRefresh && onRefresh();
+    } finally {
+      setAddonSubmitting(false);
     }
-
-    const res = await apiFetch(
-      `/api/bookings/${bookingId}/addons`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          label: addonLabel,
-          amount: +addonAmount,
-        }),
-      },
-    );
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      return toast(data.error, "error");
-    }
-
-    setAddonLabel("");
-    setAddonAmount("");
-
-    toast("Add-on added", "success");
-
-    fetchBooking(false);
-
-    onRefresh && onRefresh();
   }
 
   async function removeAddon(id) {
-    await apiFetch(
+    const res = await apiFetch(
       `/api/bookings/${bookingId}/addons/${id}`,
       {
         method: "DELETE",
       },
     );
+
+    // a paid charge is refused by the backend — say so instead of silently
+    // leaving the row on screen
+    if (!res.ok) {
+      const data = await res.json();
+      return toast(data.error || "Could not remove charge", "error");
+    }
 
     fetchBooking(false);
 
@@ -1294,9 +1309,36 @@ const [now, setNow] = useState(Date.now());
     Math.round((roomCharges - discountAmount) * 100) / 100,
   );
 
+  /*
+   * PER-SERVICE GST
+   *
+   * The room is taxed at GST_RATE. Each add-on is taxed at the rate the admin
+   * configured for that service — 5% for Food & Beverage, Laundry, Extra Bed
+   * and Room Service — and that rate is frozen onto the line when it is
+   * posted.
+   *
+   * addon_gst_amount is what the backend computed and stored. It is NULL only
+   * for a booking last written before that column existed, and the fallback
+   * sums the lines, each of which the migration stamped at the 12% they were
+   * actually billed at. Either way a pre-existing booking's total is
+   * unchanged.
+   */
+  /*
+   * PER-ROOM GST: the rate frozen onto this booking when it was sold. Never
+   * the room's current rate — the room may have been repriced since.
+   */
+  const bookingRoomRate = roomGstRate(b);
+  const bookingRoomPercent = roomGstPercent(b);
+
+  const addonSummaryUi = summariseAddons(b.addons || []);
+  const addonGstCharged =
+    b.addon_gst_amount != null
+      ? Math.round(Number(b.addon_gst_amount) * 100) / 100
+      : addonSummaryUi.gst;
+
   const taxes =
     Math.round(
-      (taxableRoom + addonTotal) * GST_RATE * 100,
+      (taxableRoom * bookingRoomRate + addonGstCharged) * 100,
     ) / 100;
 
   /*
@@ -1328,7 +1370,7 @@ const roomTotalWithGst = Math.max(
   0,
   gstEnabled
     ? Math.round(
-        taxableRoom * (1 + GST_RATE) * 100,
+        taxableRoom * (1 + bookingRoomRate) * 100,
       ) / 100
     : Math.round(taxableRoom * 100) / 100,
 );
@@ -1355,19 +1397,10 @@ const roomTotalWithGst = Math.max(
       (a) => a.paid !== 1,
     );
 
-  const unpaidAddonTotal =
-    unpaidAddons.reduce(
-      (s, a) =>
-        s + Number(a.amount || 0),
-      0,
-    );
+  const unpaidAddonTotal = addonSummaryUi.unpaidTaxable;
 
-  const unpaidAddonGst =
-    Math.round(
-      unpaidAddonTotal *
-        GST_RATE *
-        100,
-    ) / 100;
+  // each unpaid line at its own rate, not a flat 12% of the unpaid total
+  const unpaidAddonGst = addonSummaryUi.unpaidGst;
 
   /*
    * BALANCE BEFORE ANY CHECKOUT DISCOUNT
@@ -1403,7 +1436,7 @@ const roomTotalWithGst = Math.max(
   // the GST that was charged on it. Total saving = discount x 1.18.
   // Cap it so the discount plus its GST can never exceed what is still owed.
   const maxCheckoutDiscount = gstEnabled
-    ? Math.round((roomRemaining / (1 + GST_RATE)) * 100) / 100
+    ? Math.round((roomRemaining / (1 + bookingRoomRate)) * 100) / 100
     : Math.round(roomRemaining * 100) / 100;
 
   const appliedCheckoutDiscount = Math.min(
@@ -1412,7 +1445,7 @@ const roomTotalWithGst = Math.max(
   );
 
   const checkoutDiscountGst = gstEnabled
-    ? Math.round(appliedCheckoutDiscount * GST_RATE * 100) / 100
+    ? Math.round(appliedCheckoutDiscount * bookingRoomRate * 100) / 100
     : 0;
 
   const checkoutDiscountTotalImpact =
@@ -2222,111 +2255,39 @@ const roomTotalWithGst = Math.max(
                 subtitle="Services used during the stay"
               >
                 {!isCheckedOut && (
-                  <>
-                    <div className="mb-3 flex flex-wrap gap-1.5">
-                      {PRESET_ADDONS.map(
-                        (p) => (
-                          <button
-                            key={p}
-                            onClick={() =>
-                              setAddonLabel(
-                                p,
-                              )
-                            }
-                            className={`rounded-full border px-3 py-1 text-[0.72rem] font-semibold transition ${
-                              addonLabel ===
-                              p
-                                ? "border-navy bg-navy text-gold"
-                                : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        ),
-                      )}
-                    </div>
-
-                    <div className="mb-3 flex flex-wrap gap-2">
-                      <input
-                        value={addonLabel}
-                        onChange={(e) =>
-                          setAddonLabel(
-                            e.target.value,
-                          )
-                        }
-                        placeholder="Label (e.g. Airport Transfer)"
-                        className={`${inputCls} flex-[2_1_150px]`}
-                      />
-
-                      <input
-                        type="number"
-                        value={addonAmount}
-                        onChange={(e) =>
-                          setAddonAmount(
-                            e.target.value,
-                          )
-                        }
-                        placeholder="Amount ₹"
-                        className={`${inputCls} flex-[1_1_90px]`}
-                      />
-
-                      <button
-                        onClick={
-                          addAddon
-                        }
-                        className="rounded-lg bg-gold px-4 py-2 text-[0.8rem] font-bold text-white transition hover:bg-gold/90"
-                      >
-                        + Add
-                      </button>
-                    </div>
-                  </>
+                  <AddonComposer
+                    catalog={addonCatalog}
+                    submitting={addonSubmitting}
+                    onSubmit={addAddon}
+                    inputCls={inputCls}
+                  />
                 )}
 
                 {addonsList.length ? (
                   <div className="space-y-1.5">
-                    {addonsList.map(
-                      (a) => (
-                        <div
-                          key={
-                            a.addon_id
-                          }
-                          className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2"
-                        >
-                          <span className="text-[0.8rem] text-navy">
-                            {a.label}
-                          </span>
-
-                          <div className="flex items-center gap-3">
-                            <span className="text-[0.82rem] font-bold text-navy">
-                              {money(
-                                a.amount,
-                              )}
-                            </span>
-
-                            {a.paid === 1 ? (
-                              <span className="text-[0.62rem] font-bold uppercase text-emerald-600">
-                                Paid
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() =>
-                                  removeAddon(
-                                    a.addon_id,
-                                  )
-                                }
-                                className="text-[0.72rem] font-bold text-red-500"
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ),
-                    )}
+                    {addonsList.map((a) => (
+                      <AddonLineRow
+                        key={a.addon_id}
+                        line={a}
+                        removable={!isCheckedOut}
+                        onRemove={() => removeAddon(a.addon_id)}
+                      />
+                    ))}
                   </div>
                 ) : (
                   <div className="py-2 text-center text-[0.76rem] text-gray-400">
                     No add-ons yet
+                  </div>
+                )}
+
+                {/* rate-wise GST, shown only when the add-ons carry more than
+                    one rate — a single-rate bill stays as plain as before */}
+                {addonSummaryUi.byRate.length > 1 && (
+                  <div className="mt-3">
+                    <GstRateSummary
+                      rows={addonSummaryUi.byRate}
+                      title="Add-on GST (rate-wise)"
+                    />
                   </div>
                 )}
 
@@ -2378,6 +2339,20 @@ const roomTotalWithGst = Math.max(
                   )}
                 </div>
               </Card>
+            )}
+
+            {/* Folio — every line posted to this stay */}
+            {isCheckedIn && (
+              <FolioPanel
+                bookingId={bookingId}
+                apiFetch={apiFetch}
+                showToast={toast}
+                isAdmin
+                onChanged={() => {
+                  fetchBooking(false);
+                  onRefresh && onRefresh();
+                }}
+              />
             )}
 
             {/* Payment */}
@@ -2923,7 +2898,7 @@ const roomTotalWithGst = Math.max(
                         Math.round(
                           (discountAmount +
                             appliedCheckoutDiscount) *
-                            (gstEnabled ? 1 + GST_RATE : 1) *
+                            (gstEnabled ? 1 + bookingRoomRate : 1) *
                             100,
                         ) / 100,
                       )}

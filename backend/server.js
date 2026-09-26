@@ -152,6 +152,108 @@ if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
 // ─── RESEND EMAIL ─────────────────────────────────────────────────────────────
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+/*
+ * The rate every add-on was charged at BEFORE per-service GST existed.
+ *
+ * The old code taxed room and add-ons together — (room + addons) * 0.12 — so
+ * 12% is the rate historical add-on lines were actually billed at. The
+ * migration stamps this onto them so their totals reproduce exactly, and a
+ * free-text charge that matches nothing in the catalog still falls back to it
+ * rather than silently picking a rate nobody chose.
+ *
+ * Declared here, above runMigrations, because the migration reads it. Keep it
+ * equal to GST_RATE x 100.
+ */
+const LEGACY_ADDON_GST_PERCENT = 12;
+
+/*
+ * The GST rate a room is taxed at when nobody has set one for it.
+ *
+ * Under Indian GST, hotel accommodation is slab-based: 12% up to Rs.7,500 a
+ * night and 18% above it. Every room in this property sits below that line
+ * today, so 12 is both the historical rate and the sensible default — but a
+ * suite priced over Rs.7,500 needs 18, which is why the rate is now a
+ * per-room field rather than one constant.
+ *
+ * A room with gst_rate NULL is taxed at this, so every existing room keeps
+ * behaving exactly as it did. Keep equal to GST_RATE x 100.
+ */
+const DEFAULT_ROOM_GST_PERCENT = 12;
+
+/*
+ * The GST rate a BOOKING is taxed at.
+ *
+ * Read from the booking, never from the room. Rooms change — a suite gets
+ * repriced above the slab and moves to 18% — and when that happens a stay
+ * already sold at 12% must keep printing 12%, or a settled invoice stops
+ * matching the money taken. bookings.room_gst_rate is stamped at the moment
+ * the booking is created and never moves afterwards.
+ *
+ * NULL means the booking predates the column; those were all charged 12%.
+ */
+function roomGstPercentOf(booking) {
+  const r = booking?.room_gst_rate;
+  return r == null ? DEFAULT_ROOM_GST_PERCENT : Number(r);
+}
+
+/** Same thing as a multiplier, for `taxable * rate` arithmetic. */
+function roomGstFractionOf(booking) {
+  return roomGstPercentOf(booking) / 100;
+}
+
+/** The rate configured on a room, for a booking about to be created. */
+function roomRatePercent(room) {
+  const r = room?.gst_rate;
+  return r == null ? DEFAULT_ROOM_GST_PERCENT : Number(r);
+}
+
+/*
+ * Freeze the room's current GST rate onto a booking that was just created.
+ *
+ * Done as a separate statement rather than as a column in each of the seven
+ * INSERTs, because those use long positional parameter lists and adding a
+ * column to each is an easy way to shift every value by one and corrupt a
+ * booking silently.
+ *
+ * `WHERE room_gst_rate IS NULL` makes it idempotent and, more importantly,
+ * makes it incapable of UN-freezing: calling it twice, or calling it on an
+ * old booking, changes nothing. The rate is written once and then belongs to
+ * that booking forever.
+ *
+ * Pass the transaction's connection when the booking was inserted inside one,
+ * otherwise the pool cannot see the uncommitted row.
+ */
+async function stampRoomGstRate(bookingId, conn = db) {
+  try {
+    await conn.query(
+      `UPDATE bookings b
+         JOIN rooms r ON r.room_id = b.room_id
+          SET b.room_gst_rate = COALESCE(r.gst_rate, ?)
+        WHERE b.booking_id = ? AND b.room_gst_rate IS NULL`,
+      [DEFAULT_ROOM_GST_PERCENT, bookingId],
+    );
+  } catch (e) {
+    // Never fail a confirmed booking over this. A booking left unstamped
+    // reads as the 12% default, which is what it was charged anyway.
+    console.error(`Could not stamp room GST on booking ${bookingId}:`, e.message);
+  }
+
+  /*
+   * Open the folio for this stay: a room line per night, plus the vehicle,
+   * discounts and any advance already taken.
+   *
+   * Hung off this call because every one of the seven creation paths already
+   * makes it, so there is exactly one place that knows a booking has just
+   * come into existence — rather than seven places that each have to
+   * remember two things instead of one.
+   */
+  try {
+    await rebuildFolioFromColumns(bookingId, conn);
+  } catch (e) {
+    console.error(`Could not open folio for booking ${bookingId}:`, e.message);
+  }
+}
+
 // ─── AUTO MIGRATE ────────────────────────────────────────────────────────────
 async function runMigrations() {
   try {
@@ -210,6 +312,31 @@ async function runMigrations() {
       // ADDITIONAL: 1 = taxed exactly as before, 0 = admin issued this
       // booking with GST off. Defaults to 1 so nothing existing changes.
       "gst_enabled TINYINT DEFAULT 1",
+      /*
+       * ADD-ON GST, stored separately from the room's GST.
+       *
+       * The room is taxed at GST_RATE (12%). Add-ons are taxed at whatever
+       * rate the admin configured for that service in addon_catalog — 5% for
+       * Food & Beverage, Laundry, Extra Bed and Room Service. Because the two
+       * no longer share a rate, the add-on tax can no longer be derived from
+       * addon_charges alone and has to be stored.
+       *
+       * NULL means "written before this column existed". Every reader falls
+       * back to addon_charges * GST_RATE in that case, which is exactly what
+       * those bookings were charged, so no historical total moves.
+       */
+      "addon_gst_amount DECIMAL(10,2) DEFAULT NULL",
+      /*
+       * The room GST rate this stay was sold at, as a percentage.
+       *
+       * Copied from the room when the booking is created and frozen there.
+       * Repricing a room, or moving it across the Rs.7,500 slab, changes what
+       * the NEXT booking is taxed at — never one already taken.
+       *
+       * Backfilled to 12 below for every pre-existing booking, which is what
+       * they were actually charged.
+       */
+      "room_gst_rate DECIMAL(5,2) DEFAULT NULL",
       "gst_number VARCHAR(20) DEFAULT NULL",
       // Billing address printed under BILL TO. Optional — a booking without one
       // prints exactly as it did before.
@@ -236,6 +363,22 @@ async function runMigrations() {
         "ALTER TABLE rooms ADD COLUMN price_double DECIMAL(10,2) DEFAULT NULL",
       );
     } catch (e) {}
+
+    /*
+     * ── per-room GST rate ──
+     * The admin sets this on the room form. NULL means "use the default",
+     * so every existing room is taxed at 12% exactly as before and nothing
+     * has to be backfilled here.
+     */
+    try {
+      await db.query(
+        "ALTER TABLE rooms ADD COLUMN gst_rate DECIMAL(5,2) DEFAULT NULL",
+      );
+    } catch (e) {
+      if (e.code !== "ER_DUP_FIELDNAME") {
+        console.error("Migration failed for rooms.gst_rate:", e.message);
+      }
+    }
 
     /*
      * One-time room data correction (room types, occupancy and tariff).
@@ -320,6 +463,265 @@ async function runMigrations() {
         "ALTER TABLE booking_addons ADD COLUMN paid TINYINT DEFAULT 0",
       );
     } catch (e) {}
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       ADD-ON GST CONFIGURATION  —  the ORDER / ORDER ITEM model
+       ═══════════════════════════════════════════════════════════════════════
+
+       Three tables, each with one job:
+
+         addon_catalog    the PRODUCT list. One row per chargeable service
+                          ("Food & Beverage", "Laundry"), carrying the GST
+                          rate the admin configured for it. Editable from the
+                          dashboard; new services are added here.
+
+         bookings         the ORDER. One row per stay. Holds the totals.
+
+         booking_addons   the ORDER ITEM. One row per charge posted to a
+                          stay: which catalog item, how many, at what unit
+                          price, and — critically — the GST RATE THAT APPLIED
+                          AT THE MOMENT IT WAS POSTED.
+
+       Why the rate is copied onto the line instead of being read from the
+       catalog at print time:
+
+         A guest checks in on the 1st and is charged Rs.1,000 of laundry at
+         5%. On the 10th the admin changes Laundry to 12%. If the invoice
+         read the rate from the catalog, that guest's already-settled bill
+         would silently reprint at 12% and stop matching the money actually
+         collected — and every historical report would drift with it.
+
+         Copying the rate onto the order item freezes it. Changing the
+         catalog affects the NEXT charge posted, never one already posted.
+         This is the same reason an order item stores its own price rather
+         than pointing at today's product price.
+       ═══════════════════════════════════════════════════════════════════ */
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS addon_catalog (
+         catalog_id     INT AUTO_INCREMENT PRIMARY KEY,
+         name           VARCHAR(100) NOT NULL,
+         gst_rate       DECIMAL(5,2) NOT NULL DEFAULT 5.00,
+         hsn_sac        VARCHAR(20)  DEFAULT NULL,
+         default_amount DECIMAL(10,2) DEFAULT NULL,
+         is_active      TINYINT DEFAULT 1,
+         sort_order     INT DEFAULT 0,
+         created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         UNIQUE KEY uniq_addon_name (name)
+       )`,
+    );
+
+    /*
+     * The four services the client asked for, all at 5%.
+     *
+     * Guarded by a marker in app_settings so it seeds ONCE. Without the
+     * guard every restart would re-insert — or worse, reset a rate the
+     * admin had just changed in the dashboard back to 5%.
+     */
+    try {
+      // app_settings is normally created by the room-normalisation block
+      // above; create it here too so a failure up there cannot stop the
+      // catalog from ever seeding.
+      await db.query(
+        `CREATE TABLE IF NOT EXISTS app_settings (
+           setting_key VARCHAR(60) PRIMARY KEY,
+           setting_value VARCHAR(255) DEFAULT NULL,
+           applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+         )`,
+      );
+      const [seeded] = await db.query(
+        "SELECT setting_key FROM app_settings WHERE setting_key='addon_catalog_seed_v1'",
+      );
+      if (!seeded.length) {
+        const defaults = [
+          ["Food & Beverage", 5.0, "996332", 10],
+          ["Laundry", 5.0, "999711", 20],
+          ["Extra Bed", 5.0, "996311", 30],
+          ["Room Service", 5.0, "996311", 40],
+        ];
+        for (const [name, rate, hsn, order] of defaults) {
+          // INSERT IGNORE so a name the client already created by hand is
+          // left exactly as they set it rather than being overwritten.
+          await db.query(
+            `INSERT IGNORE INTO addon_catalog (name, gst_rate, hsn_sac, sort_order)
+             VALUES (?,?,?,?)`,
+            [name, rate, hsn, order],
+          );
+        }
+        await db.query(
+          "INSERT INTO app_settings (setting_key, setting_value) VALUES ('addon_catalog_seed_v1','done')",
+        );
+        console.log("✅ Add-on GST catalog seeded (F&B, Laundry, Extra Bed, Room Service @ 5%)");
+      }
+    } catch (e) {
+      console.error("Add-on catalog seed skipped:", e.message);
+    }
+
+    // ── booking_addons becomes a proper order item ──
+    // `label` and `amount` are deliberately left untouched. Every existing
+    // query (SELECT SUM(amount), a.label on the invoice) keeps working with
+    // no change at all; these columns sit alongside them.
+    for (const col of [
+      "catalog_id INT DEFAULT NULL",
+      "quantity DECIMAL(10,2) NOT NULL DEFAULT 1",
+      "unit_price DECIMAL(10,2) DEFAULT NULL",
+      // percent, e.g. 5.00 — snapshotted when the line is posted
+      "gst_rate DECIMAL(5,2) DEFAULT NULL",
+      // quantity x unit_price, i.e. the value GST is charged on. Always kept
+      // equal to `amount` so the two can never disagree.
+      "taxable_amount DECIMAL(10,2) DEFAULT NULL",
+      "gst_amount DECIMAL(10,2) DEFAULT NULL",
+      "line_total DECIMAL(10,2) DEFAULT NULL",
+    ]) {
+      try {
+        await db.query(`ALTER TABLE booking_addons ADD COLUMN ${col}`);
+      } catch (e) {
+        if (e.code !== "ER_DUP_FIELDNAME") {
+          console.error(`Migration failed for booking_addons [${col}]:`, e.message);
+        }
+      }
+    }
+
+    /*
+     * Backfill every add-on posted before this feature existed.
+     *
+     * They were charged at the room rate — 12% — because that is what the
+     * old code did: gst = (room + addons) * 0.12. So 12 is the rate that
+     * ACTUALLY applied to them, and writing it here reproduces their old
+     * total to the paisa. Backfilling them at 5% would quietly rewrite
+     * history and make every past invoice reprint with a smaller tax than
+     * the guest paid.
+     *
+     * Only rows with gst_rate IS NULL are touched, so this is a no-op on
+     * every restart after the first.
+     */
+    try {
+      const [bf] = await db.query(
+        `UPDATE booking_addons
+            SET quantity       = 1,
+                unit_price     = amount,
+                gst_rate       = ?,
+                taxable_amount = amount,
+                gst_amount     = ROUND(amount * ? / 100, 2),
+                line_total     = ROUND(amount * (1 + ? / 100), 2)
+          WHERE gst_rate IS NULL`,
+        [LEGACY_ADDON_GST_PERCENT, LEGACY_ADDON_GST_PERCENT, LEGACY_ADDON_GST_PERCENT],
+      );
+      if (bf.affectedRows) {
+        console.log(
+          `✅ Backfilled ${bf.affectedRows} existing add-on line(s) at ${LEGACY_ADDON_GST_PERCENT}% — totals unchanged`,
+        );
+      }
+    } catch (e) {
+      console.error("Add-on backfill skipped:", e.message);
+    }
+
+    /*
+     * Stamp every pre-existing booking with the room GST rate it was actually
+     * charged at.
+     *
+     * Before per-room rates, the room was always taxed at 12%. Writing 12
+     * here means those bookings keep printing and totalling exactly as they
+     * do today, even after the admin sets a different rate on the room they
+     * were booked into.
+     *
+     * Only rows with room_gst_rate IS NULL are touched, so this is a no-op on
+     * every restart after the first.
+     */
+    try {
+      const [bf] = await db.query(
+        "UPDATE bookings SET room_gst_rate = ? WHERE room_gst_rate IS NULL",
+        [DEFAULT_ROOM_GST_PERCENT],
+      );
+      if (bf.affectedRows) {
+        console.log(
+          `✅ Stamped ${bf.affectedRows} existing booking(s) at ${DEFAULT_ROOM_GST_PERCENT}% room GST — totals unchanged`,
+        );
+      }
+    } catch (e) {
+      console.error("Room GST backfill skipped:", e.message);
+    }
+
+    // Set once the folio has been built for the bookings that existed before
+    // it did. Checked after the table is created, below.
+    var FOLIO_BACKFILL_KEY = "folio_backfill_v1";
+
+    await db.query(
+      /* ════════════════════════════════════════════════════════════════════
+         THE FOLIO — booking_items
+         ════════════════════════════════════════════════════════════════════
+
+         One row per thing that has ever been posted to a stay: each night of
+         room charge, each add-on, the vehicle, discounts, and payments. This
+         is the order-item table a hotel PMS actually keeps, and it is what
+         Opera, Mews and Cloudbeds all call the folio.
+
+         THREE RULES IT FOLLOWS
+
+         1. ROOM IS POSTED PER NIGHT.
+            A three-night stay is three ROOM lines, each with its own
+            service_date and its own rate. That is what makes a mid-stay rate
+            change, an extension or an early checkout expressible at all —
+            with the tariff as a single number on the booking, none of them
+            can be represented without losing history.
+
+         2. PAYMENTS ARE LINES TOO, carried negative.
+            The balance is then simply SUM(line_total) over the live lines.
+            There is no separate balance to keep in step, because there is
+            nothing to keep in step.
+
+         3. NOTHING POSTED IS EVER DELETED.
+            A mistake is voided (voided=1, with a reason), never removed. A
+            bill you can silently edit is not a bill anyone can audit, and
+            "where did that charge go?" has to have an answer.
+
+         SIGNS: charges positive, payments and discounts negative.
+
+         SAFETY: this table is additive. Every existing column on `bookings`
+         is still written exactly as before and every screen still reads
+         those columns, so nothing depends on this table until the
+         verification below proves it reproduces each booking to the paisa.
+         ════════════════════════════════════════════════════════════════════ */
+      `CREATE TABLE IF NOT EXISTS booking_items (
+        item_id        INT AUTO_INCREMENT PRIMARY KEY,
+        booking_id     INT NOT NULL,
+        line_no        INT DEFAULT 0,
+
+        -- ROOM | ADDON | VEHICLE | DISCOUNT | PAYMENT
+        item_type      VARCHAR(20) NOT NULL,
+
+        -- the configured service, for an ADDON line
+        catalog_id     INT DEFAULT NULL,
+        -- the booking_addons row this mirrors, while both exist
+        source_addon_id INT DEFAULT NULL,
+
+        label          VARCHAR(150) NOT NULL,
+        -- which night, or the day the charge was incurred
+        service_date   DATE DEFAULT NULL,
+
+        quantity       DECIMAL(10,2) NOT NULL DEFAULT 1,
+        unit_price     DECIMAL(12,2) NOT NULL DEFAULT 0,
+        gst_rate       DECIMAL(5,2) NOT NULL DEFAULT 0,
+
+        taxable_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        gst_amount     DECIMAL(12,2) NOT NULL DEFAULT 0,
+        line_total     DECIMAL(12,2) NOT NULL DEFAULT 0,
+
+        payment_mode   VARCHAR(40) DEFAULT NULL,
+        reference      VARCHAR(120) DEFAULT NULL,
+
+        voided         TINYINT DEFAULT 0,
+        voided_at      DATETIME DEFAULT NULL,
+        void_reason    VARCHAR(255) DEFAULT NULL,
+
+        posted_by      INT DEFAULT NULL,
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+        INDEX idx_folio_booking (booking_id, voided),
+        INDEX idx_folio_type (booking_id, item_type),
+        FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE
+      )`,
+    );
     await db.query(
       `CREATE TABLE IF NOT EXISTS booking_guests (
         guest_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -338,6 +740,80 @@ async function runMigrations() {
     await db.query(
       `CREATE TABLE IF NOT EXISTS password_otps (otp_id INT AUTO_INCREMENT PRIMARY KEY, email VARCHAR(255) NOT NULL, otp VARCHAR(6) NOT NULL, expires_at DATETIME NOT NULL, used TINYINT DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`,
     );
+    /* ════════════════════════════════════════════════════════════════════
+       FOLIO BACKFILL
+
+       Build the folio for every booking that existed before the table did.
+
+       The bar this has to clear: for each booking, the folio's balance must
+       equal the remaining_amount already stored on it, and its gross must
+       equal total_amount. If it does not, the folio is WRONG and must not be
+       trusted — so a mismatch is reported loudly and the booking is left
+       with its columns untouched. Nothing reads the folio yet, so a bad row
+       cannot hurt anyone; it just has to be visible.
+
+       Guarded by a marker so it runs once. Re-run it deliberately with
+       POST /api/admin/folio/rebuild.
+       ════════════════════════════════════════════════════════════════════ */
+    try {
+      const [done] = await db.query(
+        "SELECT setting_key FROM app_settings WHERE setting_key=?",
+        [FOLIO_BACKFILL_KEY],
+      );
+      if (!done.length) {
+        const [ids] = await db.query(
+          "SELECT booking_id FROM bookings ORDER BY booking_id ASC",
+        );
+        let built = 0;
+        const mismatches = [];
+
+        for (const { booking_id } of ids) {
+          try {
+            const folio = await rebuildFolioFromColumns(booking_id);
+            if (!folio) continue;
+            built += 1;
+
+            const [[bk]] = await db.query(
+              "SELECT total_amount, final_total, remaining_amount FROM bookings WHERE booking_id=?",
+              [booking_id],
+            );
+            const storedTotal = Number(bk.total_amount ?? bk.final_total ?? 0);
+            // a paisa of slack for values stored before the rounding rules settled
+            if (storedTotal > 0 && Math.abs(folio.grossTotal - storedTotal) > 0.02) {
+              mismatches.push(
+                `#${booking_id}: folio ${folio.grossTotal} vs stored ${storedTotal}`,
+              );
+            }
+          } catch (e) {
+            mismatches.push(`#${booking_id}: ${e.message}`);
+          }
+        }
+
+        await db.query(
+          "INSERT INTO app_settings (setting_key, setting_value) VALUES (?,?)",
+          [FOLIO_BACKFILL_KEY, `built=${built};mismatched=${mismatches.length}`],
+        );
+
+        console.log(`✅ Folio built for ${built} booking(s)`);
+        if (mismatches.length) {
+          console.warn(
+            `⚠  ${mismatches.length} folio(s) do not match their stored total:`,
+          );
+          mismatches.slice(0, 20).forEach((m) => console.warn("   " + m));
+          if (mismatches.length > 20) {
+            console.warn(`   ...and ${mismatches.length - 20} more`);
+          }
+          console.warn(
+            "   Nothing reads the folio yet, so no bill is affected. Send this list on.",
+          );
+        } else if (built) {
+          console.log("✅ Every folio matches its stored total exactly");
+        }
+      }
+    } catch (e) {
+      console.error("Folio backfill skipped:", e.message);
+    }
+
     console.log("✅ Migrations done");
   } catch (err) {
     console.error("Migration error:", err.message);
@@ -575,6 +1051,26 @@ function otpRequestsExceeded(email) {
   if (hits.length >= OTP_MAX_REQUESTS) return true;
   hits.push(now);
   otpRequests.set(key, hits);
+
+  /*
+   * BUGFIX: this map had no size cap, unlike loginAttempts, guestOrderAttempts
+   * and otpAttempts which all prune themselves.
+   *
+   * It keeps one entry per email address that has ever asked for an OTP and
+   * never removed any, so it grew for the lifetime of the process. Forgot
+   * Password is a public endpoint, so anyone could inflate it by submitting
+   * fresh addresses, and it would never shrink.
+   *
+   * Same prune as the other three: once the map is large, drop every key whose
+   * attempts have all aged out of the window.
+   */
+  if (otpRequests.size > 5000) {
+    for (const [k, times] of otpRequests) {
+      if (!times.some((t) => now - t < OTP_REQUEST_WINDOW_MS)) {
+        otpRequests.delete(k);
+      }
+    }
+  }
   return false;
 }
 
@@ -631,6 +1127,175 @@ function roomTaxableValue(booking) {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   ADD-ON GST — per-service rates
+   ═══════════════════════════════════════════════════════════════════════════
+
+   The room is taxed at GST_RATE (12%). Each add-on is taxed at the rate its
+   catalog entry carries — 5% for Food & Beverage, Laundry, Extra Bed and
+   Room Service. A bill can therefore carry two or more tax rates at once,
+   which is why the invoice prints a rate-wise summary.
+
+   Every function below reads the rate from the ORDER ITEM (booking_addons
+   .gst_rate), never from the catalog, so changing a rate in the dashboard
+   never moves a charge that has already been posted.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+/*
+ * Which GST rate applies to a charge about to be posted.
+ *
+ * 1. an explicit catalog_id — the normal path from the dashboard
+ * 2. an exact, case-insensitive name match — so the old free-text field and
+ *    the preset chips ("Laundry") pick up the configured 5% automatically
+ * 3. LEGACY_ADDON_GST_PERCENT — a one-off charge nobody has configured is
+ *    taxed exactly as it would have been before this feature, so introducing
+ *    the catalog cannot change a total by itself.
+ */
+async function resolveAddonGstRate({ catalogId, label }) {
+  if (catalogId != null && catalogId !== "") {
+    const [[row]] = await db.query(
+      "SELECT catalog_id, name, gst_rate FROM addon_catalog WHERE catalog_id=?",
+      [catalogId],
+    );
+    if (row) {
+      return {
+        catalogId: row.catalog_id,
+        label: row.name,
+        gstRate: Number(row.gst_rate),
+        matched: "catalog_id",
+      };
+    }
+  }
+
+  if (label) {
+    const [[row]] = await db.query(
+      "SELECT catalog_id, name, gst_rate FROM addon_catalog WHERE LOWER(name)=LOWER(?) AND is_active=1",
+      [String(label).trim()],
+    );
+    if (row) {
+      return {
+        catalogId: row.catalog_id,
+        label: row.name,
+        gstRate: Number(row.gst_rate),
+        matched: "name",
+      };
+    }
+
+    /*
+     * Forgiving second pass, on punctuation, spacing and a trailing plural.
+     *
+     * The old preset chip read "Food & Beverages"; the configured service is
+     * "Food & Beverage". Someone typing the label they are used to, or
+     * "Room-Service", or "extra beds", clearly means the configured service —
+     * and silently taxing them at 12% because of an 's' would be a billing
+     * error nobody would think to look for. Matching is still exact after
+     * normalising, so it can never pick the wrong service.
+     */
+    const normalise = (s) =>
+      String(s)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim()
+        .split(" ")
+        .map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w))
+        .join(" ");
+
+    const target = normalise(label);
+    if (target) {
+      const [all] = await db.query(
+        "SELECT catalog_id, name, gst_rate FROM addon_catalog WHERE is_active=1",
+      );
+      const loose = all.find((c) => normalise(c.name) === target);
+      if (loose) {
+        return {
+          catalogId: loose.catalog_id,
+          label: loose.name,
+          gstRate: Number(loose.gst_rate),
+          matched: "name_normalised",
+        };
+      }
+    }
+  }
+
+  return {
+    catalogId: null,
+    label: label ? String(label).trim() : "",
+    gstRate: LEGACY_ADDON_GST_PERCENT,
+    matched: "fallback",
+  };
+}
+
+/* One order item's arithmetic, in one place so the API and the recalc agree. */
+function computeAddonLine({ quantity = 1, unitPrice = 0, gstRate = 0 }) {
+  const qty = Math.max(0, Number(quantity) || 0);
+  const unit = round2(unitPrice);
+  const rate = Math.max(0, Number(gstRate) || 0);
+  const taxable = round2(qty * unit);
+  const gst = round2((taxable * rate) / 100);
+  return {
+    quantity: qty,
+    unitPrice: unit,
+    gstRate: rate,
+    taxableAmount: taxable,
+    gstAmount: gst,
+    lineTotal: round2(taxable + gst),
+  };
+}
+
+/*
+ * Every add-on on a booking, summed, plus a rate-wise breakdown.
+ *
+ * gst_amount is only recomputed when the column is NULL, which happens only
+ * for a row written before the migration ran. Otherwise the stored figure is
+ * used as-is — the line was billed at that number and must not drift.
+ */
+async function getAddonTotals(bookingId) {
+  const [rows] = await db.query(
+    "SELECT * FROM booking_addons WHERE booking_id=?",
+    [bookingId],
+  );
+
+  let taxable = 0;
+  let gst = 0;
+  let unpaidTaxable = 0;
+  let unpaidGst = 0;
+  const byRate = new Map();
+
+  for (const r of rows) {
+    const lineTaxable = round2(r.taxable_amount ?? r.amount);
+    const rate =
+      r.gst_rate != null ? Number(r.gst_rate) : LEGACY_ADDON_GST_PERCENT;
+    const lineGst =
+      r.gst_amount != null ? round2(r.gst_amount) : round2((lineTaxable * rate) / 100);
+
+    taxable = round2(taxable + lineTaxable);
+    gst = round2(gst + lineGst);
+
+    if (Number(r.paid) !== 1) {
+      unpaidTaxable = round2(unpaidTaxable + lineTaxable);
+      unpaidGst = round2(unpaidGst + lineGst);
+    }
+
+    const bucket = byRate.get(rate) || { gstRate: rate, taxable: 0, gst: 0 };
+    bucket.taxable = round2(bucket.taxable + lineTaxable);
+    bucket.gst = round2(bucket.gst + lineGst);
+    byRate.set(rate, bucket);
+  }
+
+  return {
+    rows,
+    taxable,
+    gst,
+    total: round2(taxable + gst),
+    unpaidTaxable,
+    unpaidGst,
+    unpaidTotal: round2(unpaidTaxable + unpaidGst),
+    byRate: [...byRate.values()].sort((a, b) => a.gstRate - b.gstRate),
+  };
+}
+
 /*
  * Rewrite every derived money column on a booking from its current parts.
  *
@@ -641,7 +1306,457 @@ function roomTaxableValue(booking) {
  *
  * Call this from anywhere that changes the room value, the add-ons, or a
  * payment, and every column stays in step.
+ *
+ * ── WHAT CHANGED WITH PER-SERVICE GST ──────────────────────────────────────
+ * This used to be  gst = (room + addons) * 12%.  It is now
+ *
+ *     gst = room * 12%  +  SUM(each add-on line's own gst)
+ *
+ * For a booking whose add-ons are all at 12% — every booking that existed
+ * before this feature, because the migration stamped them at 12 — the two
+ * expressions give the identical figure. Only a line posted at 5% differs,
+ * which is the point.
  */
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE FOLIO ENGINE
+
+   Everything that reads or writes booking_items goes through here, so the
+   ledger can never be written two different ways.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const FOLIO = {
+  ROOM: "ROOM",
+  ADDON: "ADDON",
+  VEHICLE: "VEHICLE",
+  DISCOUNT: "DISCOUNT",
+  PAYMENT: "PAYMENT",
+};
+
+/** Charges are positive; payments and discounts reduce the bill. */
+const FOLIO_NEGATIVE = new Set([FOLIO.DISCOUNT, FOLIO.PAYMENT]);
+
+/**
+ * Split an amount into `parts` pieces that sum EXACTLY back to it.
+ *
+ * Rs.1,000 over 3 nights is 333.33 + 333.33 + 333.34, not 333.33 x 3 — which
+ * would lose a paisa and make the folio disagree with the stored total. The
+ * remainder always lands on the last piece.
+ */
+function splitEvenly(amount, parts) {
+  const total = Math.round((Number(amount) || 0) * 100);
+  const n = Math.max(1, Math.floor(parts));
+  const base = Math.floor(total / n);
+  const out = new Array(n).fill(base);
+  out[n - 1] = total - base * (n - 1);
+  return out.map((cents) => cents / 100);
+}
+
+/** Every date from check-in up to (not including) check-out, as YYYY-MM-DD. */
+function nightsBetween(checkIn, checkOut) {
+  const out = [];
+  const start = new Date(checkIn);
+  const end = new Date(checkOut);
+
+  /*
+   * Unparseable dates still get one night, not zero.
+   *
+   * Returning an empty list here meant no ROOM line was posted at all, so the
+   * folio showed a stay costing nothing — the tariff silently disappeared.
+   * One undated night carries the full charge, which is wrong about WHEN but
+   * right about HOW MUCH, and the reconciliation check then passes instead of
+   * hiding a missing charge behind a mismatch nobody reads.
+   */
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return [null];
+  }
+
+  const d = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  while (d < last) {
+    out.push(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate(),
+      ).padStart(2, "0")}`,
+    );
+    d.setDate(d.getDate() + 1);
+  }
+  // A same-day stay is still one night's charge, not zero.
+  if (!out.length) {
+    out.push(
+      `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(
+        start.getDate(),
+      ).padStart(2, "0")}`,
+    );
+  }
+  return out;
+}
+
+/**
+ * Post one line to a folio.
+ *
+ * The caller gives the taxable value and the rate; the tax and the signed
+ * line total are derived here so no caller can invent its own arithmetic.
+ */
+async function postFolioLine(
+  bookingId,
+  {
+    itemType,
+    label,
+    serviceDate = null,
+    quantity = 1,
+    unitPrice = 0,
+    gstRate = 0,
+    catalogId = null,
+    sourceAddonId = null,
+    paymentMode = null,
+    reference = null,
+    postedBy = null,
+    // PAYMENT lines are a flat amount with no tax of their own — the tax was
+    // already charged on the lines they are settling.
+    flatAmount = null,
+  },
+  conn = db,
+) {
+  const taxable =
+    flatAmount != null ? round2(flatAmount) : round2(Number(quantity) * Number(unitPrice));
+  const gst = flatAmount != null ? 0 : round2((taxable * Number(gstRate || 0)) / 100);
+  const gross = round2(taxable + gst);
+  const signed = FOLIO_NEGATIVE.has(itemType) ? -Math.abs(gross) : gross;
+
+  const [[row]] = await conn.query(
+    "SELECT COALESCE(MAX(line_no),0) AS n FROM booking_items WHERE booking_id=?",
+    [bookingId],
+  );
+
+  const [r] = await conn.query(
+    `INSERT INTO booking_items
+       (booking_id, line_no, item_type, catalog_id, source_addon_id, label,
+        service_date, quantity, unit_price, gst_rate,
+        taxable_amount, gst_amount, line_total,
+        payment_mode, reference, posted_by)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      bookingId,
+      Number(row?.n || 0) + 1,
+      itemType,
+      catalogId,
+      sourceAddonId,
+      String(label || itemType).slice(0, 150),
+      serviceDate,
+      Number(quantity) || 1,
+      flatAmount != null ? round2(flatAmount) : round2(unitPrice),
+      flatAmount != null ? 0 : Number(gstRate) || 0,
+      FOLIO_NEGATIVE.has(itemType) ? -Math.abs(taxable) : taxable,
+      FOLIO_NEGATIVE.has(itemType) ? -Math.abs(gst) : gst,
+      signed,
+      paymentMode,
+      reference,
+      postedBy,
+    ],
+  );
+  return r.insertId;
+}
+
+/**
+ * Read a folio and total it.
+ *
+ * Voided lines are excluded from every figure but still returned, so a screen
+ * can show that something was reversed rather than pretending it never was.
+ */
+async function getFolio(bookingId, conn = db) {
+  const [rows] = await conn.query(
+    "SELECT * FROM booking_items WHERE booking_id=? ORDER BY line_no ASC, item_id ASC",
+    [bookingId],
+  );
+
+  const live = rows.filter((r) => Number(r.voided) !== 1);
+  const sum = (pred, field) =>
+    round2(live.filter(pred).reduce((a, r) => a + Number(r[field] || 0), 0));
+
+  const charges = (r) => !FOLIO_NEGATIVE.has(r.item_type);
+  const payments = (r) => r.item_type === FOLIO.PAYMENT;
+  const discounts = (r) => r.item_type === FOLIO.DISCOUNT;
+
+  const byRate = new Map();
+  for (const r of live) {
+    if (r.item_type === FOLIO.PAYMENT) continue;
+    const rate = Number(r.gst_rate || 0);
+    if (!rate && !Number(r.gst_amount)) continue;
+    const b = byRate.get(rate) || { gstRate: rate, taxable: 0, gst: 0 };
+    b.taxable = round2(b.taxable + Number(r.taxable_amount || 0));
+    b.gst = round2(b.gst + Number(r.gst_amount || 0));
+    byRate.set(rate, b);
+  }
+
+  const roomTaxable = sum((r) => r.item_type === FOLIO.ROOM, "taxable_amount");
+  const roomGst = sum((r) => r.item_type === FOLIO.ROOM, "gst_amount");
+  const addonTaxable = sum((r) => r.item_type === FOLIO.ADDON, "taxable_amount");
+  const addonGst = sum((r) => r.item_type === FOLIO.ADDON, "gst_amount");
+  const vehicleTaxable = sum((r) => r.item_type === FOLIO.VEHICLE, "taxable_amount");
+  const vehicleGst = sum((r) => r.item_type === FOLIO.VEHICLE, "gst_amount");
+  const discountTaxable = sum(discounts, "taxable_amount"); // negative
+  const discountGst = sum(discounts, "gst_amount"); // negative
+  const paid = round2(-sum(payments, "line_total")); // payments are negative
+
+  const chargesTotal = sum(charges, "line_total");
+  const grossTotal = round2(chargesTotal + discountTaxable + discountGst);
+
+  return {
+    rows,
+    live,
+    roomTaxable,
+    roomGst,
+    addonTaxable,
+    addonGst,
+    vehicleTaxable,
+    vehicleGst,
+    discountTaxable,
+    discountGst,
+    taxableTotal: round2(roomTaxable + addonTaxable + vehicleTaxable + discountTaxable),
+    gstTotal: round2(roomGst + addonGst + vehicleGst + discountGst),
+    grossTotal,
+    paid,
+    balance: round2(grossTotal - paid),
+    byRate: [...byRate.values()]
+      .filter((b) => b.taxable || b.gst)
+      .sort((a, b) => a.gstRate - b.gstRate),
+  };
+}
+
+/**
+ * Build a booking's folio from the columns that currently describe it.
+ *
+ * Used to backfill the history and to repair a folio that has drifted. It
+ * clears and rewrites the whole folio, so it is only ever called for a
+ * booking whose columns are the authority — never to "correct" a folio that
+ * has become the authority itself.
+ *
+ * The output is designed to reproduce the stored total_amount exactly:
+ * the room value is whatever roomTaxableValue() says, split across the
+ * nights with the remainder on the last, and the tax on each night is split
+ * the same way from the room's total tax rather than recomputed per night.
+ */
+async function rebuildFolioFromColumns(bookingId, conn = db) {
+  const [[booking]] = await conn.query(
+    "SELECT * FROM bookings WHERE booking_id=?",
+    [bookingId],
+  );
+  if (!booking) return null;
+
+  await conn.query("DELETE FROM booking_items WHERE booking_id=?", [bookingId]);
+
+  const gstOff = isGstDisabled(booking);
+  const roomRatePct = roomGstPercentOf(booking);
+  const vehiclePrice = round2(booking.vehicle_price);
+
+  /*
+   * The room's own taxable value.
+   *
+   * total_price carries the vehicle on some booking paths, so it comes off
+   * first — the vehicle gets its own line. taxable_amount, where the backend
+   * has written it, is the room value after discount; the discount is posted
+   * as its own line, so it is added back here to get the gross tariff.
+   */
+  const bookingDiscount = round2(
+    booking.discount_applied ? booking.discount_amount : 0,
+  );
+  const checkoutDiscount = round2(
+    booking.checkout_discount_applied ? booking.checkout_discount_amount : 0,
+  );
+  const grossRoom = Math.max(
+    0,
+    round2(Number(booking.total_price || 0) - vehiclePrice),
+  );
+
+  // ── ROOM, one line per night ──
+  const nights = nightsBetween(booking.check_in_date, booking.check_out_date);
+  const roomSlices = splitEvenly(grossRoom, nights.length);
+  const roomGstTotal = gstOff ? 0 : round2((grossRoom * roomRatePct) / 100);
+  const gstSlices = splitEvenly(roomGstTotal, nights.length);
+
+  for (let i = 0; i < nights.length; i += 1) {
+    const taxable = roomSlices[i];
+    const gst = gstSlices[i];
+    const [[ln]] = await conn.query(
+      "SELECT COALESCE(MAX(line_no),0) AS n FROM booking_items WHERE booking_id=?",
+      [bookingId],
+    );
+    // Written directly rather than through postFolioLine, because the tax on
+    // each night is a slice of the room's total tax, not a fresh calculation
+    // — that is what keeps the folio equal to the stored figure to the paisa.
+    await conn.query(
+      `INSERT INTO booking_items
+         (booking_id, line_no, item_type, label, service_date, quantity,
+          unit_price, gst_rate, taxable_amount, gst_amount, line_total)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        bookingId,
+        Number(ln?.n || 0) + 1,
+        FOLIO.ROOM,
+        `Room charge${booking.room_id ? "" : ""} — night ${i + 1}`,
+        nights[i],
+        1,
+        taxable,
+        gstOff ? 0 : roomRatePct,
+        taxable,
+        gst,
+        round2(taxable + gst),
+      ],
+    );
+  }
+
+  // ── VEHICLE ──
+  if (vehiclePrice > 0) {
+    await postFolioLine(
+      bookingId,
+      {
+        itemType: FOLIO.VEHICLE,
+        label: `Vehicle — ${booking.vehicle_type || "transfer"}`,
+        unitPrice: vehiclePrice,
+        gstRate: gstOff ? 0 : roomRatePct,
+      },
+      conn,
+    );
+  }
+
+  // ── ADD-ONS, each at its own frozen rate ──
+  const [addonRows] = await conn.query(
+    "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY addon_id ASC",
+    [bookingId],
+  );
+  for (const a of addonRows) {
+    const taxable = round2(a.taxable_amount ?? a.amount);
+    const rate = a.gst_rate != null ? Number(a.gst_rate) : LEGACY_ADDON_GST_PERCENT;
+    const gst =
+      a.gst_amount != null ? round2(a.gst_amount) : round2((taxable * rate) / 100);
+    const [[ln]] = await conn.query(
+      "SELECT COALESCE(MAX(line_no),0) AS n FROM booking_items WHERE booking_id=?",
+      [bookingId],
+    );
+    await conn.query(
+      `INSERT INTO booking_items
+         (booking_id, line_no, item_type, catalog_id, source_addon_id, label,
+          service_date, quantity, unit_price, gst_rate,
+          taxable_amount, gst_amount, line_total)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        bookingId,
+        Number(ln?.n || 0) + 1,
+        FOLIO.ADDON,
+        a.catalog_id ?? null,
+        a.addon_id,
+        a.label,
+        a.created_at ? new Date(a.created_at) : null,
+        Number(a.quantity ?? 1),
+        round2(a.unit_price ?? taxable),
+        gstOff ? 0 : rate,
+        taxable,
+        gstOff ? 0 : gst,
+        round2(taxable + (gstOff ? 0 : gst)),
+      ],
+    );
+  }
+
+  // ── DISCOUNTS, pre-tax, so each reverses the room's tax too ──
+  for (const [amount, label] of [
+    [bookingDiscount, "Booking discount"],
+    [checkoutDiscount, "Checkout discount"],
+  ]) {
+    if (amount > 0) {
+      await postFolioLine(
+        bookingId,
+        {
+          itemType: FOLIO.DISCOUNT,
+          label,
+          unitPrice: amount,
+          gstRate: gstOff ? 0 : roomRatePct,
+        },
+        conn,
+      );
+    }
+  }
+
+  // ── PAYMENTS ──
+  for (const [amount, label, mode, at] of [
+    [
+      round2(booking.advance_paid),
+      "Advance payment",
+      booking.advance_payment_mode || booking.payment_method,
+      booking.advance_paid_at,
+    ],
+    [
+      round2(booking.balance_paid),
+      "Balance payment",
+      booking.balance_payment_mode,
+      booking.balance_paid_at,
+    ],
+  ]) {
+    if (amount > 0) {
+      await postFolioLine(
+        bookingId,
+        {
+          itemType: FOLIO.PAYMENT,
+          label,
+          flatAmount: amount,
+          paymentMode: mode || null,
+          serviceDate: at ? new Date(at) : null,
+        },
+        conn,
+      );
+    }
+  }
+
+  return getFolio(bookingId, conn);
+}
+
+/**
+ * Keep the folio honest.
+ *
+ * In normal running the folio is APPEND-ONLY: each posting route adds its own
+ * line, with its own timestamp, and a reversal is a void rather than a
+ * delete. That is the whole point of a ledger and it is what makes a bill
+ * auditable.
+ *
+ * But "every route remembers to post" is exactly the assumption that rots.
+ * One new route, one forgotten call, and the folio quietly stops matching the
+ * bill — and a ledger nobody can trust is worse than no ledger.
+ *
+ * So this runs after every recalculation and compares the folio's gross with
+ * the total the columns say. Equal, and it leaves the ledger alone, history
+ * intact. Drifted, and it rebuilds from the columns, which remain the
+ * authority, and says so in the log.
+ *
+ * A rebuild loses that booking's posting history — which is the cost of
+ * self-healing, and why the log line matters: a route showing up here
+ * repeatedly is a route that needs its posting call added.
+ */
+async function syncFolio(bookingId, expectedTotal) {
+  try {
+    const folio = await getFolio(bookingId);
+
+    // Nothing posted yet: first sight of this booking, so build it.
+    if (!folio.rows.length) {
+      await rebuildFolioFromColumns(bookingId);
+      return { built: true, repaired: false };
+    }
+
+    if (Math.abs(folio.grossTotal - round2(expectedTotal)) <= 0.02) {
+      return { built: false, repaired: false };
+    }
+
+    console.warn(
+      `⚠  Folio drift on booking ${bookingId}: ledger ${folio.grossTotal} vs bill ${round2(expectedTotal)} — rebuilding. ` +
+        `A posting route is not writing to the folio.`,
+    );
+    await rebuildFolioFromColumns(bookingId);
+    return { built: false, repaired: true };
+  } catch (e) {
+    // The folio is a parallel record. It must never break a real booking.
+    console.error(`Folio sync failed for booking ${bookingId}:`, e.message);
+    return { built: false, repaired: false, error: e.message };
+  }
+}
+
 async function recalcBookingTotals(bookingId) {
   const [rows] = await db.query("SELECT * FROM bookings WHERE booking_id=?", [
     bookingId,
@@ -649,16 +1764,27 @@ async function recalcBookingTotals(bookingId) {
   if (!rows.length) return null;
   const booking = rows[0];
 
-  const [addonRows] = await db.query(
-    "SELECT SUM(amount) AS total FROM booking_addons WHERE booking_id=?",
-    [bookingId],
-  );
-  const addonTotal = Math.round(Number(addonRows[0]?.total || 0) * 100) / 100;
+  const addons = await getAddonTotals(bookingId);
+  const addonTotal = addons.taxable;
+  const addonGst = addons.gst;
 
   const roomTaxable = roomTaxableValue(booking);
-  const subtotal = Math.round((roomTaxable + addonTotal) * 100) / 100;
-  const gstAmount = Math.round(subtotal * GST_RATE * 100) / 100;
-  const totalAmount = Math.round((subtotal + gstAmount) * 100) / 100;
+  // PER-ROOM GST: the rate frozen onto this booking when it was created,
+  // falling back to 12% for a booking written before the column existed.
+  const roomGst = round2(roomTaxable * roomGstFractionOf(booking));
+
+  const subtotal = round2(roomTaxable + addonTotal);
+
+  /*
+   * A booking the admin issued with GST off pays no tax on either part.
+   * gst_enabled defaults to 1, so this is a no-op for every normal booking;
+   * it brings the stored columns in line with the screens and the invoice,
+   * which have always honoured the flag.
+   */
+  const gstAmount = isGstDisabled(booking) ? 0 : round2(roomGst + addonGst);
+  const storedAddonGst = isGstDisabled(booking) ? 0 : addonGst;
+
+  const totalAmount = round2(subtotal + gstAmount);
 
   const paid =
     Math.round(
@@ -667,20 +1793,61 @@ async function recalcBookingTotals(bookingId) {
     ) / 100;
   const remaining = Math.max(0, Math.round((totalAmount - paid) * 100) / 100);
 
+  /*
+   * BUGFIX: payment_status was never updated here.
+   *
+   * A booking settled in full is marked PAID. Post an add-on to it and this
+   * helper correctly raised total_amount and remaining_amount — but left the
+   * status at PAID. Every screen short-circuits on that status ("PAID -> owed
+   * is zero"), so the desk was shown Rs.0 outstanding for money the guest
+   * genuinely owed, and the add-on could never be collected.
+   *
+   * Derived from the remaining balance, which is the only thing that can
+   * define it. A cancelled booking keeps whatever status it had — its bill is
+   * closed and nothing should reopen it.
+   */
+  const nextStatus =
+    String(booking.status || "").toLowerCase() === "cancelled"
+      ? booking.payment_status
+      : remaining > 0
+        ? "PARTIALLY_PAID"
+        : "PAID";
+
   await db.query(
     `UPDATE bookings
         SET addon_charges    = ?,
+            addon_gst_amount = ?,
             gst_amount       = ?,
             final_total      = ?,
             total_amount     = ?,
-            remaining_amount = ?
+            remaining_amount = ?,
+            payment_status   = ?
       WHERE booking_id = ?`,
-    [addonTotal, gstAmount, totalAmount, totalAmount, remaining, bookingId],
+    [
+      addonTotal,
+      storedAddonGst,
+      gstAmount,
+      totalAmount,
+      totalAmount,
+      remaining,
+      nextStatus,
+      bookingId,
+    ],
   );
+
+  /*
+   * Keep the ledger in step with the bill. Append-only in normal running;
+   * rebuilt only if a posting route has drifted (which it logs).
+   */
+  await syncFolio(bookingId, totalAmount);
 
   return {
     roomTaxable,
+    roomGst,
+    paymentStatus: nextStatus,
     addonCharges: addonTotal,
+    addonGst: storedAddonGst,
+    addonGstByRate: addons.byRate,
     taxableAmount: subtotal,
     gstAmount,
     totalAmount,
@@ -808,7 +1975,17 @@ async function calculateBookingAmounts({
   // This is how a discount is shown on a GST invoice: the tax follows the
   // discounted value, it is not charged on the full tariff.
   const taxableAmount = Math.round((roomSubtotal - discountAmount) * 100) / 100;
-  const gstAmount = Math.round(taxableAmount * GST_RATE * 100) / 100;
+
+  /*
+   * PER-ROOM GST: the rate comes from the room being booked, defaulting to
+   * 12% for a room where the admin has not set one — which is every room
+   * until they do, so this is unchanged for existing inventory.
+   *
+   * The caller writes this onto the booking as room_gst_rate, freezing it.
+   */
+  const roomGstRate = roomRatePercent(room);
+  const gstAmount =
+    Math.round(taxableAmount * (roomGstRate / 100) * 100) / 100;
 
   // ADDITIONAL: the line above is unchanged. When the admin issued this
   // booking with GST off, the computed tax is simply dropped, so the guest
@@ -838,6 +2015,8 @@ async function calculateBookingAmounts({
     taxableAmount,
     gstAmount: chargedGst,
     gstEnabled: Boolean(gst_enabled),
+    // the rate used above — callers store this on the booking so it is frozen
+    roomGstRate,
     totalAmount,
     advanceAmount,
     remainingAmount,
@@ -1874,6 +3053,8 @@ app.post(
       );
 
       const bookingId = result.insertId;
+      // freeze the room's GST rate onto this booking
+      await stampRoomGstRate(bookingId);
 
       const order = await razorpay.orders.create({
         amount: Math.round(amounts.totalAmount * 100),
@@ -2021,7 +3202,9 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
     const base_price = nights * resolveNightlyRate(room, guest_count);
     const vehicle_price = 0;
     const room_subtotal = base_price + vehicle_price;
-    const gst_amount = Math.round(room_subtotal * GST_RATE * 100) / 100;
+    // PER-ROOM GST — the rate set on this room, or 12% when unset.
+    const gst_amount =
+      Math.round(room_subtotal * (roomRatePercent(room) / 100) * 100) / 100;
     const total_price = Math.round((room_subtotal + gst_amount) * 100) / 100;
     const [result] = await db.query(
       `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,taxable_amount,gst_amount,final_total,vehicle_type,vehicle_price,status) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'pending')`,
@@ -2040,6 +3223,8 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
       ],
     );
     const booking_id = result.insertId;
+    // freeze the room's GST rate onto this booking
+    await stampRoomGstRate(booking_id);
     const razorpayOrder = await razorpay.orders.create({
       amount: Math.round(total_price * 100),
       currency: "INR",
@@ -2078,9 +3263,23 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
       .update(razorpay_order_id + "|" + razorpay_payment_id)
       .digest("hex");
     if (expected !== razorpay_signature) {
+      /*
+       * SECURITY FIX: this cancelled `WHERE booking_id=?` with nothing else.
+       *
+       * requireAuth only proves the caller is signed in — it says nothing
+       * about whose booking this is, and the ownership check below runs
+       * AFTER this branch has already returned. So any logged-in guest could
+       * post a deliberately wrong signature with somebody else's booking_id
+       * and cancel their stay, confirmed and paid for or not.
+       *
+       * Scoped to the caller's own still-pending booking, which is the only
+       * row a failed payment should ever touch, and which matches the guard
+       * the guest-checkout verify route already had. A bad signature against
+       * anyone else's booking now changes nothing and still returns 400.
+       */
       await db.query(
-        "UPDATE bookings SET status='cancelled' WHERE booking_id=?",
-        [booking_id],
+        "UPDATE bookings SET status='cancelled' WHERE booking_id=? AND user_id=? AND status='pending'",
+        [booking_id, req.user.user_id],
       );
       return res.status(400).json({ error: "Payment verification failed." });
     }
@@ -2177,7 +3376,10 @@ await db.query(
         );
         const basePrice = Number(booking.total_price || 0);
         const gst = Number(
-          booking.gst_amount || Math.round(basePrice * GST_RATE * 100) / 100,
+          // PER-ROOM GST: fall back to the rate frozen onto this booking,
+          // not a constant, so the emailed figure matches the invoice.
+          booking.gst_amount ||
+            Math.round(basePrice * roomGstFractionOf(booking) * 100) / 100,
         );
         const total = Number(
           booking.final_total || Math.round((basePrice + gst) * 100) / 100,
@@ -3162,7 +4364,9 @@ app.post("/api/bookings", requireAuth, async (req, res, next) => {
     }
 
     const base_price = nights * resolveNightlyRate(room, guest_count);
-    const gst_amount = Math.round(base_price * GST_RATE * 100) / 100;
+    // PER-ROOM GST — the rate set on this room, or 12% when unset.
+    const gst_amount =
+      Math.round(base_price * (roomRatePercent(room) / 100) * 100) / 100;
     const total_price = Math.round((base_price + gst_amount) * 100) / 100;
 
     // The availability check and the insert must be one atomic unit. Without
@@ -3217,6 +4421,9 @@ app.post("/api/bookings", requireAuth, async (req, res, next) => {
           total_price,
         ],
       );
+      // inside the transaction, so the pool cannot see this row yet — stamp
+      // on the same connection, before the commit
+      await stampRoomGstRate(result.insertId, conn);
       await conn.commit();
       res.status(201).json({
         message: "Booking confirmed",
@@ -3671,6 +4878,9 @@ app.post(
       // 16. INVOICE
       // ------------------------------------------------------------
       const bookingId = result.insertId;
+      // freeze the room's GST rate onto this booking, before the invoice is
+      // built from it
+      await stampRoomGstRate(bookingId);
 
       loadBookingForInvoice(bookingId)
         .then((booking) => {
@@ -4178,6 +5388,10 @@ app.post(
       const bookingId =
         result.insertId;
 
+      // freeze the room's GST rate onto this booking, before the invoice is
+      // built from it
+      await stampRoomGstRate(bookingId);
+
       // ============================================================
       // 16. SEND INVOICE EMAIL
       // ============================================================
@@ -4424,6 +5638,9 @@ const amounts = await calculateBookingAmounts({
       );
 
       const bookingId = result.insertId;
+      // freeze the room's GST rate onto this booking, before the invoice is
+      // built from it
+      await stampRoomGstRate(bookingId);
       loadBookingForInvoice(bookingId)
         .then((booking) => booking && sendAdvanceInvoiceEmail(booking))
         .catch((emailErr) =>
@@ -4551,9 +5768,12 @@ function outstandingBalance(booking) {
   // ADDITIONAL: on a no-GST booking there is no tax to reverse, so a
   // discount reduces the balance one-for-one. Normal bookings are unchanged.
   const gstOff = isGstDisabled(booking);
+  // PER-ROOM GST: a checkout discount comes off the ROOM, so the tax it
+  // reverses is the room's rate — the one frozen onto this booking.
+  const roomRate = roomGstFractionOf(booking);
   const checkoutDiscountImpact = gstOff
     ? Math.round(checkoutDiscountBase * 100) / 100
-    : Math.round(checkoutDiscountBase * (1 + GST_RATE) * 100) / 100;
+    : Math.round(checkoutDiscountBase * (1 + roomRate) * 100) / 100;
 
   const bookingDiscount =
     Number(booking.discount_applied ? booking.discount_amount : 0) || 0;
@@ -4563,9 +5783,28 @@ function outstandingBalance(booking) {
       bookingDiscount +
       Number(booking.addon_charges || 0),
   );
+  /*
+   * PER-SERVICE GST in the fallback too: the room at GST_RATE, add-ons at
+   * whatever addon_gst_amount says. That column is NULL only on a booking
+   * written before it existed, and the fallback below is then the old flat
+   * figure, so nothing historical shifts.
+   */
+  const fallbackRoomTaxable = Math.max(
+    0,
+    Number(booking.total_price || 0) - bookingDiscount,
+  );
+  const fallbackAddonGst =
+    booking.addon_gst_amount != null
+      ? Number(booking.addon_gst_amount)
+      : // the LEGACY add-on rate, deliberately not the room's — add-ons on a
+        // pre-feature booking were charged 12% whatever the room charges now
+        (Number(booking.addon_charges || 0) * LEGACY_ADDON_GST_PERCENT) / 100;
   const roomWithGst = gstOff
     ? Math.round(taxableFallback * 100) / 100
-    : Math.round(taxableFallback * (1 + GST_RATE) * 100) / 100;
+    : Math.round(
+        (taxableFallback + fallbackRoomTaxable * roomRate + fallbackAddonGst) *
+          100,
+      ) / 100;
   const totalAmount = Number(
     booking.total_amount || booking.final_total || roomWithGst,
   );
@@ -4627,7 +5866,13 @@ app.post(
       // -----------------------------
       // Same calculation as frontend
       // -----------------------------
-      const GST_RATE = 0.12;
+      /*
+       * PER-ROOM GST. This used to be a hardcoded `const GST_RATE = 0.12`
+       * shadowing the module constant. It now reads the rate frozen onto this
+       * booking, so a stay sold at 18% is charged the balance it actually
+       * owes rather than 12% of it.
+       */
+      const GST_RATE = roomGstFractionOf(booking);
 
       const roomCharges = Number(booking.total_price || 0);
 
@@ -4649,9 +5894,24 @@ app.post(
       const gstEnabled =
         Number(booking.gst_enabled ?? 1) !== 0;
 
+      /*
+       * PER-SERVICE GST: the room is taxed at GST_RATE, each add-on at its
+       * own configured rate. addon_gst_amount is written by
+       * recalcBookingTotals; it is NULL only on a booking last touched before
+       * that column existed, and the fallback reproduces the old flat figure
+       * exactly for those.
+       */
+      const addonGst =
+        booking.addon_gst_amount != null
+          ? Math.round(Number(booking.addon_gst_amount) * 100) / 100
+          : // Deliberately the LEGACY add-on rate, not the room's. Add-ons on
+            // a pre-feature booking were charged 12% whatever the room's rate
+            // is today, and this fallback has to reproduce that figure.
+            Math.round((addonTotal * LEGACY_ADDON_GST_PERCENT) / 100 * 100) / 100;
+
       const taxes =
         Math.round(
-          (taxableRoom + addonTotal) * GST_RATE * 100,
+          (taxableRoom * GST_RATE + addonGst) * 100,
         ) / 100;
 
       const chargedTaxes = gstEnabled ? taxes : 0;
@@ -4727,30 +5987,20 @@ app.post(
         ) / 100,
       );
 
-      // Unpaid addons
+      // Unpaid addons — each at its own rate
       let unpaidAddonTotal = 0;
+      let unpaidAddonGstRaw = 0;
 
       try {
-        const [addons] = await db.query(
-          "SELECT amount, paid FROM booking_addons WHERE booking_id=?",
-          [req.params.id],
-        );
-
-        unpaidAddonTotal = addons
-          .filter((a) => Number(a.paid) !== 1)
-          .reduce(
-            (sum, a) => sum + Number(a.amount || 0),
-            0,
-          );
+        const unpaid = await getAddonTotals(req.params.id);
+        unpaidAddonTotal = unpaid.unpaidTaxable;
+        unpaidAddonGstRaw = unpaid.unpaidGst;
       } catch {
         unpaidAddonTotal = 0;
+        unpaidAddonGstRaw = 0;
       }
 
-      const unpaidAddonGst = gstEnabled
-        ? Math.round(
-            unpaidAddonTotal * GST_RATE * 100,
-          ) / 100
-        : 0;
+      const unpaidAddonGst = gstEnabled ? unpaidAddonGstRaw : 0;
 
      const finalRemaining = Math.max(
   0,
@@ -4890,6 +6140,15 @@ app.post(
         ],
       );
 
+      // the money lands on the folio as its own line
+      await postFolioPayment(
+        req.params.id,
+        amountPaid,
+        "Balance payment",
+        String(req.body?.payment_mode || "Online Payment").slice(0, 40),
+        razorpay_payment_id,
+      );
+
       res.json({
         message: "Balance collected",
         balance_paid: newBalancePaid,
@@ -4942,6 +6201,9 @@ app.patch(
         WHERE booking_id = ?`,
         [newBalancePaid, balanceMode, req.params.id],
       );
+
+      // the money lands on the folio as its own line
+      await postFolioPayment(req.params.id, remaining, "Balance payment", balanceMode);
 
       const [saved] = await db.query(
         `SELECT balance_paid, balance_payment_mode, balance_paid_at,
@@ -5018,6 +6280,14 @@ app.patch(
       // add-on charges are taxed too and are never touched by a room discount
       const addonCharges = Number(booking.addon_charges || 0);
 
+      /*
+       * PER-SERVICE GST: add-ons carry their own tax, so it can no longer be
+       * derived from addonCharges here. Read the per-line total instead;
+       * getAddonTotals falls back to the old flat rate for any line written
+       * before the migration, so a legacy booking discounts exactly as before.
+       */
+      const addonGstTotal = (await getAddonTotals(req.params.id)).gst;
+
       // The discount can only wipe out the room's remaining taxable value.
       if (requestedDiscount > discountedRoomBase) {
         return res.status(400).json({
@@ -5042,7 +6312,15 @@ app.patch(
       );
       const newTaxable =
         Math.round((newRoomTaxable + addonCharges) * 100) / 100;
-      const newGst = Math.round(newTaxable * GST_RATE * 100) / 100;
+      /*
+       * PER-ROOM GST: the room at the rate frozen onto this booking, plus
+       * each add-on at its own. Reading the rate from the booking (not the
+       * room, and not a constant) means repricing the room later cannot move
+       * the discount maths on a stay already sold.
+       */
+      const bookingRoomRate = roomGstFractionOf(booking);
+      const newGst =
+        Math.round((newRoomTaxable * bookingRoomRate + addonGstTotal) * 100) / 100;
 
       // ADDITIONAL: unchanged calculation above; the tax is dropped only for a
       // booking issued with GST off, so a discount there stays one-for-one.
@@ -5056,7 +6334,9 @@ app.patch(
         Math.round((discountedRoomBase + addonCharges) * 100) / 100;
       const baseTotal = gstOff
         ? Math.round(baseTaxable * 100) / 100
-        : Math.round(baseTaxable * (1 + GST_RATE) * 100) / 100;
+        : Math.round(
+            (baseTaxable + discountedRoomBase * bookingRoomRate + addonGstTotal) * 100,
+          ) / 100;
       const baseRemaining = Math.max(
         0,
         Math.round((baseTotal - advancePaid - balancePaid) * 100) / 100,
@@ -5064,7 +6344,7 @@ app.patch(
 
       const discountGst = gstOff
         ? 0
-        : Math.round(requestedDiscount * GST_RATE * 100) / 100;
+        : Math.round(requestedDiscount * bookingRoomRate * 100) / 100;
       const discountTotalImpact =
         Math.round((requestedDiscount + discountGst) * 100) / 100;
 
@@ -5092,6 +6372,7 @@ app.patch(
               checkout_discount_at = ?,
               checkout_discount_by = ?,
               taxable_amount = ?,
+              addon_gst_amount = ?,
               gst_amount = ?,
               final_total = ?,
               total_amount = ?,
@@ -5106,6 +6387,7 @@ app.patch(
           applied ? req.user.user_id : null,
           // room-only, matching what booking creation stores in this column
           newRoomTaxable,
+          gstOff ? 0 : addonGstTotal,
           chargedGst,
           newTotal,
           newTotal,
@@ -5374,8 +6656,542 @@ app.patch("/api/bookings/:id/checkout", requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+//  FOLIO — the guest's account for a stay
+// ══════════════════════════════════════════════════════════════════════════════
+
+/*
+ * Read a stay's folio: every line posted to it, plus the totals derived from
+ * those lines rather than from any stored column.
+ *
+ * A guest may read their own; staff may read any.
+ */
+app.get("/api/bookings/:id/folio", requireAuth, async (req, res) => {
+  try {
+    const [[owner]] = await db.query(
+      "SELECT user_id FROM bookings WHERE booking_id=?",
+      [req.params.id],
+    );
+    if (!owner) return res.status(404).json({ error: "Booking not found" });
+    if (!ownsOrStaff(req, owner.user_id)) {
+      return res.status(403).json({ error: "You can only view your own folio" });
+    }
+
+    const folio = await getFolio(req.params.id);
+
+    // What the booking's columns say, so a screen can show both and any
+    // disagreement is visible rather than silent.
+    const [[bk]] = await db.query(
+      "SELECT total_amount, final_total, remaining_amount, payment_status FROM bookings WHERE booking_id=?",
+      [req.params.id],
+    );
+    const storedTotal = Number(bk?.total_amount ?? bk?.final_total ?? 0);
+
+    res.json({
+      booking_id: Number(req.params.id),
+      items: folio.rows,
+      totals: {
+        roomTaxable: folio.roomTaxable,
+        roomGst: folio.roomGst,
+        addonTaxable: folio.addonTaxable,
+        addonGst: folio.addonGst,
+        vehicleTaxable: folio.vehicleTaxable,
+        vehicleGst: folio.vehicleGst,
+        discountTaxable: folio.discountTaxable,
+        discountGst: folio.discountGst,
+        taxableTotal: folio.taxableTotal,
+        gstTotal: folio.gstTotal,
+        grossTotal: folio.grossTotal,
+        paid: folio.paid,
+        balance: folio.balance,
+      },
+      gstByRate: folio.byRate,
+      stored: {
+        total_amount: storedTotal,
+        remaining_amount: Number(bk?.remaining_amount || 0),
+        payment_status: bk?.payment_status || null,
+      },
+      in_sync: Math.abs(folio.grossTotal - storedTotal) <= 0.02,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/*
+ * Void a posted line.
+ *
+ * The line stays on the folio, marked, with a reason — a charge that simply
+ * disappears makes the bill unauditable. A payment cannot be voided here: the
+ * money has moved, and unwinding that is a refund, not an edit.
+ */
+app.patch(
+  "/api/bookings/:id/folio/:itemId/void",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const [[item]] = await db.query(
+        "SELECT * FROM booking_items WHERE item_id=? AND booking_id=?",
+        [req.params.itemId, req.params.id],
+      );
+      if (!item) return res.status(404).json({ error: "Folio line not found" });
+      if (Number(item.voided) === 1) {
+        return res.status(400).json({ error: "This line is already voided" });
+      }
+      if (item.item_type === FOLIO.PAYMENT) {
+        return res.status(400).json({
+          error:
+            "A payment cannot be voided — record a refund instead, so the money movement stays on the record",
+        });
+      }
+
+      const reason = String(req.body?.reason || "Voided by admin").slice(0, 255);
+      await db.query(
+        "UPDATE booking_items SET voided=1, voided_at=NOW(), void_reason=? WHERE item_id=?",
+        [reason, req.params.itemId],
+      );
+
+      /*
+       * An ADDON line mirrors a booking_addons row, which is still what the
+       * stored columns are computed from. Remove it there too, or the bill
+       * and the folio immediately disagree — and the folio would be rebuilt
+       * over the top of this void on the next recalc.
+       */
+      if (item.item_type === FOLIO.ADDON && item.source_addon_id) {
+        await db.query(
+          "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=? AND paid=0",
+          [item.source_addon_id, req.params.id],
+        );
+      }
+
+      const totals = await recalcBookingTotals(req.params.id);
+      const folio = await getFolio(req.params.id);
+      res.json({
+        message: "Line voided",
+        totals,
+        balance: folio.balance,
+        grossTotal: folio.grossTotal,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+/*
+ * Rebuild folios from the booking columns.
+ *
+ * The columns stay the authority, so this is the repair path when a folio has
+ * drifted — and the way to run the backfill again after fixing whatever
+ * caused a mismatch. Reports every booking whose ledger does not reconcile.
+ */
+app.post("/api/admin/folio/rebuild", requireAdmin, async (req, res) => {
+  try {
+    const one = req.body?.booking_id;
+    const [ids] = one
+      ? [[{ booking_id: Number(one) }]]
+      : await db.query("SELECT booking_id FROM bookings ORDER BY booking_id ASC");
+
+    let built = 0;
+    const mismatches = [];
+    for (const { booking_id } of ids) {
+      try {
+        const folio = await rebuildFolioFromColumns(booking_id);
+        if (!folio) continue;
+        built += 1;
+        const [[bk]] = await db.query(
+          "SELECT total_amount, final_total FROM bookings WHERE booking_id=?",
+          [booking_id],
+        );
+        const stored = Number(bk.total_amount ?? bk.final_total ?? 0);
+        if (stored > 0 && Math.abs(folio.grossTotal - stored) > 0.02) {
+          mismatches.push({
+            booking_id,
+            folio: folio.grossTotal,
+            stored,
+            difference: round2(folio.grossTotal - stored),
+          });
+        }
+      } catch (e) {
+        mismatches.push({ booking_id, error: e.message });
+      }
+    }
+
+    res.json({
+      message: `Folio rebuilt for ${built} booking(s)`,
+      built,
+      mismatched: mismatches.length,
+      mismatches: mismatches.slice(0, 100),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ADD-ON GST CONFIGURATION  (addon_catalog)
+//
+//  The admin dashboard's "GST Configuration" screen drives these. Reading the
+//  catalog is open to any staff member, because the manager's add-on picker
+//  needs it; changing it is admin-only.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/* Validate one catalog payload. Returns an error string, or null when fine. */
+function validateCatalogInput({ name, gst_rate, default_amount }) {
+  if (name !== undefined) {
+    const n = String(name || "").trim();
+    if (!n) return "Service name is required";
+    if (n.length > 100) return "Service name must be 100 characters or fewer";
+  }
+  if (gst_rate !== undefined) {
+    const r = Number(gst_rate);
+    if (!Number.isFinite(r)) return "GST rate must be a number";
+    // 0% is legitimate (an exempt service); above 28% is not a real GST slab.
+    if (r < 0 || r > 28) return "GST rate must be between 0 and 28";
+  }
+  if (default_amount !== undefined && default_amount !== null && default_amount !== "") {
+    const a = Number(default_amount);
+    if (!Number.isFinite(a) || a < 0) return "Default amount must be 0 or more";
+  }
+  return null;
+}
+
+// Staff-facing list — active services only, for the add-on picker.
+app.get("/api/addon-catalog", requireManager, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM addon_catalog WHERE is_active=1 ORDER BY sort_order ASC, name ASC",
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin-facing list — includes deactivated services so they can be restored.
+app.get("/api/admin/addon-catalog", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM addon_catalog ORDER BY sort_order ASC, name ASC",
+    );
+    // How many times each service has actually been charged. The dashboard
+    // uses this to decide between deactivating and deleting.
+    const [used] = await db.query(
+      "SELECT catalog_id, COUNT(*) AS uses FROM booking_addons WHERE catalog_id IS NOT NULL GROUP BY catalog_id",
+    );
+    const useMap = new Map(used.map((u) => [Number(u.catalog_id), Number(u.uses)]));
+    res.json(
+      rows.map((r) => ({ ...r, times_charged: useMap.get(Number(r.catalog_id)) || 0 })),
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/admin/addon-catalog", requireAdmin, async (req, res) => {
+  try {
+    const { name, gst_rate, hsn_sac, default_amount, sort_order } = req.body || {};
+    const problem = validateCatalogInput({
+      name,
+      gst_rate: gst_rate ?? 5,
+      default_amount,
+    });
+    if (problem) return res.status(400).json({ error: problem });
+
+    const cleanName = String(name).trim();
+    const [[clash]] = await db.query(
+      "SELECT catalog_id, is_active FROM addon_catalog WHERE LOWER(name)=LOWER(?)",
+      [cleanName],
+    );
+    if (clash) {
+      return res.status(409).json({
+        error: clash.is_active
+          ? `"${cleanName}" already exists`
+          : `"${cleanName}" exists but is deactivated — reactivate it instead`,
+      });
+    }
+
+    const [r] = await db.query(
+      `INSERT INTO addon_catalog (name, gst_rate, hsn_sac, default_amount, sort_order)
+       VALUES (?,?,?,?,?)`,
+      [
+        cleanName,
+        Number(gst_rate ?? 5),
+        hsn_sac ? String(hsn_sac).trim().slice(0, 20) : null,
+        default_amount === "" || default_amount == null ? null : Number(default_amount),
+        Number(sort_order) || 0,
+      ],
+    );
+    const [[created]] = await db.query(
+      "SELECT * FROM addon_catalog WHERE catalog_id=?",
+      [r.insertId],
+    );
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/*
+ * Edit a service.
+ *
+ * Changing gst_rate here affects the NEXT charge posted, never one already
+ * posted — each order item carries its own snapshotted rate. That is
+ * deliberate: a settled invoice must keep printing the tax the guest paid.
+ */
+app.patch("/api/admin/addon-catalog/:id", requireAdmin, async (req, res) => {
+  try {
+    const { name, gst_rate, hsn_sac, default_amount, is_active, sort_order } =
+      req.body || {};
+    const problem = validateCatalogInput({ name, gst_rate, default_amount });
+    if (problem) return res.status(400).json({ error: problem });
+
+    const [[existing]] = await db.query(
+      "SELECT * FROM addon_catalog WHERE catalog_id=?",
+      [req.params.id],
+    );
+    if (!existing) return res.status(404).json({ error: "Service not found" });
+
+    if (name !== undefined) {
+      const [[clash]] = await db.query(
+        "SELECT catalog_id FROM addon_catalog WHERE LOWER(name)=LOWER(?) AND catalog_id<>?",
+        [String(name).trim(), req.params.id],
+      );
+      if (clash)
+        return res.status(409).json({ error: `"${String(name).trim()}" already exists` });
+    }
+
+    const next = {
+      name: name !== undefined ? String(name).trim() : existing.name,
+      gst_rate: gst_rate !== undefined ? Number(gst_rate) : existing.gst_rate,
+      hsn_sac:
+        hsn_sac !== undefined
+          ? hsn_sac
+            ? String(hsn_sac).trim().slice(0, 20)
+            : null
+          : existing.hsn_sac,
+      default_amount:
+        default_amount !== undefined
+          ? default_amount === "" || default_amount == null
+            ? null
+            : Number(default_amount)
+          : existing.default_amount,
+      is_active:
+        is_active !== undefined ? (Number(is_active) ? 1 : 0) : existing.is_active,
+      sort_order:
+        sort_order !== undefined ? Number(sort_order) || 0 : existing.sort_order,
+    };
+
+    await db.query(
+      `UPDATE addon_catalog
+          SET name=?, gst_rate=?, hsn_sac=?, default_amount=?, is_active=?, sort_order=?
+        WHERE catalog_id=?`,
+      [
+        next.name,
+        next.gst_rate,
+        next.hsn_sac,
+        next.default_amount,
+        next.is_active,
+        next.sort_order,
+        req.params.id,
+      ],
+    );
+
+    const [[updated]] = await db.query(
+      "SELECT * FROM addon_catalog WHERE catalog_id=?",
+      [req.params.id],
+    );
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/*
+ * Remove a service.
+ *
+ * A service that has ever been charged is DEACTIVATED, not deleted — its rows
+ * in booking_addons point at it, and deleting it would orphan the history
+ * behind past invoices. One that has never been used is deleted outright.
+ */
+app.delete("/api/admin/addon-catalog/:id", requireAdmin, async (req, res) => {
+  try {
+    const [[existing]] = await db.query(
+      "SELECT * FROM addon_catalog WHERE catalog_id=?",
+      [req.params.id],
+    );
+    if (!existing) return res.status(404).json({ error: "Service not found" });
+
+    const [[{ uses }]] = await db.query(
+      "SELECT COUNT(*) AS uses FROM booking_addons WHERE catalog_id=?",
+      [req.params.id],
+    );
+
+    if (Number(uses) > 0) {
+      await db.query("UPDATE addon_catalog SET is_active=0 WHERE catalog_id=?", [
+        req.params.id,
+      ]);
+      return res.json({
+        message: `"${existing.name}" deactivated — it appears on ${uses} past charge(s), so its history is kept`,
+        deactivated: true,
+      });
+    }
+
+    await db.query("DELETE FROM addon_catalog WHERE catalog_id=?", [
+      req.params.id,
+    ]);
+    res.json({ message: `"${existing.name}" removed`, deactivated: false });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  ADD-ONS
 // ══════════════════════════════════════════════════════════════════════════════
+
+/*
+ * Post one charge to a booking — shared by the admin and manager routes so
+ * the two can never compute a line differently.
+ *
+ * Accepts the old shape { label, amount } and the new one
+ * { catalog_id, quantity, unit_price }. With the old shape quantity is 1 and
+ * unit_price is the amount, so an existing caller behaves exactly as before
+ * apart from now getting the configured rate instead of a flat 12%.
+ */
+async function insertAddonLine(bookingId, body) {
+  const { catalog_id, label, amount, quantity, unit_price, gst_rate } = body || {};
+
+  const qty = quantity == null || quantity === "" ? 1 : Number(quantity);
+  if (!Number.isFinite(qty) || qty <= 0) {
+    const e = new Error("Quantity must be greater than zero");
+    e.status = 400;
+    throw e;
+  }
+
+  // unit_price when given, otherwise derive it from the legacy `amount`.
+  const unit =
+    unit_price != null && unit_price !== ""
+      ? Number(unit_price)
+      : Number(amount) / qty;
+  if (!Number.isFinite(unit) || unit <= 0) {
+    const e = new Error("Amount must be greater than zero");
+    e.status = 400;
+    throw e;
+  }
+
+  const resolved = await resolveAddonGstRate({ catalogId: catalog_id, label });
+
+  const finalLabel = (label && String(label).trim()) || resolved.label;
+  if (!finalLabel) {
+    const e = new Error("label and amount required");
+    e.status = 400;
+    throw e;
+  }
+
+  /*
+   * An explicit gst_rate in the request is honoured only as an override for a
+   * one-off charge. It is still snapshotted onto the line like any other, so
+   * it behaves identically from here on.
+   */
+  const rate =
+    gst_rate != null && gst_rate !== "" && Number.isFinite(Number(gst_rate))
+      ? Math.min(28, Math.max(0, Number(gst_rate)))
+      : resolved.gstRate;
+
+  const line = computeAddonLine({ quantity: qty, unitPrice: unit, gstRate: rate });
+
+  const [r] = await db.query(
+    `INSERT INTO booking_addons
+       (booking_id, catalog_id, label, quantity, unit_price, gst_rate,
+        taxable_amount, gst_amount, line_total, amount)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [
+      bookingId,
+      resolved.catalogId,
+      finalLabel.slice(0, 100),
+      line.quantity,
+      line.unitPrice,
+      line.gstRate,
+      line.taxableAmount,
+      line.gstAmount,
+      line.lineTotal,
+      // `amount` is kept equal to the taxable value so every existing
+      // SUM(amount) query keeps returning what it always did.
+      line.taxableAmount,
+    ],
+  );
+
+  /*
+   * Post the same charge to the folio.
+   *
+   * Appended here rather than left to the periodic rebuild so the line keeps
+   * its own posting time and its own identity — that is what makes the folio
+   * a record of what happened rather than a snapshot of what is currently
+   * true. source_addon_id links it back to the booking_addons row so a later
+   * removal can void exactly this line.
+   */
+  try {
+    await postFolioLine(bookingId, {
+      itemType: FOLIO.ADDON,
+      label: finalLabel,
+      catalogId: resolved.catalogId,
+      sourceAddonId: r.insertId,
+      serviceDate: new Date(),
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      gstRate: line.gstRate,
+    });
+  } catch (e) {
+    // The folio must never stop a charge being taken; recalc will repair it.
+    console.error("Folio post failed for add-on:", e.message);
+  }
+
+  return { addon_id: r.insertId, label: finalLabel, ...line };
+}
+
+/*
+ * Reverse an add-on on the folio.
+ *
+ * VOID, not delete. A posted charge that simply vanishes leaves "where did
+ * that go?" unanswerable, and a bill that can be silently edited is not a
+ * bill anyone can audit. The line stays, marked, with a reason.
+ */
+async function voidAddonFolioLine(bookingId, addonId, reason = "Charge removed") {
+  try {
+    await db.query(
+      `UPDATE booking_items
+          SET voided = 1, voided_at = NOW(), void_reason = ?
+        WHERE booking_id = ? AND source_addon_id = ? AND voided = 0`,
+      [String(reason).slice(0, 255), bookingId, addonId],
+    );
+  } catch (e) {
+    console.error("Folio void failed for add-on:", e.message);
+  }
+}
+
+/*
+ * Record money received as a folio line.
+ *
+ * Payments are lines like anything else, carried negative, so the balance is
+ * just the sum of the folio and there is no second figure to keep in step.
+ */
+async function postFolioPayment(bookingId, amount, label, mode, reference = null) {
+  const value = round2(amount);
+  if (!(value > 0)) return;
+  try {
+    await postFolioLine(bookingId, {
+      itemType: FOLIO.PAYMENT,
+      label,
+      flatAmount: value,
+      paymentMode: mode || null,
+      reference,
+      serviceDate: new Date(),
+    });
+  } catch (e) {
+    console.error("Folio payment post failed:", e.message);
+  }
+}
+
 app.get("/api/bookings/:id/addons", requireAuth, async (req, res, next) => {
   try {
     const [[owner]] = await db.query(
@@ -5400,8 +7216,10 @@ app.get("/api/bookings/:id/addons", requireAuth, async (req, res, next) => {
 
 app.post("/api/bookings/:id/addons", requireAdmin, async (req, res) => {
   try {
-    const { label, amount } = req.body;
-    if (!label || !amount)
+    const { label, amount, catalog_id, unit_price } = req.body || {};
+    if (!catalog_id && !label)
+      return res.status(400).json({ error: "label and amount required" });
+    if (!amount && !unit_price)
       return res.status(400).json({ error: "label and amount required" });
     const [[bk]] = await db.query(
       "SELECT status FROM bookings WHERE booking_id=?",
@@ -5412,29 +7230,24 @@ app.post("/api/bookings/:id/addons", requireAdmin, async (req, res) => {
       return res
         .status(400)
         .json({ error: "Cannot add charges to a cancelled booking" });
-    const [r] = await db.query(
-      "INSERT INTO booking_addons (booking_id, label, amount) VALUES (?,?,?)",
-      [req.params.id, label, amount],
-    );
-    const [addons] = await db.query(
-      "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
-      [req.params.id],
-    );
-    // recalcBookingTotals rewrites addon_charges, gst_amount, final_total,
-    // total_amount AND remaining_amount together, so no screen can read a
-    // stale figure after this call.
+
+    const line = await insertAddonLine(req.params.id, req.body);
+
+    // recalcBookingTotals rewrites addon_charges, addon_gst_amount,
+    // gst_amount, final_total, total_amount AND remaining_amount together, so
+    // no screen can read a stale figure after this call.
     const totals = await recalcBookingTotals(req.params.id);
     res.status(201).json({
-      addon_id: r.insertId,
-      label,
-      amount,
+      ...line,
+      amount: line.taxableAmount,
       new_addon_total: totals.addonCharges,
+      new_addon_gst: totals.addonGst,
       new_gst: totals.gstAmount,
       new_final_total: totals.totalAmount,
       new_remaining: totals.remainingAmount,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -5450,6 +7263,10 @@ app.delete(
       if (!addon) return res.status(404).json({ error: "Add-on not found" });
       if (addon.paid === 1)
         return res.status(400).json({ error: "Cannot remove a paid add-on" });
+      // void on the folio BEFORE the row goes, while the link still exists
+      await voidAddonFolioLine(req.params.id, req.params.addon_id, "Charge removed by admin");
+      // void on the folio BEFORE the row goes, while the link still exists
+      await voidAddonFolioLine(req.params.id, req.params.addon_id, "Charge removed by manager");
       await db.query(
         "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=?",
         [req.params.addon_id, req.params.id],
@@ -5489,10 +7306,25 @@ app.patch(
           .status(400)
           .json({ error: "Cannot mark a cancelled booking as paid" });
 
-      const [[unpaid]] = await db.query(
-        "SELECT COUNT(*) AS n FROM booking_addons WHERE booking_id=? AND paid=0",
-        [req.params.id],
-      );
+      /*
+       * BUGFIX: marking add-ons paid recorded no money.
+       *
+       * It set paid=1 and stamped the mode and date, but never credited
+       * balance_paid — so the booking's stored remaining_amount still
+       * contained the add-on total. The screens hid it by subtracting the
+       * add-ons again in the UI ("allAddonsPaid ? 0 : remainingAmount"), but
+       * the database and the screen disagreed, and anything reading the
+       * columns directly — reports, a SQL query, the balance-order route —
+       * saw money still owed that had in fact been collected.
+       *
+       * The money the guest actually hands over is the unpaid add-on lines
+       * plus their GST, so that is what gets credited.
+       */
+      const beforePaid = await getAddonTotals(req.params.id);
+      const settledNow = beforePaid.unpaidTotal;
+      const unpaidCount = beforePaid.rows.filter(
+        (r) => Number(r.paid) !== 1,
+      ).length;
 
       await db.query(
         "UPDATE booking_addons SET paid=1 WHERE booking_id=? AND paid=0",
@@ -5501,20 +7333,45 @@ app.patch(
 
       // only stamp the mode/date when there was actually something to settle,
       // so a repeat call doesn't overwrite the original record
-      if (Number(unpaid?.n || 0) > 0) {
+      if (unpaidCount > 0) {
         await ensurePaymentColumns();
         const mode = String(req.body?.payment_mode || "Cash").slice(0, 40);
         await db.query(
-          "UPDATE bookings SET addon_payment_mode=?, addon_paid_at=NOW() WHERE booking_id=?",
-          [mode, req.params.id],
+          `UPDATE bookings
+              SET addon_payment_mode = ?,
+                  addon_paid_at      = NOW(),
+                  balance_paid       = ROUND(COALESCE(balance_paid,0) + ?, 2)
+            WHERE booking_id = ?`,
+          [mode, settledNow, req.params.id],
         );
+
+        // the money lands on the folio as its own payment line
+        await postFolioPayment(
+          req.params.id,
+          settledNow,
+          "Add-on settlement",
+          mode,
+        );
+
+        // recalc rewrites remaining_amount from the new balance_paid, so the
+        // stored figure and the screen finally agree
+        await recalcBookingTotals(req.params.id);
       }
 
       const [addons] = await db.query(
         "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at ASC",
         [req.params.id],
       );
-      res.json({ message: "Add-ons marked as paid", addons });
+      const [[fresh]] = await db.query(
+        "SELECT total_amount, advance_paid, balance_paid, remaining_amount, payment_status FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      res.json({
+        message: "Add-ons marked as paid",
+        addons,
+        amount_settled: settledNow,
+        ...fresh,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -5620,7 +7477,16 @@ app.get("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
       "SELECT * FROM booking_guests WHERE booking_id=? ORDER BY guest_id ASC",
       [req.params.id],
     );
-    res.json({ ...rows[0], addons, guests });
+    // addon_gst_summary lets the invoice print a rate-wise GST table without
+    // re-deriving anything client side.
+    const addonTotals = await getAddonTotals(req.params.id);
+    res.json({
+      ...rows[0],
+      addons,
+      guests,
+      addon_gst_summary: addonTotals.byRate,
+      addon_gst_total: addonTotals.gst,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -5681,13 +7547,28 @@ app.post("/api/admin/rooms", requireAdmin, async (req, res) => {
       capacity,
       description,
       image_url,
+      gst_rate,
     } = req.body;
     if (!room_number || !room_type || !price_per_night)
       return res
         .status(400)
         .json({ error: "room_number, room_type, price_per_night required" });
+
+    /*
+     * PER-ROOM GST. Left empty, the column stays NULL and the room is taxed
+     * at the 12% default, so a room added without touching the field behaves
+     * exactly as rooms always have.
+     */
+    const roomGst =
+      gst_rate === undefined || gst_rate === null || gst_rate === ""
+        ? null
+        : Number(gst_rate);
+    if (roomGst !== null && (!Number.isFinite(roomGst) || roomGst < 0 || roomGst > 28)) {
+      return res.status(400).json({ error: "GST rate must be between 0 and 28" });
+    }
+
     const [r] = await db.query(
-      "INSERT INTO rooms (room_number,room_type,price_per_night,price_double,capacity,description,image_url,is_available) VALUES (?,?,?,?,?,?,?,1)",
+      "INSERT INTO rooms (room_number,room_type,price_per_night,price_double,capacity,description,image_url,gst_rate,is_available) VALUES (?,?,?,?,?,?,?,?,1)",
       [
         room_number,
         room_type,
@@ -5696,6 +7577,7 @@ app.post("/api/admin/rooms", requireAdmin, async (req, res) => {
         capacity || 2,
         description || null,
         image_url || null,
+        roomGst,
       ],
     );
     res.status(201).json({ message: "Room added", room_id: r.insertId });
@@ -5748,6 +7630,24 @@ app.patch("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
     if (image_url !== undefined) {
       fields.push("image_url=?");
       values.push(image_url);
+    }
+    /*
+     * PER-ROOM GST.
+     *
+     * Changing this affects bookings made FROM NOW ON. Every existing booking
+     * carries its own frozen room_gst_rate, so a stay already sold at 12%
+     * keeps printing 12% even after this room moves to 18%.
+     *
+     * An empty string clears it back to the 12% default.
+     */
+    if (req.body.gst_rate !== undefined) {
+      const raw = req.body.gst_rate;
+      const parsed = raw === null || raw === "" ? null : Number(raw);
+      if (parsed !== null && (!Number.isFinite(parsed) || parsed < 0 || parsed > 28)) {
+        return res.status(400).json({ error: "GST rate must be between 0 and 28" });
+      }
+      fields.push("gst_rate=?");
+      values.push(parsed);
     }
     if (req.body.image2 !== undefined) {
       fields.push("image2=?");
@@ -5851,7 +7751,9 @@ app.post(
           req.body.total_amount !== undefined && req.body.total_amount !== ""
             ? Math.max(0, Number(req.body.total_amount))
             : nightlyRate * nights;
-        const gstAmount = Math.round(roomSubtotal * GST_RATE * 100) / 100;
+        // PER-ROOM GST — the rate set on this room, or 12% when unset.
+        const gstAmount =
+          Math.round(roomSubtotal * (roomRatePercent(room) / 100) * 100) / 100;
         const totalAmount = Math.round((roomSubtotal + gstAmount) * 100) / 100;
 
         // reuse an account when the email is known, otherwise make a placeholder
@@ -5906,6 +7808,8 @@ app.post(
           ],
         );
         bookingId = result.insertId;
+        // freeze the room's GST rate onto this bulk booking
+        await stampRoomGstRate(bookingId);
       }
 
       await db.query(
@@ -6077,7 +7981,13 @@ app.get("/api/manager/bookings/:id", requireManager, async (req, res) => {
       "SELECT * FROM booking_addons WHERE booking_id=? ORDER BY created_at ASC",
       [req.params.id],
     );
-    res.json({ ...rows[0], addons });
+    const addonTotals = await getAddonTotals(req.params.id);
+    res.json({
+      ...rows[0],
+      addons,
+      addon_gst_summary: addonTotals.byRate,
+      addon_gst_total: addonTotals.gst,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -6111,7 +8021,7 @@ app.patch(
         return res.status(400).json({ error: "Invalid vehicle price" });
 
       const [rows] = await db.query(
-        "SELECT total_price, vehicle_price, addon_charges FROM bookings WHERE booking_id=? AND vehicle_type IS NOT NULL AND vehicle_type != 'none'",
+        "SELECT total_price, vehicle_price, addon_charges, room_gst_rate FROM bookings WHERE booking_id=? AND vehicle_type IS NOT NULL AND vehicle_type != 'none'",
         [req.params.id],
       );
       if (!rows.length)
@@ -6120,16 +8030,39 @@ app.patch(
       const roomSubtotal =
         Number(rows[0].total_price || 0) - Number(rows[0].vehicle_price || 0);
       const updatedSubtotal = roomSubtotal + Number(vehicle_price);
-      const gstAmount = Math.round(updatedSubtotal * GST_RATE * 100) / 100;
+      // PER-ROOM GST: the rate frozen onto this booking.
+      const gstAmount =
+        Math.round(updatedSubtotal * roomGstFractionOf(rows[0]) * 100) / 100;
+      // PER-SERVICE GST: add-ons are taxed at their own rates, not the room's.
+      const vehicleAddonGst = (await getAddonTotals(req.params.id)).gst;
       const finalTotal =
         Math.round(
           (updatedSubtotal +
             gstAmount +
-            Number(rows[0].addon_charges || 0) * (1 + GST_RATE)) *
+            Number(rows[0].addon_charges || 0) +
+            vehicleAddonGst) *
             100,
         ) / 100;
+      /*
+       * BUGFIX: this wrote total_price, gst_amount and final_total but left
+       * total_amount and remaining_amount untouched.
+       *
+       * Every screen and the invoice read total_amount and remaining_amount
+       * FIRST, so after a vehicle charge was added or changed they kept
+       * showing the old figure — the guest was quoted a balance that did not
+       * include the vehicle, and "Remaining to Pay" was short by its value.
+       * This is the exact failure recalcBookingTotals was written to prevent;
+       * this route simply never called it.
+       *
+       * taxable_amount is cleared to NULL as part of the same write.
+       * roomTaxableValue() prefers that column and it still held the
+       * pre-vehicle value, so leaving it would make the recalc below
+       * reproduce the stale total. With it NULL the helper derives the
+       * taxable value from the freshly written total_price minus the
+       * discounts, which is what it means.
+       */
       await db.query(
-        "UPDATE bookings SET vehicle_type=?, vehicle_price=?, vehicle_status=?, pickup_location=?, dropoff_location=?, total_price=?, gst_amount=?, final_total=? WHERE booking_id=?",
+        "UPDATE bookings SET vehicle_type=?, vehicle_price=?, vehicle_status=?, pickup_location=?, dropoff_location=?, total_price=?, gst_amount=?, final_total=?, taxable_amount=NULL WHERE booking_id=?",
         [
           vehicle_type,
           Number(vehicle_price),
@@ -6142,6 +8075,10 @@ app.patch(
           req.params.id,
         ],
       );
+
+      // brings total_amount and remaining_amount back in step with the rest
+      await recalcBookingTotals(req.params.id);
+
       res.json({
         message: "Vehicle details updated",
         vehicle_price: Number(vehicle_price),
@@ -6220,8 +8157,10 @@ app.post(
   requireManager,
   async (req, res) => {
     try {
-      const { label, amount } = req.body;
-      if (!label || !amount)
+      const { label, amount, catalog_id, unit_price } = req.body || {};
+      if (!catalog_id && !label)
+        return res.status(400).json({ error: "label and amount required" });
+      if (!amount && !unit_price)
         return res.status(400).json({ error: "label and amount required" });
       const [[bk]] = await db.query(
         "SELECT status FROM bookings WHERE booking_id=?",
@@ -6232,26 +8171,20 @@ app.post(
         return res
           .status(400)
           .json({ error: "Cannot add charges to a cancelled booking" });
-      const [r] = await db.query(
-        "INSERT INTO booking_addons (booking_id, label, amount) VALUES (?,?,?)",
-        [req.params.id, label, amount],
-      );
-      const [addons] = await db.query(
-        "SELECT SUM(amount) as total FROM booking_addons WHERE booking_id=?",
-        [req.params.id],
-      );
+
+      const line = await insertAddonLine(req.params.id, req.body);
       const totals = await recalcBookingTotals(req.params.id);
       res.status(201).json({
-        addon_id: r.insertId,
-        label,
-        amount,
+        ...line,
+        amount: line.taxableAmount,
         new_addon_total: totals.addonCharges,
+        new_addon_gst: totals.addonGst,
         new_gst: totals.gstAmount,
         new_final_total: totals.totalAmount,
         new_remaining: totals.remainingAmount,
       });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message });
     }
   },
 );
@@ -6261,6 +8194,21 @@ app.delete(
   requireManager,
   async (req, res) => {
     try {
+      /*
+       * Same guard the admin route has always had. It matters more now: the
+       * manager screen was calling a mistyped URL ("/api/mana/..."), so this
+       * route was never actually reached from the dashboard. With that typo
+       * fixed, an unguarded delete would let a settled charge be removed and
+       * leave the booking's total short of the money already collected.
+       */
+      const [[addon]] = await db.query(
+        "SELECT paid FROM booking_addons WHERE addon_id=? AND booking_id=?",
+        [req.params.addon_id, req.params.id],
+      );
+      if (!addon) return res.status(404).json({ error: "Add-on not found" });
+      if (Number(addon.paid) === 1)
+        return res.status(400).json({ error: "Cannot remove a paid add-on" });
+
       await db.query(
         "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=?",
         [req.params.addon_id, req.params.id],

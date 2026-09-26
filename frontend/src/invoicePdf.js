@@ -14,7 +14,15 @@
 //  The invoice date is read at print time, so it is always today's date.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { HOTEL_GSTIN } from "./utils/billing";
+import { HOTEL_GSTIN, roomGstRate, roomGstPercent } from "./utils/billing";
+import {
+  summariseAddons,
+  gstSummaryRows,
+  addonLineRate,
+  addonLineTaxable,
+  addonLineGst,
+  formatRate,
+} from "./utils/addonGst";
 
 const GST_RATE = 0.12;
 
@@ -225,8 +233,16 @@ const co = b.check_out_date
    */
   const invoiceGstEnabled = Number(b.gst_enabled ?? 1) !== 0;
 
+  /*
+   * PER-ROOM GST: the rate frozen onto THIS booking when it was sold, not
+   * whatever the room charges today. An invoice reprinted after the room was
+   * repriced must still show the tax the guest actually paid.
+   */
+  const invoiceRoomRate = roomGstRate(b);
+  const invoiceRoomPercent = roomGstPercent(b);
+
   const roomGst =
-    Math.round(discountedRoomAmount * GST_RATE * 100) / 100;
+    Math.round(discountedRoomAmount * invoiceRoomRate * 100) / 100;
 
   const roomTotal = Math.max(
     0,
@@ -294,7 +310,7 @@ const co = b.check_out_date
   // on it is refunded too. Total impact = discount x 1.18. Cap the discount so
   // that combined figure can never exceed what is still owed.
   const maxCheckoutDiscount = invoiceGstEnabled
-    ? Math.round((roomRemaining / (1 + GST_RATE)) * 100) / 100
+    ? Math.round((roomRemaining / (1 + invoiceRoomRate)) * 100) / 100
     : Math.round(roomRemaining * 100) / 100;
 
   const appliedCheckoutDiscount = Math.min(
@@ -303,7 +319,7 @@ const co = b.check_out_date
   );
 
   const checkoutDiscountGst = invoiceGstEnabled
-    ? Math.round(appliedCheckoutDiscount * GST_RATE * 100) / 100
+    ? Math.round(appliedCheckoutDiscount * invoiceRoomRate * 100) / 100
     : 0;
 
   const checkoutDiscountImpact =
@@ -315,14 +331,32 @@ const co = b.check_out_date
   // ADD-ONS
   // ─────────────────────────────────────────────────────────────────────
 
+  /*
+   * PER-SERVICE GST
+   *
+   * The room is taxed at GST_RATE (12%); each add-on is taxed at the rate the
+   * admin configured for that service — 5% for Food & Beverage, Laundry,
+   * Extra Bed and Room Service — and that rate is frozen onto the line when
+   * the charge is posted.
+   *
+   * A bill can therefore carry more than one rate, which is why this invoice
+   * prints a rate-wise GST table further down: under GST a tax invoice has to
+   * show the taxable value and the tax at each rate separately.
+   *
+   * summariseAddons stamps any line with no rate at GST_RATE, because that is
+   * what those lines were actually billed at before per-service rates
+   * existed. An old invoice therefore reprints for the identical figure.
+   */
+  const addonSummary = summariseAddons(addons);
+
   const addonTotal = Number(
     b.addon_charges || 0,
   );
 
   const addonGst = invoiceGstEnabled
-    ? Math.round(
-        addonTotal * GST_RATE * 100,
-      ) / 100
+    ? b.addon_gst_amount != null
+      ? Math.round(Number(b.addon_gst_amount) * 100) / 100
+      : addonSummary.gst
     : 0;
 
   const addonWithGst =
@@ -331,20 +365,9 @@ const co = b.check_out_date
         100,
     ) / 100;
 
-  const unpaidAddonTotal = addons
-    .filter((a) => a.paid !== 1)
-    .reduce(
-      (s, a) =>
-        s + Number(a.amount || 0),
-      0,
-    );
+  const unpaidAddonTotal = addonSummary.unpaidTaxable;
 
-  const unpaidAddonGst =
-    Math.round(
-      unpaidAddonTotal *
-        GST_RATE *
-        100,
-    ) / 100;
+  const unpaidAddonGst = invoiceGstEnabled ? addonSummary.unpaidGst : 0;
 
   /*
    * Amount still payable.
@@ -380,9 +403,29 @@ const co = b.check_out_date
   const taxableTotal =
     Math.round((finalRoomTaxable + addonTotal) * 100) / 100;
 
+  /*
+   * Room and add-ons are taxed separately and then added — the room at
+   * GST_RATE, the add-ons at their own rates. With every add-on at 12% this
+   * is arithmetically the old `taxableTotal * GST_RATE`, so a legacy invoice
+   * is unchanged; with a 5% add-on it is the only correct answer.
+   *
+   * The rounding order matches the backend exactly (round each part, then
+   * sum), so this PDF can never be a paisa away from the stored total.
+   */
   const totalGst = invoiceGstEnabled
-    ? Math.round(taxableTotal * GST_RATE * 100) / 100
+    ? Math.round((finalRoomTaxable * invoiceRoomRate + addonGst) * 100) / 100
     : 0;
+
+  /*
+   * The rate-wise GST table: the room's taxable value under 12%, then each
+   * add-on rate with its own taxable value and tax.
+   */
+  const gstRateRows = gstSummaryRows({
+    roomTaxable: finalRoomTaxable,
+    roomRatePercent: invoiceRoomPercent,
+    addonSummary,
+    gstEnabled: invoiceGstEnabled,
+  });
 
   const grandTotal = Math.max(
     0,
@@ -1211,11 +1254,32 @@ if (addons.length) {
     "ADD-ON CHARGES",
   );
 
+  /*
+   * Each line prints the rate it was billed at, not the catalog's current
+   * rate. Two services on one bill can legitimately sit at different rates,
+   * and a guest looking at the tax column has to be able to see why.
+   *
+   * The AMOUNT column stays the TAXABLE value, exactly as before, so it keeps
+   * adding up to the "Add-on Charges" figure in the summary below. The tax is
+   * shown in the detail column and totalled in the GST summary.
+   */
   addons.forEach((a) => {
+    const rate = addonLineRate(a);
+    const qty = Number(a.quantity ?? 1);
+    const unit =
+      a.unit_price != null ? Number(a.unit_price) : addonLineTaxable(a);
+
+    const detail = [
+      qty > 1 ? `${qty} x ${money(unit)}` : null,
+      `GST ${formatRate(rate)} ${money(addonLineGst(a))}`,
+    ]
+      .filter(Boolean)
+      .join("   ");
+
     tableRow(
       a.label,
-      "",
-      money(a.amount),
+      detail,
+      money(addonLineTaxable(a)),
     );
   });
 }
@@ -1231,6 +1295,18 @@ if (addons.length) {
    * footer bar whenever both discounts were present.
    *   heading 6.5 | row 6 | boxed row 10 | payment-mode line 9 | total box 24
    */
+  /*
+   * Per-service GST adds rows here, so the reserve has to grow with them:
+   * one add-on GST row per rate instead of a fixed single row, and the
+   * rate-wise summary block when the bill carries more than one rate. A
+   * fixed reserve would push the grand total under the footer bar.
+   */
+  const addonGstRowCount = Math.max(1, addonSummary.byRate.length);
+  const rateSummaryHeight =
+    invoiceGstEnabled && gstRateRows.length > 1
+      ? 6.5 + 6 * (gstRateRows.length + 1) // heading + one row per rate + total
+      : 0;
+
   const summaryHeight =
     8 +
     6.5 + // BOOKING PAYMENT heading
@@ -1241,7 +1317,8 @@ if (addons.length) {
     (balancePaid > 0 ? 6 : 0) +
     10 + // amount already paid box
     6.5 +
-    6 * 2 + // add-on heading + two rows
+    6 * (1 + addonGstRowCount) + // add-on heading + charges + one GST row per rate
+    rateSummaryHeight +
     10 + // remaining box
     9 + // payment mode line
     24; // grand total box
@@ -1410,11 +1487,13 @@ if (addons.length) {
   // ignored the checkout discount, so the tax line was too high.
   // ADDITIONAL: no tax line at all on a no-GST booking — printing "GST Rs.0"
   // would suggest tax was worked out and came to nothing.
+  // "Room" is now in the label: with add-ons taxed at their own rates, an
+  // unqualified "GST (12%)" here would read as the tax on the whole bill.
   if (invoiceGstEnabled) {
     sumRow(
-      "GST (12%)",
+      `GST on Room (${formatRate(invoiceRoomPercent)})`,
       money(
-        Math.round(finalRoomTaxable * GST_RATE * 100) / 100,
+        Math.round(finalRoomTaxable * invoiceRoomRate * 100) / 100,
       ),
     );
   }
@@ -1487,11 +1566,49 @@ if (addons.length) {
     money(addonTotal),
   );
 
+  /*
+   * One GST line per rate the add-ons carry. A bill whose add-ons all sit at
+   * 5% prints a single "GST on Add-ons (5%)" row; a mixed bill prints one row
+   * per rate, which is what makes the tax reconcilable.
+   */
   if (invoiceGstEnabled) {
-    sumRow(
-      "GST on Add-ons (12%)",
-      money(addonGst),
-    );
+    if (addonSummary.byRate.length > 1) {
+      addonSummary.byRate.forEach((r) => {
+        sumRow(
+          `GST on Add-ons (${formatRate(r.gstRate)})`,
+          money(r.gst),
+        );
+      });
+    } else {
+      sumRow(
+        addonSummary.byRate.length === 1
+          ? `GST on Add-ons (${formatRate(addonSummary.byRate[0].gstRate)})`
+          : "GST on Add-ons",
+        money(addonGst),
+      );
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────
+     RATE-WISE GST SUMMARY
+
+     A tax invoice that charges more than one rate has to show the taxable
+     value and the tax at each rate separately. Printed only when the bill
+     actually carries two or more rates — a room-only bill, or one whose
+     add-ons all share the room's rate, stays exactly as plain as before.
+     ─────────────────────────────────────────────────────────────────── */
+
+  if (invoiceGstEnabled && gstRateRows.length > 1) {
+    sumHead("GST SUMMARY (RATE-WISE)");
+
+    gstRateRows.forEach((r) => {
+      sumRow(
+        `${formatRate(r.gstRate)} on ${money(r.taxable)}`,
+        money(r.gst),
+      );
+    });
+
+    sumRow("Total GST", money(totalGst));
   }
 
   if (

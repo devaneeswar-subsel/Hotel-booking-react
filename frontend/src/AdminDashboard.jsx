@@ -25,6 +25,8 @@ import BookingCalendar from "./BookingCalendar";
 import { printInvoicePdf } from "./invoicePdf";
 import { createPortal } from "react-dom";
 import ReportsTab from "./Components/ReportsTab";
+import GstConfigTab from "./Components/GstConfigTab";
+import { roomRateFromRoom, roomPercentFromRoom } from "./utils/billing";
 
 const API = process.env.REACT_APP_API_URL;
 const GST_RATE = 0.12;
@@ -1117,6 +1119,9 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
     price_per_night: room.price_per_night || "",
     price_double: room.price_double ?? "",
     capacity: room.capacity || 2,
+    // PER-ROOM GST. Empty means "use the 12% default", which is how every
+    // room behaves until someone sets a rate here.
+    gst_rate: room.gst_rate ?? "",
     description: room.description || "",
     is_available: room.is_available,
   });
@@ -1304,6 +1309,24 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
                 onChange={(e) => setForm({ ...form, capacity: e.target.value })}
               />
             </div>
+            <div>
+              <label className={labelCls}>GST Rate (%)</label>
+              <input
+                className={inputCls}
+                type="number"
+                min={0}
+                max={28}
+                step="0.01"
+                placeholder="12 (default)"
+                value={form.gst_rate}
+                onChange={(e) => setForm({ ...form, gst_rate: e.target.value })}
+              />
+              <div className="mt-1 text-[0.68rem] leading-snug text-gray-400">
+                Leave blank for 12%. Rooms over Rs.7,500 / night are 18% under
+                GST. Changing this affects new bookings only — stays already
+                booked keep the rate they were sold at.
+              </div>
+            </div>
           </div>
 
           {/* Description */}
@@ -1371,6 +1394,8 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
     price_per_night: "",
     price_double: "",
     capacity: 2,
+    // PER-ROOM GST. Empty means "use the 12% default".
+    gst_rate: "",
     description: "",
     image_url: "",
   });
@@ -1519,6 +1544,26 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
             />
           </div>
 
+          {/* GST rate */}
+          <div>
+            <label className={labelCls}>GST Rate (%)</label>
+            <input
+              className={inputCls}
+              type="number"
+              min={0}
+              max={28}
+              step="0.01"
+              placeholder="Leave blank for 12%"
+              value={form.gst_rate}
+              onChange={(e) => setForm({ ...form, gst_rate: e.target.value })}
+            />
+            <div className="mt-1 text-[0.68rem] leading-snug text-gray-400">
+              Hotel accommodation is 12% up to Rs.7,500 / night and 18% above.
+              The rate is locked onto each booking when it is made, so changing
+              it later never alters a stay already sold.
+            </div>
+          </div>
+
           {/* Capacity */}
           <div>
             <label className={labelCls}>Capacity (max guests)</label>
@@ -1582,12 +1627,14 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                   val: `Rs.${Number(form.price_per_night || 0).toLocaleString()}`,
                 },
                 {
-                  label: "GST (12%)",
-                  val: `Rs.${Math.round(Number(form.price_per_night || 0) * GST_RATE).toLocaleString()}`,
+                  // PER-ROOM GST: previews the rate being typed into the form
+                  // above, so the effect of changing it is visible before save.
+                  label: `GST (${roomPercentFromRoom(form)}%)`,
+                  val: `Rs.${Math.round(Number(form.price_per_night || 0) * roomRateFromRoom(form)).toLocaleString()}`,
                 },
                 {
                   label: "Guest pays — 1 guest",
-                  val: `Rs.${Math.round(Number(form.price_per_night || 0) * (1 + GST_RATE)).toLocaleString()}`,
+                  val: `Rs.${Math.round(Number(form.price_per_night || 0) * (1 + roomRateFromRoom(form))).toLocaleString()}`,
                   strong: true,
                 },
                 ...(Number(form.price_double) > 0
@@ -1597,12 +1644,12 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                         val: `Rs.${Number(form.price_double).toLocaleString()}`,
                       },
                       {
-                        label: "GST (12%)",
-                        val: `Rs.${Math.round(Number(form.price_double) * GST_RATE).toLocaleString()}`,
+                        label: `GST (${roomPercentFromRoom(form)}%) `,
+                        val: `Rs.${Math.round(Number(form.price_double) * roomRateFromRoom(form)).toLocaleString()}`,
                       },
                       {
                         label: "Guest pays — 2+ guests",
-                        val: `Rs.${Math.round(Number(form.price_double) * (1 + GST_RATE)).toLocaleString()}`,
+                        val: `Rs.${Math.round(Number(form.price_double) * (1 + roomRateFromRoom(form))).toLocaleString()}`,
                         strong: true,
                       },
                     ]
@@ -2598,6 +2645,9 @@ Number(booking.balance_paid || 0)
   const secondaryTabs = [
     { id: "vehicles", label: "Vehicle Customers", icon: BookingIcon },
     { id: "checkins", label: "Check-in Details", icon: BedIcon },
+    // Per-service GST rates for add-on charges (Food & Beverage, Laundry,
+    // Extra Bed, Room Service and anything the admin adds).
+    { id: "gst", label: "GST Configuration", icon: CreditCardIcon },
   ];
 
   const tabs = [...primaryTabs, ...secondaryTabs]; // keep this — Topbar label lookup still needs every id
@@ -3923,6 +3973,10 @@ Number(booking.balance_paid || 0)
             <ReportsTab apiFetch={apiFetch} showToast={showToast} />
           )}
 
+          {tab === "gst" && (
+            <GstConfigTab apiFetch={apiFetch} showToast={showToast} />
+          )}
+
           {tab === "book" && (
             <div>
               <div className="font-display text-[1rem] font-semibold text-navy mb-5">
@@ -4140,7 +4194,9 @@ function AdminBookingForm({ room, adminUser, onClose, showToast, onSuccess }) {
       ? Number(room.price_double)
       : Number(room.price_per_night || 0);
   const basePrice = nightly * nights;
-  const gst = Math.round(basePrice * GST_RATE * 100) / 100;
+  // Quoting a booking that does not exist yet, so the ROOM's configured rate
+  // applies. It is frozen onto the booking when this is submitted.
+  const gst = Math.round(basePrice * roomRateFromRoom(room) * 100) / 100;
   const total = basePrice + gst;
 
   async function submit(e) {
@@ -4311,7 +4367,9 @@ function AdminBookingForm({ room, adminUser, onClose, showToast, onSuccess }) {
           </div>
 
           <div className="mb-2 flex items-center justify-between text-sm">
-            <span className="text-gray-500">GST (12%)</span>
+            <span className="text-gray-500">
+              GST ({roomPercentFromRoom(room)}%)
+            </span>
 
             <span className="font-semibold text-slate-900">
               ₹{gst.toLocaleString("en-IN")}
