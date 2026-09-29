@@ -31,14 +31,27 @@ const ROW = 5.2; // summary row
 const HEAD = 5.5; // summary heading
 const BOX = 9; // boxed summary row
 
-// palette
-const NAVY = [22, 42, 78];
-const NAVY_DARK = [15, 27, 50];
-const GOLD = [193, 134, 43];
-const GOLD_SOFT = [222, 178, 92];
-const CREAM = [253, 249, 240];
-const GREY = [95, 100, 108];
-const WHITE = [255, 255, 255];
+// palettes — the invoice prints in black & white by default (mono: true).
+// Pass { mono: false } to printInvoicePdf for the navy-and-gold version.
+const PALETTE_COLOR = {
+  NAVY: [22, 42, 78],
+  NAVY_DARK: [15, 27, 50],
+  GOLD: [193, 134, 43],
+  GOLD_SOFT: [222, 178, 92],
+  CREAM: [253, 249, 240],
+  GREY: [95, 100, 108],
+  WHITE: [255, 255, 255],
+};
+
+const PALETTE_MONO = {
+  NAVY: [0, 0, 0],
+  NAVY_DARK: [0, 0, 0],
+  GOLD: [0, 0, 0],
+  GOLD_SOFT: [0, 0, 0],
+  CREAM: [255, 255, 255],
+  GREY: [70, 70, 70],
+  WHITE: [255, 255, 255],
+};
 
 // column positions
 const C_DESC = L + 4;
@@ -57,13 +70,14 @@ function formatBookingId(booking) {
 /* load the hotel crest from /public so it can be embedded in the PDF.
  *
  * It is re-drawn onto a canvas at least LOGO_MIN_PX wide (high-quality
- * smoothing, transparency kept) so the crest is embedded at print resolution
- * instead of being stretched by the PDF viewer. A logo that is already large
- * is used untouched. NOTE: this cannot add detail that /public/logo.png does
- * not have — for the sharpest result use a source of 1000px or more. */
+ * smoothing, transparency kept) so the crest is embedded at print resolution.
+ * With mono = true every visible pixel is turned pure black (or white for the
+ * light parts), so the crest prints as a clean black-and-white mark instead of
+ * a grey smudge from the gold. This cannot add detail the source file does not
+ * have — for the sharpest result use a logo of 1000px or more. */
 const LOGO_MIN_PX = 1200;
 
-async function loadLogo() {
+async function loadLogo(mono = false) {
   try {
     const res = await fetch("/logo.png");
     if (!res.ok) return null;
@@ -84,9 +98,10 @@ async function loadLogo() {
         i.src = dataUrl;
       });
 
-      if (!img.width || img.width >= LOGO_MIN_PX) return dataUrl;
+      const needsScale = img.width && img.width < LOGO_MIN_PX;
+      if (!img.width || (!needsScale && !mono)) return dataUrl;
 
-      const scale = LOGO_MIN_PX / img.width;
+      const scale = needsScale ? LOGO_MIN_PX / img.width : 1;
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(img.width * scale);
       canvas.height = Math.round(img.height * scale);
@@ -95,6 +110,19 @@ async function loadLogo() {
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      if (mono) {
+        const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const px = frame.data;
+        for (let i = 0; i < px.length; i += 4) {
+          const lum = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+          const v = lum > 225 ? 255 : 0; // alpha is left alone, edges stay smooth
+          px[i] = v;
+          px[i + 1] = v;
+          px[i + 2] = v;
+        }
+        ctx.putImageData(frame, 0, 0);
+      }
 
       return canvas.toDataURL("image/png");
     } catch {
@@ -113,6 +141,8 @@ export async function printInvoicePdf(
     checkoutDiscount = 0,
     // Signature block. Off by default; only the admin dashboard passes true.
     showSignature = false,
+    // Black & white print (the client's preferred copy). false = navy & gold.
+    mono = true,
   } = {},
 ) {
   if (!booking) return;
@@ -126,6 +156,10 @@ export async function printInvoicePdf(
         "Online";
 
   const b = booking;
+
+  const { NAVY, NAVY_DARK, GOLD, GOLD_SOFT, CREAM, GREY, WHITE } = mono
+    ? PALETTE_MONO
+    : PALETTE_COLOR;
   const addons = b.addons || [];
   const isCancelled = b.status === "cancelled";
 
@@ -313,7 +347,7 @@ export async function printInvoicePdf(
     year: "numeric",
   });
 
-  const logo = await loadLogo();
+  const logo = await loadLogo(mono);
 
   const { jsPDF } = await import("jspdf");
 
@@ -339,7 +373,7 @@ export async function printInvoicePdf(
   };
 
   function watermark() {
-    if (!logo) return;
+    if (!logo || mono) return;
     try {
       doc.saveGraphicsState();
       doc.setGState(new doc.GState({ opacity: 0.06 }));
@@ -351,6 +385,27 @@ export async function printInvoicePdf(
   }
 
   function footerBar() {
+    if (mono) {
+      // white footer with a black rule, as on the client's black & white copy
+      stroke(NAVY, 0.6);
+      doc.line(L, FOOTER_TOP, R, FOOTER_TOP);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      ink(NAVY);
+      doc.text("+91 93849 82510  |  +91 90032 51115", L, FOOTER_TOP + 7);
+      doc.text("vvgrandpark@gmail.com  |  vvgrandpark.com", L, FOOTER_TOP + 12);
+
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      doc.text("Thank you for choosing", R, FOOTER_TOP + 7, { align: "right" });
+      doc.setFont("helvetica", "bolditalic");
+      doc.text("VV Grand Park Residency.", R, FOOTER_TOP + 12, {
+        align: "right",
+      });
+      return;
+    }
+
     fill(NAVY_DARK);
     doc.rect(0, FOOTER_TOP, W, H - FOOTER_TOP, "F");
 
@@ -817,13 +872,13 @@ export async function printInvoicePdf(
 
   /* GRAND TOTAL */
 
-  fill(CREAM);
-  stroke(GOLD, 1.1);
+  fill(mono ? NAVY : CREAM);
+  stroke(mono ? NAVY : GOLD, 1.1);
   doc.rect(SX - 3, y, R - SX + 3, 20, "FD");
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  ink(GOLD);
+  ink(mono ? WHITE : GOLD);
   doc.text("GRAND TOTAL", (SX - 3 + R) / 2, y + 7.5, { align: "center" });
 
   doc.setFontSize(18);
@@ -876,7 +931,7 @@ export async function printInvoicePdf(
         doc.setGState(new doc.GState({ opacity: 0.13 }));
         doc.setFont("helvetica", "bold");
         doc.setFontSize(58);
-        ink([200, 40, 40]);
+        ink(mono ? [90, 90, 90] : [200, 40, 40]);
         doc.text("CANCELLED", W / 2, 150, { align: "center", angle: 30 });
         doc.restoreGraphicsState();
       } catch {
