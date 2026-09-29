@@ -1,17 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  invoicePdf.js — branded invoice generator
+//  invoicePdf.js — branded invoice generator (single-page layout)
 //
 //  Usage:
-//  await printInvoicePdf(booking, {
-//    paymentMode,
-//    showToast,
-//    checkoutDiscount,
-//  });
+//  await printInvoicePdf(booking, { paymentMode, showToast, checkoutDiscount });
 //
-//  Page 1: header, bill-to/from, line items, summary, grand total.
-//  Extra pages are inserted automatically when there are many add-ons.
-//  Terms & Conditions page removed.
-//  The invoice date is read at print time, so it is always today's date.
+//  Fits on ONE page for normal bookings. A second page is added only when the
+//  content genuinely cannot fit (many add-ons).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { HOTEL_GSTIN, roomGstRate, roomGstPercent } from "./utils/billing";
@@ -24,8 +18,6 @@ import {
   formatRate,
 } from "./utils/addonGst";
 
-const GST_RATE = 0.12;
-
 // page geometry (A4, mm)
 const W = 210;
 const H = 297;
@@ -33,6 +25,11 @@ const L = 15;
 const R = W - 15;
 const FOOTER_TOP = 277;
 const BOTTOM = 270;
+
+// vertical rhythm (mm) — kept in one place so the height estimate matches
+const ROW = 5.2; // summary row
+const HEAD = 5.5; // summary heading
+const BOX = 9; // boxed summary row
 
 // palette
 const NAVY = [22, 42, 78];
@@ -54,10 +51,7 @@ const money = (v) =>
 
 // invoice numbers are year-prefixed, e.g. INV-2026-0037
 function formatBookingId(booking) {
-  const year = new Date(
-    booking.created_at || Date.now(),
-  ).getFullYear();
-
+  const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
 }
 
@@ -65,17 +59,12 @@ function formatBookingId(booking) {
 async function loadLogo() {
   try {
     const res = await fetch("/logo.png");
-
     if (!res.ok) return null;
-
     const blob = await res.blob();
-
     return await new Promise((resolve, reject) => {
       const r = new FileReader();
-
       r.onload = () => resolve(r.result);
       r.onerror = reject;
-
       r.readAsDataURL(blob);
     });
   } catch {
@@ -89,11 +78,7 @@ export async function printInvoicePdf(
     paymentMode = "Online",
     showToast = () => {},
     checkoutDiscount = 0,
-    /*
-     * Signature block at the bottom right. Off by default, so the guest-facing
-     * copy printed from the check-in screen is unchanged; only the admin
-     * dashboard passes true.
-     */
+    // Signature block. Off by default; only the admin dashboard passes true.
     showSignature = false,
   } = {},
 ) {
@@ -111,67 +96,48 @@ export async function printInvoicePdf(
   const addons = b.addons || [];
   const isCancelled = b.status === "cancelled";
 
-// Booking dates — always use the dates selected during booking.
-// Do not replace them with actual check-in / check-out timestamps.
-const ci = b.check_in_date
-  ? new Date(b.check_in_date).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    })
-  : "—";
+  // Booking dates — always the dates selected during booking.
+  const ci = b.check_in_date
+    ? new Date(b.check_in_date).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
 
-const co = b.check_out_date
-  ? new Date(b.check_out_date).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    })
-  : "—";
+  const co = b.check_out_date
+    ? new Date(b.check_out_date).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
+
   const nights =
     b.check_in_date && b.check_out_date
       ? Math.max(
           1,
           Math.ceil(
-            (new Date(b.check_out_date) -
-              new Date(b.check_in_date)) /
-              86400000,
+            (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
           ),
         )
       : 1;
 
   // actual time in the room
   let stayLabel = "";
-
   if (b.actual_checkin && b.actual_checkout) {
     const mins = Math.max(
       0,
       Math.round(
-        (new Date(b.actual_checkout) -
-          new Date(b.actual_checkin)) /
-          60000,
+        (new Date(b.actual_checkout) - new Date(b.actual_checkin)) / 60000,
       ),
     );
-
     const h = Math.floor(mins / 60);
     const m = mins % 60;
-
-    stayLabel =
-      h > 0 ? `${h} hr ${m} min` : `${m} min`;
+    stayLabel = h > 0 ? `${h} hr ${m} min` : `${m} min`;
   }
 
-  /*
-   * Head count recorded at check-in.
-   *
-   * adults_count / children_count are what reception actually entered on the
-   * stepper, so they win. Only guests whose NAME was typed get a row in
-   * booking_guests, and reception is not required to name anyone beyond the
-   * primary guest — so counting rows undercounted the party. A check-in of
-   * 3 adults with one name filled in printed "1 Adult" on the invoice.
-   *
-   * The rows are still the fallback for older bookings saved before the
-   * count columns existed.
-   */
+  // Head count recorded at check-in (counts win over named rows).
   const guestRows = b.guests || [];
 
   const adultCount =
@@ -186,58 +152,30 @@ const co = b.check_out_date
       : guestRows.filter((g) => g.guest_type === "child").length || 0;
 
   const guestSummary = [
-    `${adultCount} Adult${
-      adultCount === 1 ? "" : "s"
-    }`,
-    childCount > 0
-      ? `${childCount} Child${
-          childCount === 1 ? "" : "ren"
-        }`
-      : null,
+    `${adultCount} Adult${adultCount === 1 ? "" : "s"}`,
+    childCount > 0 ? `${childCount} Child${childCount === 1 ? "" : "ren"}` : null,
   ]
     .filter(Boolean)
     .join(", ");
 
   /* ── amounts ─────────────────────────────────────────────────────────── */
 
-  // Original room price before booking discount
   const basePrice = Number(b.total_price || 0);
 
-  // ─────────────────────────────────────────────────────────────────────
-  // ORIGINAL BOOKING DISCOUNT
-  // This is the discount applied when the booking was created.
-  // It must remain separate from checkout discount.
-  // ─────────────────────────────────────────────────────────────────────
   const discountAmount = Math.max(
     0,
-    Number(
-      b.discount_applied
-        ? b.discount_amount
-        : 0,
-    ) || 0,
+    Number(b.discount_applied ? b.discount_amount : 0) || 0,
   );
 
   // PRE-TAX DISCOUNT MODEL
-  // The discount reduces the room's taxable value, then GST is charged on the
-  // reduced amount:  3000 - 500 = 2500 -> GST 450 -> total 2950.
-  // This is how a discount must appear on a GST invoice.
   const discountedRoomAmount = Math.max(
     0,
     Math.round((basePrice - discountAmount) * 100) / 100,
   );
 
-  /*
-   * ADDITIONAL: gst_enabled defaults to 1, so every existing booking prints
-   * exactly as before. Only a booking the admin issued with GST off skips
-   * the tax lines below.
-   */
   const invoiceGstEnabled = Number(b.gst_enabled ?? 1) !== 0;
 
-  /*
-   * PER-ROOM GST: the rate frozen onto THIS booking when it was sold, not
-   * whatever the room charges today. An invoice reprinted after the room was
-   * repriced must still show the tax the guest actually paid.
-   */
+  // PER-ROOM GST: the rate frozen onto THIS booking when it was sold.
   const invoiceRoomRate = roomGstRate(b);
   const invoiceRoomPercent = roomGstPercent(b);
 
@@ -249,66 +187,22 @@ const co = b.check_out_date
     Math.round((discountedRoomAmount + roomGst) * 100) / 100,
   );
 
-  // Payments already made
-  const advancePaid = Number(
-    b.advance_paid || 0,
-  );
+  const advancePaid = Number(b.advance_paid || 0);
+  const balancePaid = Number(b.balance_paid || 0);
 
-  const balancePaid = Number(
-    b.balance_paid || 0,
-  );
-
-  /*
-   * BALANCE BEFORE ANY CHECKOUT DISCOUNT.
-   *
-   * Derived from the tariff and the booking discount, NOT from
-   * b.total_amount. The backend writes the checkout discount into
-   * total_amount, so reading it here and then subtracting the checkout
-   * discount again below double-counted it — a Rs.500 discount on a
-   * Rs.2,000 balance printed Rs.820 instead of Rs.1,410, and the figure
-   * fell further every time the invoice was regenerated.
-   */
+  // Balance before any checkout discount (derived, not read from total_amount).
   const roomRemaining = Math.max(
     0,
-    Math.round(
-      (roomTotal -
-        advancePaid -
-        balancePaid) *
-        100,
-    ) / 100,
+    Math.round((roomTotal - advancePaid - balancePaid) * 100) / 100,
   );
 
-  // ─────────────────────────────────────────────────────────────────────
-  // CHECKOUT DISCOUNT
-  //
-  // This is a SECOND, separate discount applied at checkout.
-  //
-  // checkoutDiscount:
-  //   Base room discount amount
-  //
-  // checkoutDiscountGst:
-  //   GST reduction caused by checkout discount
-  //
-  // checkoutDiscountImpact:
-  //   Total reduction from the final payable amount
-  // ─────────────────────────────────────────────────────────────────────
-
-  const persistedCheckoutDiscount = Number(
-    b.checkout_discount_amount || 0,
-  );
-
-  const suppliedCheckoutDiscount = Number(
-    checkoutDiscount || 0,
-  );
-
+  const persistedCheckoutDiscount = Number(b.checkout_discount_amount || 0);
+  const suppliedCheckoutDiscount = Number(checkoutDiscount || 0);
   const rawCheckoutDiscount =
     suppliedCheckoutDiscount > 0
       ? suppliedCheckoutDiscount
       : persistedCheckoutDiscount;
 
-  // Pre-tax model: the discount reduces the taxable value, so the GST charged
-  // on it is refunded too. Total impact = discount x 1.18. Cap the discount so
-  // that combined figure can never exceed what is still owed.
   const maxCheckoutDiscount = invoiceGstEnabled
     ? Math.round((roomRemaining / (1 + invoiceRoomRate)) * 100) / 100
     : Math.round(roomRemaining * 100) / 100;
@@ -323,35 +217,12 @@ const co = b.check_out_date
     : 0;
 
   const checkoutDiscountImpact =
-    Math.round(
-      (appliedCheckoutDiscount + checkoutDiscountGst) * 100,
-    ) / 100;
+    Math.round((appliedCheckoutDiscount + checkoutDiscountGst) * 100) / 100;
 
-  // ─────────────────────────────────────────────────────────────────────
-  // ADD-ONS
-  // ─────────────────────────────────────────────────────────────────────
-
-  /*
-   * PER-SERVICE GST
-   *
-   * The room is taxed at GST_RATE (12%); each add-on is taxed at the rate the
-   * admin configured for that service — 5% for Food & Beverage, Laundry,
-   * Extra Bed and Room Service — and that rate is frozen onto the line when
-   * the charge is posted.
-   *
-   * A bill can therefore carry more than one rate, which is why this invoice
-   * prints a rate-wise GST table further down: under GST a tax invoice has to
-   * show the taxable value and the tax at each rate separately.
-   *
-   * summariseAddons stamps any line with no rate at GST_RATE, because that is
-   * what those lines were actually billed at before per-service rates
-   * existed. An old invoice therefore reprints for the identical figure.
-   */
+  // ── ADD-ONS (per-service GST) ──
   const addonSummary = summariseAddons(addons);
 
-  const addonTotal = Number(
-    b.addon_charges || 0,
-  );
+  const addonTotal = Number(b.addon_charges || 0);
 
   const addonGst = invoiceGstEnabled
     ? b.addon_gst_amount != null
@@ -359,67 +230,22 @@ const co = b.check_out_date
       : addonSummary.gst
     : 0;
 
-  const addonWithGst =
-    Math.round(
-      (addonTotal + addonGst) *
-        100,
-    ) / 100;
+  const addonWithGst = Math.round((addonTotal + addonGst) * 100) / 100;
 
-  const unpaidAddonTotal = addonSummary.unpaidTaxable;
+  const paidSoFar = Math.round((advancePaid + balancePaid) * 100) / 100;
 
-  const unpaidAddonGst = invoiceGstEnabled ? addonSummary.unpaidGst : 0;
-
-  /*
-   * Amount still payable.
-   *
-   * Computed as grand total minus everything received, so the "Remaining to
-   * Pay" box and the "Grand Total" box can never contradict each other.
-   * unpaidAddonTotal is kept below only for the add-on breakdown lines.
-   */
-  const paidSoFar =
-    Math.round((advancePaid + balancePaid) * 100) / 100;
-
-  /*
-   * GRAND TOTAL — rebuilt from first principles so it can never disagree
-   * with the backend.
-   *
-   *   room tariff
-   *   - booking discount
-   *   - checkout discount      = final room taxable value
-   *   + add-ons                = taxable value
-   *   + 12% GST on that        = grand total
-   *
-   * The previous version was `paymentTotal + addons + addonGst -
-   * checkoutDiscountImpact`. b.total_amount already contains the add-ons
-   * AND the checkout discount, so both were counted twice.
-   */
   const finalRoomTaxable = Math.max(
     0,
-    Math.round(
-      (discountedRoomAmount - appliedCheckoutDiscount) * 100,
-    ) / 100,
+    Math.round((discountedRoomAmount - appliedCheckoutDiscount) * 100) / 100,
   );
 
   const taxableTotal =
     Math.round((finalRoomTaxable + addonTotal) * 100) / 100;
 
-  /*
-   * Room and add-ons are taxed separately and then added — the room at
-   * GST_RATE, the add-ons at their own rates. With every add-on at 12% this
-   * is arithmetically the old `taxableTotal * GST_RATE`, so a legacy invoice
-   * is unchanged; with a 5% add-on it is the only correct answer.
-   *
-   * The rounding order matches the backend exactly (round each part, then
-   * sum), so this PDF can never be a paisa away from the stored total.
-   */
   const totalGst = invoiceGstEnabled
     ? Math.round((finalRoomTaxable * invoiceRoomRate + addonGst) * 100) / 100
     : 0;
 
-  /*
-   * The rate-wise GST table: the room's taxable value under 12%, then each
-   * add-on rate with its own taxable value and tax.
-   */
   const gstRateRows = gstSummaryRows({
     roomTaxable: finalRoomTaxable,
     roomRatePercent: invoiceRoomPercent,
@@ -437,106 +263,42 @@ const co = b.check_out_date
     Math.round((grandTotal - paidSoFar) * 100) / 100,
   );
 
-  const advanceMode =
-    b.advance_payment_mode ||
-    b.payment_method ||
-    "—";
+  const advanceMode = b.advance_payment_mode || b.payment_method || "—";
+  const balanceMode = b.balance_payment_mode || payLabel;
 
-  const balanceMode =
-    b.balance_payment_mode ||
-    payLabel;
-
-  // const fmtStamp = (d) =>
-    // d
-    //   ? new Date(d).toLocaleString(
-    //       "en-IN",
-    //       {
-    //         day: "2-digit",
-    //         month: "short",
-    //         year: "numeric",
-    //         hour: "2-digit",
-    //         minute: "2-digit",
-    //       },
-    //     )
-    //   : "—";
-
-  const invNo =
-    `INV-${formatBookingId(b)}`;
+  const invNo = `INV-${formatBookingId(b)}`;
 
   // read at print time
-  const today =
-    new Date().toLocaleDateString(
-      "en-IN",
-      {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      },
-    );
+  const today = new Date().toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
   const logo = await loadLogo();
 
-  const { jsPDF } =
-    await import("jspdf");
+  const { jsPDF } = await import("jspdf");
 
-  const doc = new jsPDF({
-    unit: "mm",
-    format: "a4",
-  });
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
 
   let y = 0;
   let page = 1;
 
   /* ── paint helpers ───────────────────────────────────────────────────── */
 
-  const ink = (c) =>
-    doc.setTextColor(
-      c[0],
-      c[1],
-      c[2],
-    );
-
-  const fill = (c) =>
-    doc.setFillColor(
-      c[0],
-      c[1],
-      c[2],
-    );
-
-  const stroke = (
-    c,
-    w = 0.2,
-  ) => {
-    doc.setDrawColor(
-      c[0],
-      c[1],
-      c[2],
-    );
-
+  const ink = (c) => doc.setTextColor(c[0], c[1], c[2]);
+  const fill = (c) => doc.setFillColor(c[0], c[1], c[2]);
+  const stroke = (c, w = 0.2) => {
+    doc.setDrawColor(c[0], c[1], c[2]);
     doc.setLineWidth(w);
   };
 
   function watermark() {
     if (!logo) return;
-
     try {
       doc.saveGraphicsState();
-
-      doc.setGState(
-        new doc.GState({
-          opacity: 0.06,
-        }),
-      );
-
-      doc.addImage(
-        logo,
-        "PNG",
-        22,
-        165,
-        78,
-        78,
-      );
-
+      doc.setGState(new doc.GState({ opacity: 0.06 }));
+      doc.addImage(logo, "PNG", 22, 165, 78, 78);
       doc.restoreGraphicsState();
     } catch {
       // ignore
@@ -545,432 +307,176 @@ const co = b.check_out_date
 
   function footerBar() {
     fill(NAVY_DARK);
+    doc.rect(0, FOOTER_TOP, W, H - FOOTER_TOP, "F");
 
-    doc.rect(
-      0,
-      FOOTER_TOP,
-      W,
-      H - FOOTER_TOP,
-      "F",
-    );
-
-    doc.setFont(
-      "helvetica",
-      "normal",
-    );
-
-    doc.setFontSize(8);
-
+    doc.setFont("helvetica", "normal");
     ink(WHITE);
-
     doc.setFontSize(7.5);
+    doc.text("+91 93849 82510  |  +91 90032 51115", L, FOOTER_TOP + 8);
+    doc.text("vvgrandpark@gmail.com  |  vvgrandpark.com", L, FOOTER_TOP + 13);
 
-    doc.text(
-      "+91 93849 82510  |  +91 90032 51115",
-      L,
-      FOOTER_TOP + 8,
-    );
-
-    doc.text(
-      "vvgrandpark@gmail.com  |  vvgrandpark.com",
-      L,
-      FOOTER_TOP + 13,
-    );
-
-    doc.setFont(
-      "helvetica",
-      "italic",
-    );
-
+    doc.setFont("helvetica", "italic");
     doc.setFontSize(8);
-
     ink(GOLD_SOFT);
-
-    doc.text(
-      "Thank you for choosing",
-      R,
-      FOOTER_TOP + 8,
-      {
-        align: "right",
-      },
-    );
-
-    doc.text(
-      "VV Grand Park Residency.",
-      R,
-      FOOTER_TOP + 13,
-      {
-        align: "right",
-      },
-    );
+    doc.text("Thank you for choosing", R, FOOTER_TOP + 8, { align: "right" });
+    doc.text("VV Grand Park Residency.", R, FOOTER_TOP + 13, {
+      align: "right",
+    });
   }
 
   /* ── page header ─────────────────────────────────────────────────────── */
 
-  function pageHeader(
-    continuation,
-  ) {
-    const top =
-      continuation ? 6 : 7;
+  function pageHeader(continuation) {
+    const top = continuation ? 6 : 7;
 
     if (logo) {
       try {
-        doc.addImage(
-          logo,
-          "PNG",
-          L,
-          top - 2,
-          22,
-          22,
-        );
+        doc.addImage(logo, "PNG", L, top - 2, 22, 22);
       } catch {
         // ignore
       }
     }
 
-    const tx = logo
-      ? L + 27
-      : L;
+    const tx = logo ? L + 27 : L;
 
-    doc.setFont(
-      "times",
-      "bold",
-    );
-
+    doc.setFont("times", "bold");
     doc.setFontSize(22);
-
     ink(NAVY);
+    doc.text("VV GRAND PARK", tx, top + 9);
 
-    doc.text(
-      "VV GRAND PARK",
-      tx,
-      top + 9,
-    );
-
-    doc.setFont(
-      "helvetica",
-      "normal",
-    );
-
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
-
     ink(NAVY);
+    doc.text("R E S I D E N C Y", tx + 1, top + 15);
 
-    doc.text(
-      "R E S I D E N C Y",
-      tx + 1,
-      top + 15,
-    );
-
-    stroke(
-      GOLD_SOFT,
-      0.4,
-    );
-
-    doc.line(
-      tx + 1,
-      top + 18.5,
-      tx + 55,
-      top + 18.5,
-    );
-
-    // Website sits with the hotel name in the letterhead rather than in the
-    // FROM block, so the address column reads as contact details only.
-    // Drawn above the gold rule with clearance — at top+22 it landed exactly
-    // on the rule and the descenders were cut through.
-    doc.setFont(
-      "helvetica",
-      "normal",
-    );
+    stroke(GOLD_SOFT, 0.4);
+    doc.line(tx + 1, top + 18.5, tx + 55, top + 18.5);
 
     doc.setFontSize(7.5);
-
     ink(GREY);
+    doc.text("vvgrandpark.com", tx + 1, top + 23);
 
-    doc.text(
-      "vvgrandpark.com",
-      tx + 1,
-      top + 23,
-    );
-
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(19);
-
     ink(NAVY);
+    doc.text("INVOICE", R, top + 8, { align: "right" });
 
-    doc.text(
-      "INVOICE",
-      R,
-      top + 8,
-      {
-        align: "right",
-      },
-    );
-
-    doc.setFont(
-      "helvetica",
-      "normal",
-    );
-
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-
     ink(GOLD);
-
-    doc.text(
-      continuation
-        ? `${invNo} — page ${page}`
-        : invNo,
-      R,
-      top + 14,
-      {
-        align: "right",
-      },
-    );
+    doc.text(continuation ? `${invNo} — page ${page}` : invNo, R, top + 14, {
+      align: "right",
+    });
 
     if (!continuation) {
       doc.setFontSize(8.5);
-
       ink(GREY);
-
-      doc.text(
-        `Date: ${today}`,
-        R,
-        top + 20,
-        {
-          align: "right",
-        },
-      );
+      doc.text(`Date: ${today}`, R, top + 20, { align: "right" });
     }
 
-    // Rule sits below the website line rather than through it.
-    const rule =
-      top + 27;
-
+    const rule = top + 27;
     stroke(GOLD, 0.7);
+    doc.line(L, rule, R, rule);
 
-    doc.line(
-      L,
-      rule,
-      R,
-      rule,
-    );
-
-    return rule + 7;
+    // was rule + 7 — the address block now starts higher
+    return rule + 5;
   }
 
   function newPage() {
     watermark();
     footerBar();
-
     doc.addPage();
-
     page += 1;
-
     y = pageHeader(true);
   }
 
   y = pageHeader(false);
 
-  /* ── bill to / from ──────────────────────────────────────────────────── */
+  /* ── FROM (left) / BILL TO (right) ───────────────────────────────────── */
 
-  /*
-   * FROM sits in the left column and BILL TO in the right.
-   *
-   * FX is the x position of the RIGHT column, so the guest block now uses it
-   * and the hotel block uses the left margin. The guest crest is drawn at
-   * GUEST_X, which is the same position minus the crest width, so the initial
-   * circle keeps its original offset from the name.
-   */
   const FX = 105;
   const GUEST_X = FX + 13;
+  const GUEST_W = R - GUEST_X;
+  const FROM_W = FX - L - 8;
 
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
-
   ink(GOLD);
+  doc.text("FROM", L, y);
+  doc.text("BILL TO", GUEST_X, y);
 
-  doc.text(
-    "FROM",
-    L,
-    y,
-  );
-
-  doc.text(
-    "BILL TO",
-    GUEST_X,
-    y,
-  );
-
-  y += 7;
+  y += 6;
 
   // guest crest
   fill(CREAM);
+  stroke(GOLD_SOFT, 0.3);
+  doc.circle(FX + 5, y + 1, 5.5, "FD");
 
-  stroke(
-    GOLD_SOFT,
-    0.3,
-  );
-
-  doc.circle(
-    FX + 5,
-    y + 1,
-    5.5,
-    "FD",
-  );
-
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-
   ink(GOLD);
-
-  doc.text(
-    (
-      b.guest_name ||
-      "G"
-    )
-      .charAt(0)
-      .toUpperCase(),
-    FX + 5,
-    y + 2.5,
-    {
-      align: "center",
-    },
-  );
-
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
+  doc.text((b.guest_name || "G").charAt(0).toUpperCase(), FX + 5, y + 2.5, {
+    align: "center",
+  });
 
   doc.setFontSize(12);
-
   ink(NAVY);
+  doc.text(b.guest_name || "Guest", GUEST_X, y + 2);
+  doc.text("VV Grand Park Residency", L, y + 2);
 
-  doc.text(
-    b.guest_name ||
-      "Guest",
-    GUEST_X,
-    y + 2,
-  );
-
-  doc.text(
-    "VV Grand Park Residency",
-    L,
-    y + 2,
-  );
-
-  doc.setFont(
-    "helvetica",
-    "normal",
-  );
-
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
-
   ink(GREY);
 
-  const emailLines =
-    doc.splitTextToSize(
-      b.email || "",
-      80,
-    );
+  // guest details, wrapped to the BILL TO column
+  let guestY = y + 8;
 
-  // Guest details now live in the right column, wrapped to the space between
-  // GUEST_X and the right margin so nothing can run off the page.
-  const GUEST_W = R - GUEST_X;
-
-  const emailWrapped = doc.splitTextToSize(b.email || "", GUEST_W);
-
-  doc.text(
-    emailWrapped,
-    GUEST_X,
-    y + 9,
-  );
-
-  let guestY = y + 9 + emailWrapped.length * 4.5;
+  if (b.email) {
+    const emailWrapped = doc.splitTextToSize(b.email, GUEST_W);
+    doc.text(emailWrapped, GUEST_X, guestY);
+    guestY += emailWrapped.length * 4.3;
+  }
 
   if (b.phone) {
     doc.text(String(b.phone), GUEST_X, guestY);
-
-    guestY += 4.5;
+    guestY += 4.3;
   }
 
-  // Optional billing address, wrapped to the BILL TO column width.
   if (b.customer_address) {
     const addressLines = doc.splitTextToSize(
       String(b.customer_address),
       GUEST_W,
     );
-
     doc.text(addressLines, GUEST_X, guestY);
-
-    guestY += addressLines.length * 4.5;
+    guestY += addressLines.length * 4.3;
   }
 
   if (b.gst_number) {
     doc.setFont("helvetica", "bold");
-
     doc.text(`GSTIN: ${b.gst_number}`, GUEST_X, guestY);
-
     doc.setFont("helvetica", "normal");
-
-    guestY += 4.5;
+    guestY += 4.3;
   }
 
-  // Hotel details in the left column, wrapped so the long phone/email line
-  // cannot reach across into the BILL TO block.
-  const FROM_W = FX - L - 8;
-
+  // hotel details (tighter spacing than before)
   doc.text(
     doc.splitTextToSize("3/4/D, Thanjai Saalai, Thiruvarur - 610004", FROM_W),
     L,
-    y + 9,
+    y + 8,
   );
-
   doc.text(
-    doc.splitTextToSize(
-      "+91 93849 82510  |  +91 90032 51115",
-      FROM_W,
-    ),
+    doc.splitTextToSize("+91 93849 82510  |  +91 90032 51115", FROM_W),
     L,
-    y + 16,
+    y + 12.5,
   );
+  doc.text("vvgrandpark@gmail.com", L, y + 17);
 
-  doc.text(
-    "vvgrandpark@gmail.com",
-    L,
-    y + 21,
-  );
-
-  // The hotel's own GSTIN. Bold so it reads as a tax field rather than another
-  // contact line.
   doc.setFont("helvetica", "bold");
-
-  doc.text(
-    `GSTIN: ${HOTEL_GSTIN}`,
-    L,
-    y + 28,
-  );
-
+  doc.text(`GSTIN: ${HOTEL_GSTIN}`, L, y + 22.5);
   doc.setFont("helvetica", "normal");
 
-  // Whichever column is taller decides where the table starts.
-  y =
-    Math.max(
-      guestY,
-      y + 33,
-    ) + 6;
+  // the taller column decides where the table starts
+  y = Math.max(guestY, y + 25) + 3;
 
   /* ── line-item table ─────────────────────────────────────────────────── */
 
@@ -978,856 +484,360 @@ const co = b.check_out_date
 
   function tableHead() {
     fill(GOLD);
+    doc.rect(L, y, R - L, 8, "F");
 
-    doc.rect(
-      L,
-      y,
-      R - L,
-      9,
-      "F",
-    );
-
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-
     ink(WHITE);
+    doc.text("DESCRIPTION", C_DESC, y + 5.4);
+    doc.text("DETAILS", C_DETAIL, y + 5.4);
+    doc.text("AMOUNT", R - 4, y + 5.4, { align: "right" });
 
-    doc.text(
-      "DESCRIPTION",
-      C_DESC,
-      y + 6,
-    );
-
-    doc.text(
-      "DETAILS",
-      C_DETAIL,
-      y + 6,
-    );
-
-    doc.text(
-      "AMOUNT",
-      R - 4,
-      y + 6,
-      {
-        align: "right",
-      },
-    );
-
-    y += 9;
+    y += 8;
   }
 
-  function tableRow(
-    desc,
-    detail,
-    amount,
-  ) {
-    const dLines =
-      doc.splitTextToSize(
-        String(desc ?? ""),
-        C_DESC_W,
-      );
-
-    const tLines =
-      doc.splitTextToSize(
-        String(detail ?? ""),
-        C_DETAIL_W,
-      );
+  function tableRow(desc, detail, amount) {
+    const dLines = doc.splitTextToSize(String(desc ?? ""), C_DESC_W);
+    const tLines = doc.splitTextToSize(String(detail ?? ""), C_DETAIL_W);
 
     const h = Math.max(
-      9,
-      Math.max(
-        dLines.length,
-        tLines.length,
-      ) *
-        4.4 +
-        4.5,
+      7.5,
+      Math.max(dLines.length, tLines.length) * 4.2 + 3.2,
     );
 
-    if (
-      y + h >
-      BOTTOM
-    ) {
+    if (y + h > BOTTOM) {
       newPage();
       tableHead();
     }
 
     if (stripe % 2 === 1) {
       fill(CREAM);
-
-      doc.rect(
-        L,
-        y,
-        R - L,
-        h,
-        "F",
-      );
+      doc.rect(L, y, R - L, h, "F");
     }
-
     stripe += 1;
 
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
-
     ink(NAVY);
+    doc.text(dLines, C_DESC, y + 5);
 
-    doc.text(
-      dLines,
-      C_DESC,
-      y + 5.8,
-    );
-
-    doc.setFont(
-      "helvetica",
-      "normal",
-    );
-
+    doc.setFont("helvetica", "normal");
     ink(GREY);
+    doc.text(tLines, C_DETAIL, y + 5);
 
-    doc.text(
-      tLines,
-      C_DETAIL,
-      y + 5.8,
-    );
-
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
+    doc.setFont("helvetica", "bold");
     ink(NAVY);
-
-    doc.text(
-      String(amount),
-      R - 4,
-      y + 5.8,
-      {
-        align: "right",
-      },
-    );
+    doc.text(String(amount), R - 4, y + 5, { align: "right" });
 
     y += h;
 
-    stroke(
-      GOLD_SOFT,
-      0.15,
-    );
-
-    doc.line(
-      L,
-      y,
-      R,
-      y,
-    );
+    stroke(GOLD_SOFT, 0.15);
+    doc.line(L, y, R, y);
   }
 
   function sectionRow(label) {
-    if (
-      y + 9 >
-      BOTTOM
-    ) {
+    if (y + 8 > BOTTOM) {
       newPage();
       tableHead();
     }
 
     fill(CREAM);
+    doc.rect(L, y, R - L, 7, "F");
 
-    doc.rect(
-      L,
-      y,
-      R - L,
-      8,
-      "F",
-    );
-
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(7.5);
-
     ink(GOLD);
+    doc.text(label, C_DESC, y + 4.8);
 
-    doc.text(
-      label,
-      C_DESC,
-      y + 5.5,
-    );
+    y += 7;
 
-    y += 8;
-
-    stroke(
-      GOLD_SOFT,
-      0.2,
-    );
-
-    doc.line(
-      L,
-      y,
-      R,
-      y,
-    );
+    stroke(GOLD_SOFT, 0.2);
+    doc.line(L, y, R, y);
 
     stripe = 0;
   }
 
-  stroke(
-    GOLD_SOFT,
-    0.3,
-  );
-
+  stroke(GOLD_SOFT, 0.3);
   tableHead();
 
   tableRow(
-    `${b.room_type} — Room ${
-      b.room_number ||
-      b.room_id
-    }`,
-    `${nights} night${
-      nights > 1 ? "s" : ""
-    }`,
+    `${b.room_type} — Room ${b.room_number || b.room_id}`,
+    `${nights} night${nights > 1 ? "s" : ""}`,
     money(basePrice),
   );
+  tableRow("Check-in", ci, "—");
+  tableRow("Check-out", co, "—");
+  if (stayLabel) tableRow("Time Stayed", stayLabel, "—");
+  tableRow("Guests", guestSummary, "—");
 
-  tableRow(
-    "Check-in",
-    ci,
-    "—",
-  );
-
-  tableRow(
-    "Check-out",
-    co,
-    "—",
-  );
-
-  if (stayLabel) {
-    tableRow(
-      "Time Stayed",
-      stayLabel,
-      "—",
-    );
+  // payment history
+  if (advancePaid > 0 || balancePaid > 0) {
+    sectionRow("PAYMENT HISTORY");
+    if (advancePaid > 0) {
+      tableRow("Advance Payment", advanceMode, money(advancePaid));
+    }
+    if (balancePaid > 0) {
+      tableRow("Balance Payment", balanceMode, money(balancePaid));
+    }
   }
 
-  tableRow(
-    "Guests",
-    guestSummary,
-    "—",
-  );
+  // add-ons — each line prints the rate it was billed at
+  if (addons.length) {
+    sectionRow("ADD-ON CHARGES");
 
-// payment history
-if (
-  advancePaid > 0 ||
-  balancePaid > 0
-) {
-  sectionRow(
-    "PAYMENT HISTORY",
-  );
+    addons.forEach((a) => {
+      const rate = addonLineRate(a);
+      const qty = Number(a.quantity ?? 1);
+      const unit =
+        a.unit_price != null ? Number(a.unit_price) : addonLineTaxable(a);
 
-  if (advancePaid > 0) {
-    tableRow(
-      `Advance Payment`,
-      advanceMode,
-      money(advancePaid),
-    );
+      const detail = [
+        qty > 1 ? `${qty} x ${money(unit)}` : null,
+        `GST ${formatRate(rate)} ${money(addonLineGst(a))}`,
+      ]
+        .filter(Boolean)
+        .join("   ");
+
+      tableRow(a.label, detail, money(addonLineTaxable(a)));
+    });
   }
-
-  if (balancePaid > 0) {
-    tableRow(
-      `Balance Payment`,
-      balanceMode,
-      money(balancePaid),
-    );
-  }
-}
-// add-ons
-if (addons.length) {
-  sectionRow(
-    "ADD-ON CHARGES",
-  );
-
-  /*
-   * Each line prints the rate it was billed at, not the catalog's current
-   * rate. Two services on one bill can legitimately sit at different rates,
-   * and a guest looking at the tax column has to be able to see why.
-   *
-   * The AMOUNT column stays the TAXABLE value, exactly as before, so it keeps
-   * adding up to the "Add-on Charges" figure in the summary below. The tax is
-   * shown in the detail column and totalled in the GST summary.
-   */
-  addons.forEach((a) => {
-    const rate = addonLineRate(a);
-    const qty = Number(a.quantity ?? 1);
-    const unit =
-      a.unit_price != null ? Number(a.unit_price) : addonLineTaxable(a);
-
-    const detail = [
-      qty > 1 ? `${qty} x ${money(unit)}` : null,
-      `GST ${formatRate(rate)} ${money(addonLineGst(a))}`,
-    ]
-      .filter(Boolean)
-      .join("   ");
-
-    tableRow(
-      a.label,
-      detail,
-      money(addonLineTaxable(a)),
-    );
-  });
-}
 
   /* ── summary ─────────────────────────────────────────────────────────── */
 
   const SX = 100;
 
-  /*
-   * The summary block runs from BOOKING PAYMENT down to the GRAND TOTAL box.
-   * Its height varies with which discount sections apply, so measure it
-   * instead of guessing — a fixed reserve pushed the grand total under the
-   * footer bar whenever both discounts were present.
-   *   heading 6.5 | row 6 | boxed row 10 | payment-mode line 9 | total box 24
-   */
-  /*
-   * Per-service GST adds rows here, so the reserve has to grow with them:
-   * one add-on GST row per rate instead of a fixed single row, and the
-   * rate-wise summary block when the bill carries more than one rate. A
-   * fixed reserve would push the grand total under the footer bar.
-   */
+  // The ADD-ON block is only worth printing when there is something in it.
+  const showAddonBlock = addons.length > 0 || addonTotal > 0;
+
   const addonGstRowCount = Math.max(1, addonSummary.byRate.length);
   const rateSummaryHeight =
     invoiceGstEnabled && gstRateRows.length > 1
-      ? 6.5 + 6 * (gstRateRows.length + 1) // heading + one row per rate + total
+      ? HEAD + ROW * (gstRateRows.length + 1)
       : 0;
 
+  // Estimate of the whole summary (down to and including the grand total box)
   const summaryHeight =
-    8 +
-    6.5 + // BOOKING PAYMENT heading
-    6 * 2 + // room charges + GST
-    (discountAmount > 0 ? 6 * 2 : 0) + // discount + total before discount
-    (appliedCheckoutDiscount > 0 ? 6.5 + 6 + 10 : 0) + // checkout section
-    (advancePaid > 0 ? 6 : 0) +
-    (balancePaid > 0 ? 6 : 0) +
-    10 + // amount already paid box
-    6.5 +
-    6 * (1 + addonGstRowCount) + // add-on heading + charges + one GST row per rate
+    6 + // top gap
+    HEAD +
+    ROW * 2 + // room charges + GST
+    (discountAmount > 0 ? ROW : 0) +
+    (appliedCheckoutDiscount > 0 ? ROW : 0) +
+    (discountAmount > 0 || appliedCheckoutDiscount > 0 ? ROW : 0) +
+    (appliedCheckoutDiscount > 0 && invoiceGstEnabled
+      ? HEAD + ROW * 2
+      : 0) +
+    (advancePaid > 0 ? ROW : 0) +
+    (balancePaid > 0 ? ROW : 0) +
+    BOX + // amount already paid
+    (showAddonBlock ? HEAD + ROW * (1 + addonGstRowCount) : 0) +
     rateSummaryHeight +
-    10 + // remaining box
-    9 + // payment mode line
-    24; // grand total box
+    BOX + // remaining / settled box
+    8 + // payment mode line
+    22; // grand total box
 
   if (y + summaryHeight > BOTTOM) {
     newPage();
   }
 
-  y += 8;
+  y += 6;
 
   function sumHead(label) {
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(7.5);
-
     ink(GOLD);
-
-    doc.text(
-      label,
-      SX,
-      y,
-    );
-
-    y += 6.5;
+    doc.text(label, SX, y);
+    y += HEAD;
   }
 
-  function sumRow(
-    label,
-    val,
-  ) {
-    doc.setFont(
-      "helvetica",
-      "normal",
-    );
-
+  function sumRow(label, val) {
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(8.5);
-
     ink(GREY);
+    doc.text(label, SX, y);
 
-    doc.text(
-      label,
-      SX,
-      y,
-    );
-
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
+    doc.setFont("helvetica", "bold");
     ink(NAVY);
+    doc.text(val, R, y, { align: "right" });
 
-    doc.text(
-      val,
-      R,
-      y,
-      {
-        align: "right",
-      },
-    );
-
-    y += 6;
+    y += ROW;
   }
 
-  function sumBox(
-    label,
-    val,
-  ) {
+  function sumBox(label, val) {
     fill(CREAM);
+    stroke(GOLD, 0.5);
+    doc.rect(SX - 3, y - 4.4, R - SX + 3, 8, "FD");
 
-    stroke(
-      GOLD,
-      0.5,
-    );
-
-    doc.rect(
-      SX - 3,
-      y - 4.6,
-      R - SX + 3,
-      8.5,
-      "FD",
-    );
-
-    doc.setFont(
-      "helvetica",
-      "bold",
-    );
-
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
-
     ink(NAVY);
-
-    doc.text(
-      label,
-      SX,
-      y,
-    );
+    doc.text(label, SX, y);
 
     ink(GOLD);
+    doc.text(val, R - 3, y, { align: "right" });
 
-    doc.text(
-      val,
-      R - 3,
-      y,
-      {
-        align: "right",
-      },
-    );
-
-    y += 10;
+    y += BOX;
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
-     BOOKING PAYMENT
-     ─────────────────────────────────────────────────────────────────── */
+  /* BOOKING PAYMENT */
 
-  sumHead(
-    "BOOKING PAYMENT",
-  );
+  sumHead("BOOKING PAYMENT");
 
-  // Original room tariff
-  sumRow(
-    "Room Charges",
-    money(basePrice),
-  );
+  sumRow("Room Charges", money(basePrice));
 
-  // Both discounts come off the tariff BEFORE tax, so the rows must read
-  // tariff -> discounts -> taxable value -> GST. This is the order a GST
-  // invoice has to follow.
-  if (
-    discountAmount > 0
-  ) {
-    sumRow(
-      "Booking Discount",
-      `- ${money(
-        discountAmount,
-      )}`,
-    );
+  if (discountAmount > 0) {
+    sumRow("Booking Discount", `- ${money(discountAmount)}`);
   }
 
-  if (
-    appliedCheckoutDiscount > 0
-  ) {
-    sumRow(
-      "Checkout Discount",
-      `- ${money(
-        appliedCheckoutDiscount,
-      )}`,
-    );
+  if (appliedCheckoutDiscount > 0) {
+    sumRow("Checkout Discount", `- ${money(appliedCheckoutDiscount)}`);
   }
 
-  if (
-    discountAmount > 0 ||
-    appliedCheckoutDiscount > 0
-  ) {
-    sumRow(
-      "Taxable Value (Room)",
-      money(finalRoomTaxable),
-    );
+  if (discountAmount > 0 || appliedCheckoutDiscount > 0) {
+    sumRow("Taxable Value (Room)", money(finalRoomTaxable));
   }
 
-  // GST is charged on the room value AFTER both discounts. Using roomGst here
-  // ignored the checkout discount, so the tax line was too high.
-  // ADDITIONAL: no tax line at all on a no-GST booking — printing "GST Rs.0"
-  // would suggest tax was worked out and came to nothing.
-  // "Room" is now in the label: with add-ons taxed at their own rates, an
-  // unqualified "GST (12%)" here would read as the tax on the whole bill.
   if (invoiceGstEnabled) {
     sumRow(
       `GST on Room (${formatRate(invoiceRoomPercent)})`,
-      money(
-        Math.round(finalRoomTaxable * invoiceRoomRate * 100) / 100,
-      ),
+      money(Math.round(finalRoomTaxable * invoiceRoomRate * 100) / 100),
     );
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
-     CHECKOUT DISCOUNT
-     ─────────────────────────────────────────────────────────────────── */
+  /* CHECKOUT DISCOUNT */
 
-  if (
-    appliedCheckoutDiscount >
-    0
-  ) {
-    sumHead(
-      "CHECKOUT / FINAL DISCOUNT",
-    );
-
-    // The discount itself is already listed above with the booking discount.
-    // What belongs here is the GST it reverses, so the guest can see why the
-    // bill drops by more than the discount amount.
-    if (invoiceGstEnabled) {
-      sumRow(
-        "GST reversed on discount",
-        `- ${money(
-          checkoutDiscountGst,
-        )}`,
-      );
-
-      sumRow(
-        "Total guest saving",
-        money(checkoutDiscountImpact),
-      );
-    }
+  if (appliedCheckoutDiscount > 0 && invoiceGstEnabled) {
+    sumHead("CHECKOUT / FINAL DISCOUNT");
+    sumRow("GST reversed on discount", `- ${money(checkoutDiscountGst)}`);
+    sumRow("Total guest saving", money(checkoutDiscountImpact));
   }
 
-  // Payment history
+  // payment history
   if (advancePaid > 0) {
-    sumRow(
-      `Advance — ${advanceMode}`,
-      money(advancePaid),
-    );
+    sumRow(`Advance — ${advanceMode}`, money(advancePaid));
   }
 
   if (balancePaid > 0) {
-    sumRow(
-      `Balance — ${balanceMode}`,
-      money(balancePaid),
-    );
+    sumRow(`Balance — ${balanceMode}`, money(balancePaid));
   }
 
   sumBox(
-    isCancelled
-      ? "Refunded (Cancelled)"
-      : "Amount Already Paid",
-    money(
-      advancePaid +
-        balancePaid,
-    ),
+    isCancelled ? "Refunded (Cancelled)" : "Amount Already Paid",
+    money(advancePaid + balancePaid),
   );
 
-  /* ─────────────────────────────────────────────────────────────────────
-     ADD-ON CHARGES
-     ─────────────────────────────────────────────────────────────────── */
+  /* ADD-ON CHARGES — skipped entirely when there are none */
 
-  sumHead(
-    "ADD-ON CHARGES",
-  );
+  if (showAddonBlock) {
+    sumHead("ADD-ON CHARGES");
 
-  sumRow(
-    "Add-on Charges",
-    money(addonTotal),
-  );
+    sumRow("Add-on Charges", money(addonTotal));
 
-  /*
-   * One GST line per rate the add-ons carry. A bill whose add-ons all sit at
-   * 5% prints a single "GST on Add-ons (5%)" row; a mixed bill prints one row
-   * per rate, which is what makes the tax reconcilable.
-   */
-  if (invoiceGstEnabled) {
-    if (addonSummary.byRate.length > 1) {
-      addonSummary.byRate.forEach((r) => {
+    if (invoiceGstEnabled) {
+      if (addonSummary.byRate.length > 1) {
+        addonSummary.byRate.forEach((r) => {
+          sumRow(`GST on Add-ons (${formatRate(r.gstRate)})`, money(r.gst));
+        });
+      } else {
         sumRow(
-          `GST on Add-ons (${formatRate(r.gstRate)})`,
-          money(r.gst),
+          addonSummary.byRate.length === 1
+            ? `GST on Add-ons (${formatRate(addonSummary.byRate[0].gstRate)})`
+            : "GST on Add-ons",
+          money(addonGst),
         );
-      });
-    } else {
-      sumRow(
-        addonSummary.byRate.length === 1
-          ? `GST on Add-ons (${formatRate(addonSummary.byRate[0].gstRate)})`
-          : "GST on Add-ons",
-        money(addonGst),
-      );
+      }
     }
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
-     RATE-WISE GST SUMMARY
-
-     A tax invoice that charges more than one rate has to show the taxable
-     value and the tax at each rate separately. Printed only when the bill
-     actually carries two or more rates — a room-only bill, or one whose
-     add-ons all share the room's rate, stays exactly as plain as before.
-     ─────────────────────────────────────────────────────────────────── */
+  /* RATE-WISE GST SUMMARY — only when the bill carries 2+ rates */
 
   if (invoiceGstEnabled && gstRateRows.length > 1) {
     sumHead("GST SUMMARY (RATE-WISE)");
 
     gstRateRows.forEach((r) => {
-      sumRow(
-        `${formatRate(r.gstRate)} on ${money(r.taxable)}`,
-        money(r.gst),
-      );
+      sumRow(`${formatRate(r.gstRate)} on ${money(r.taxable)}`, money(r.gst));
     });
 
     sumRow("Total GST", money(totalGst));
   }
 
-  if (
-    remaining > 0
-  ) {
-    sumBox(
-      "Remaining to Pay",
-      money(remaining),
-    );
-  } else if (
-    addonWithGst > 0
-  ) {
-    sumBox(
-      "Add-ons Paid",
-      money(addonWithGst),
-    );
+  if (remaining > 0) {
+    sumBox("Remaining to Pay", money(remaining));
+  } else if (addonWithGst > 0) {
+    sumBox("Add-ons Paid", money(addonWithGst));
   } else {
-    sumBox(
-      "Fully Settled",
-      money(0),
-    );
+    sumBox("Fully Settled", money(0));
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
-     PAYMENT STATUS
-     ─────────────────────────────────────────────────────────────────── */
+  /* PAYMENT STATUS */
 
-  doc.setFont(
-    "helvetica",
-    "normal",
-  );
-
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
-
   ink(GREY);
+  doc.text("Payment Mode:", SX, y);
 
-  doc.text(
-    "Payment Mode:",
-    SX,
-    y,
-  );
-
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
+  doc.setFont("helvetica", "bold");
   ink(GOLD);
+  doc.text(payLabel, SX + 22, y);
 
-  doc.text(
-    payLabel,
-    SX + 22,
-    y,
-  );
-
-  doc.setFont(
-    "helvetica",
-    "normal",
-  );
-
+  doc.setFont("helvetica", "normal");
   ink(GREY);
+  doc.text("Status:", SX + 48, y);
 
-  doc.text(
-    "Status:",
-    SX + 48,
-    y,
-  );
-
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
+  doc.setFont("helvetica", "bold");
   ink(GOLD);
+  doc.text(remaining <= 0 ? "PAID" : "PENDING", SX + 59, y);
 
-  doc.text(
-    remaining <= 0
-      ? "PAID"
-      : "PENDING",
-    SX + 59,
-    y,
-  );
+  y += 8;
 
-  y += 9;
-
-  /*
-   * Signature geometry, needed here as well as below: if the signature will
-   * not fit beneath the GRAND TOTAL box, the box moves to the next page too,
-   * so the two stay together instead of the signature going over alone.
-   */
-  const SIG_W = 55;
-  const SIG_H = 18;
-  const SIG_GAP = 6;
-  const SIG_CLEARANCE = 4;
-
-  // the box is 20mm tall — if it will not clear the footer, move it over
-  const signatureFits =
-    !showSignature ||
-    y + 20 + SIG_CLEARANCE + SIG_H <= FOOTER_TOP - SIG_GAP;
-
-  if (y + 22 > BOTTOM || !signatureFits) {
+  // Only the grand total decides whether a new page is needed. The signature
+  // no longer has a say — it sits beside the total (below), not under it.
+  if (y + 22 > BOTTOM) {
     newPage();
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
-     GRAND TOTAL
-     ─────────────────────────────────────────────────────────────────── */
+  /* GRAND TOTAL */
 
   fill(CREAM);
+  stroke(GOLD, 1.1);
+  doc.rect(SX - 3, y, R - SX + 3, 20, "FD");
 
-  stroke(
-    GOLD,
-    1.1,
-  );
-
-  doc.rect(
-    SX - 3,
-    y,
-    R - SX + 3,
-    20,
-    "FD",
-  );
-
-  doc.setFont(
-    "helvetica",
-    "bold",
-  );
-
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-
   ink(GOLD);
-
-  doc.text(
-    "GRAND TOTAL",
-    (SX - 3 + R) / 2,
-    y + 7.5,
-    {
-      align: "center",
-    },
-  );
+  doc.text("GRAND TOTAL", (SX - 3 + R) / 2, y + 7.5, { align: "center" });
 
   doc.setFontSize(18);
-
   doc.text(
-    isCancelled
-      ? "Rs.0"
-      : money(grandTotal),
+    isCancelled ? "Rs.0" : money(grandTotal),
     (SX - 3 + R) / 2,
     y + 16.5,
-    {
-      align: "center",
-    },
+    { align: "center" },
   );
 
-  /* ── authorised signatory (admin copy only) ──────────────────────────── */
+  /* AUTHORISED SIGNATORY (admin copy only)
+   *
+   * Drawn in the empty space to the LEFT of the grand total box, in the same
+   * vertical band, so it costs no extra height and can never push the total
+   * onto a second page. */
 
   if (showSignature) {
-    /*
-     * Sits under the GRAND TOTAL box, right aligned with it.
-     *
-     * If the totals ran long enough that there is no room left above the
-     * footer bar, the block moves to a new page rather than printing on top
-     * of it.
-     */
-    /*
-     * Sit just above the footer bar, in the white space the totals leave
-     * behind, rather than immediately under the GRAND TOTAL box.
-     *
-     * Anchoring it to the box needed ~50mm of clear space below the totals,
-     * so on an ordinary invoice with no add-ons the block was pushed onto a
-     * second page while most of page one sat empty. Anchoring it to the
-     * bottom uses that space and keeps the whole invoice on one page.
-     *
-     * minTop still keeps it clear of the GRAND TOTAL box; only when the
-     * totals genuinely run down that far does it move to a new page.
-     */
-    const preferredTop = FOOTER_TOP - SIG_GAP - SIG_H;
-    const minTop = y + 20 + SIG_CLEARANCE;
-    let sigTop = Math.max(minTop, preferredTop);
-
-    if (sigTop + SIG_H > FOOTER_TOP - SIG_GAP) {
-      watermark();
-      footerBar();
-      doc.addPage();
-      pageHeader(true);
-      sigTop = 60;
-    }
+    const sigRight = SX - 3 - 8; // right edge, a little clear of the box
+    const sigW = 55;
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     ink(GREY);
-
-    doc.text(
-      "For VV Grand Park Residency",
-      R,
-      sigTop,
-      { align: "right" },
-    );
+    doc.text("For VV Grand Park Residency", sigRight, y + 3.5, {
+      align: "right",
+    });
 
     // space left blank for a physical signature
     stroke(GREY, 0.4);
-
-    doc.line(
-      R - SIG_W,
-      sigTop + 13,
-      R,
-      sigTop + 13,
-    );
+    doc.line(sigRight - sigW, y + 14, sigRight, y + 14);
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
     ink(NAVY);
-
-    doc.text(
-      "Authorised Signatory",
-      R,
-      sigTop + SIG_H,
-      { align: "right" },
-    );
+    doc.text("Authorised Signatory", sigRight, y + 18.5, { align: "right" });
   }
 
   watermark();
@@ -1836,48 +846,18 @@ if (addons.length) {
   /* ── cancelled watermark ─────────────────────────────────────────────── */
 
   if (isCancelled) {
-    const total =
-      doc.getNumberOfPages();
+    const total = doc.getNumberOfPages();
 
-    for (
-      let p = 1;
-      p <= total;
-      p += 1
-    ) {
+    for (let p = 1; p <= total; p += 1) {
       doc.setPage(p);
 
       try {
         doc.saveGraphicsState();
-
-        doc.setGState(
-          new doc.GState({
-            opacity: 0.13,
-          }),
-        );
-
-        doc.setFont(
-          "helvetica",
-          "bold",
-        );
-
+        doc.setGState(new doc.GState({ opacity: 0.13 }));
+        doc.setFont("helvetica", "bold");
         doc.setFontSize(58);
-
-        ink([
-          200,
-          40,
-          40,
-        ]);
-
-        doc.text(
-          "CANCELLED",
-          W / 2,
-          150,
-          {
-            align: "center",
-            angle: 30,
-          },
-        );
-
+        ink([200, 40, 40]);
+        doc.text("CANCELLED", W / 2, 150, { align: "center", angle: 30 });
         doc.restoreGraphicsState();
       } catch {
         // skip on older jsPDF
@@ -1889,35 +869,15 @@ if (addons.length) {
 
   doc.autoPrint();
 
-  const pdfUrl =
-    URL.createObjectURL(
-      doc.output("blob"),
-    );
+  const pdfUrl = URL.createObjectURL(doc.output("blob"));
 
-  const printWindow =
-    window.open(
-      pdfUrl,
-      "_blank",
-    );
+  const printWindow = window.open(pdfUrl, "_blank");
 
   if (!printWindow) {
-    showToast(
-      "Please allow pop-ups to print the invoice.",
-      "error",
-    );
-
-    URL.revokeObjectURL(
-      pdfUrl,
-    );
-
+    showToast("Please allow pop-ups to print the invoice.", "error");
+    URL.revokeObjectURL(pdfUrl);
     return;
   }
 
-  setTimeout(
-    () =>
-      URL.revokeObjectURL(
-        pdfUrl,
-      ),
-    60000,
-  );
+  setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
 }
