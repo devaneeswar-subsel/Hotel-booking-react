@@ -46,8 +46,7 @@ const C_DETAIL = 100;
 const C_DESC_W = C_DETAIL - C_DESC - 4;
 const C_DETAIL_W = 48;
 
-const money = (v) =>
-  `Rs.${Math.round(Number(v) || 0).toLocaleString("en-IN")}`;
+const money = (v) => `Rs.${Math.round(Number(v) || 0).toLocaleString("en-IN")}`;
 
 // invoice numbers are year-prefixed, e.g. INV-2026-0037
 function formatBookingId(booking) {
@@ -55,18 +54,52 @@ function formatBookingId(booking) {
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
 }
 
-/* load the hotel crest from /public so it can be embedded in the PDF */
+/* load the hotel crest from /public so it can be embedded in the PDF.
+ *
+ * It is re-drawn onto a canvas at least LOGO_MIN_PX wide (high-quality
+ * smoothing, transparency kept) so the crest is embedded at print resolution
+ * instead of being stretched by the PDF viewer. A logo that is already large
+ * is used untouched. NOTE: this cannot add detail that /public/logo.png does
+ * not have — for the sharpest result use a source of 1000px or more. */
+const LOGO_MIN_PX = 1200;
+
 async function loadLogo() {
   try {
     const res = await fetch("/logo.png");
     if (!res.ok) return null;
     const blob = await res.blob();
-    return await new Promise((resolve, reject) => {
+
+    const dataUrl = await new Promise((resolve, reject) => {
       const r = new FileReader();
       r.onload = () => resolve(r.result);
       r.onerror = reject;
       r.readAsDataURL(blob);
     });
+
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = reject;
+        i.src = dataUrl;
+      });
+
+      if (!img.width || img.width >= LOGO_MIN_PX) return dataUrl;
+
+      const scale = LOGO_MIN_PX / img.width;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      return canvas.toDataURL("image/png");
+    } catch {
+      return dataUrl;
+    }
   } catch {
     return null;
   }
@@ -153,7 +186,9 @@ export async function printInvoicePdf(
 
   const guestSummary = [
     `${adultCount} Adult${adultCount === 1 ? "" : "s"}`,
-    childCount > 0 ? `${childCount} Child${childCount === 1 ? "" : "ren"}` : null,
+    childCount > 0
+      ? `${childCount} Child${childCount === 1 ? "" : "ren"}`
+      : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -239,8 +274,7 @@ export async function printInvoicePdf(
     Math.round((discountedRoomAmount - appliedCheckoutDiscount) * 100) / 100,
   );
 
-  const taxableTotal =
-    Math.round((finalRoomTaxable + addonTotal) * 100) / 100;
+  const taxableTotal = Math.round((finalRoomTaxable + addonTotal) * 100) / 100;
 
   const totalGst = invoiceGstEnabled
     ? Math.round((finalRoomTaxable * invoiceRoomRate + addonGst) * 100) / 100
@@ -268,6 +302,10 @@ export async function printInvoicePdf(
 
   const invNo = `INV-${formatBookingId(b)}`;
 
+  // e.g. VV_Grand_Park_Invoice_INV-2026-0054 — used as the PDF title, which
+  // browsers use as the tab title and as the default "Save as PDF" file name.
+  const fileName = `VV_Grand_Park_Invoice_${invNo}`;
+
   // read at print time
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric",
@@ -280,6 +318,13 @@ export async function printInvoicePdf(
   const { jsPDF } = await import("jspdf");
 
   const doc = new jsPDF({ unit: "mm", format: "a4" });
+
+  doc.setProperties({
+    title: fileName,
+    subject: `Invoice ${invNo}`,
+    author: "VV Grand Park Residency",
+    creator: "VV Grand Park Residency",
+  });
 
   let y = 0;
   let page = 1;
@@ -298,7 +343,7 @@ export async function printInvoicePdf(
     try {
       doc.saveGraphicsState();
       doc.setGState(new doc.GState({ opacity: 0.06 }));
-      doc.addImage(logo, "PNG", 22, 165, 78, 78);
+      doc.addImage(logo, "PNG", 22, 165, 78, 78, "vvlogo", "NONE");
       doc.restoreGraphicsState();
     } catch {
       // ignore
@@ -331,7 +376,7 @@ export async function printInvoicePdf(
 
     if (logo) {
       try {
-        doc.addImage(logo, "PNG", L, top - 2, 22, 22);
+        doc.addImage(logo, "PNG", L, top - 2, 22, 22, "vvlogo", "NONE");
       } catch {
         // ignore
       }
@@ -339,22 +384,22 @@ export async function printInvoicePdf(
 
     const tx = logo ? L + 27 : L;
 
-    doc.setFont("times", "bold");
-    doc.setFontSize(22);
+    // Hotel details sit beside the crest (this replaces the old
+    // "VV GRAND PARK / RESIDENCY / website" heading and the FROM block).
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
     ink(NAVY);
-    doc.text("VV GRAND PARK", tx, top + 9);
+    doc.text("VV Grand Park Residency", tx, top + 5);
 
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    ink(NAVY);
-    doc.text("R E S I D E N C Y", tx + 1, top + 15);
-
-    stroke(GOLD_SOFT, 0.4);
-    doc.line(tx + 1, top + 18.5, tx + 55, top + 18.5);
-
-    doc.setFontSize(7.5);
+    doc.setFontSize(8.5);
     ink(GREY);
-    doc.text("vvgrandpark.com", tx + 1, top + 23);
+    doc.text("3/4/D, Thanjai Saalai, Thiruvarur - 610004", tx, top + 10);
+    doc.text("+91 93849 82510  |  +91 90032 51115", tx, top + 14.5);
+    doc.text("vvgrandpark@gmail.com", tx, top + 19);
+
+    doc.setFont("helvetica", "bold");
+    doc.text(`GSTIN: ${HOTEL_GSTIN}`, tx, top + 23.5);
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(19);
@@ -392,17 +437,16 @@ export async function printInvoicePdf(
 
   y = pageHeader(false);
 
-  /* ── FROM (left) / BILL TO (right) ───────────────────────────────────── */
+  /* ── BILL TO (hotel details now live in the letterhead) ─────────────── */
 
+  // BILL TO sits in the right column, same position as before
   const FX = 105;
   const GUEST_X = FX + 13;
   const GUEST_W = R - GUEST_X;
-  const FROM_W = FX - L - 8;
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
   ink(GOLD);
-  doc.text("FROM", L, y);
   doc.text("BILL TO", GUEST_X, y);
 
   y += 6;
@@ -422,13 +466,11 @@ export async function printInvoicePdf(
   doc.setFontSize(12);
   ink(NAVY);
   doc.text(b.guest_name || "Guest", GUEST_X, y + 2);
-  doc.text("VV Grand Park Residency", L, y + 2);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
   ink(GREY);
 
-  // guest details, wrapped to the BILL TO column
   let guestY = y + 8;
 
   if (b.email) {
@@ -458,25 +500,8 @@ export async function printInvoicePdf(
     guestY += 4.3;
   }
 
-  // hotel details (tighter spacing than before)
-  doc.text(
-    doc.splitTextToSize("3/4/D, Thanjai Saalai, Thiruvarur - 610004", FROM_W),
-    L,
-    y + 8,
-  );
-  doc.text(
-    doc.splitTextToSize("+91 93849 82510  |  +91 90032 51115", FROM_W),
-    L,
-    y + 12.5,
-  );
-  doc.text("vvgrandpark@gmail.com", L, y + 17);
-
-  doc.setFont("helvetica", "bold");
-  doc.text(`GSTIN: ${HOTEL_GSTIN}`, L, y + 22.5);
-  doc.setFont("helvetica", "normal");
-
-  // the taller column decides where the table starts
-  y = Math.max(guestY, y + 25) + 3;
+  // the table starts below the guest block (never overlapping the crest)
+  y = Math.max(guestY, y + 9) + 3;
 
   /* ── line-item table ─────────────────────────────────────────────────── */
 
@@ -500,10 +525,7 @@ export async function printInvoicePdf(
     const dLines = doc.splitTextToSize(String(desc ?? ""), C_DESC_W);
     const tLines = doc.splitTextToSize(String(detail ?? ""), C_DETAIL_W);
 
-    const h = Math.max(
-      7.5,
-      Math.max(dLines.length, tLines.length) * 4.2 + 3.2,
-    );
+    const h = Math.max(7.5, Math.max(dLines.length, tLines.length) * 4.2 + 3.2);
 
     if (y + h > BOTTOM) {
       newPage();
@@ -623,9 +645,7 @@ export async function printInvoicePdf(
     (discountAmount > 0 ? ROW : 0) +
     (appliedCheckoutDiscount > 0 ? ROW : 0) +
     (discountAmount > 0 || appliedCheckoutDiscount > 0 ? ROW : 0) +
-    (appliedCheckoutDiscount > 0 && invoiceGstEnabled
-      ? HEAD + ROW * 2
-      : 0) +
+    (appliedCheckoutDiscount > 0 && invoiceGstEnabled ? HEAD + ROW * 2 : 0) +
     (advancePaid > 0 ? ROW : 0) +
     (balancePaid > 0 ? ROW : 0) +
     BOX + // amount already paid
