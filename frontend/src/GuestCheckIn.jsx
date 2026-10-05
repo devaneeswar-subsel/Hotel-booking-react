@@ -7,7 +7,7 @@ import {
   AddonLineRow,
   GstRateSummary,
 } from "./Components/AddonEntry";
-import { summariseAddons } from "./utils/addonGst";
+import { summariseAddons, formatRate } from "./utils/addonGst";
 import { roomGstRate, roomGstPercent } from "./utils/billing";
 import FolioPanel from "./Components/FolioPanel";
 
@@ -2451,8 +2451,25 @@ const roomTotalWithGst = Math.max(
                 />
 
                 {gstEnabled ? (
+                  /*
+                   * This row is room GST + add-on GST combined, and the two
+                   * carry different rates — the room at the rate frozen onto
+                   * this booking, each add-on at its own. So a single
+                   * percentage is only honest when the add-ons added no tax;
+                   * once they have, the rate is dropped and the rate-wise
+                   * add-on breakdown above carries the detail.
+                   *
+                   * It used to read a hardcoded "12%", which was wrong for
+                   * any room the admin had moved off the default.
+                   */
                   <Row
-                    label="Taxes & Fees (GST 12%)"
+                    label={
+                      addonGstCharged > 0
+                        ? "Taxes & Fees (GST)"
+                        : `Taxes & Fees (GST ${formatRate(
+                            bookingRoomPercent,
+                          )})`
+                    }
                     value={money(
                       taxes,
                     )}
