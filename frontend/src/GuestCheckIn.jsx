@@ -12,7 +12,6 @@ import { roomGstRate, roomGstPercent } from "./utils/billing";
 import FolioPanel from "./Components/FolioPanel";
 
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.12;
 
 const apiFetch = async (url, options = {}) => {
   const res = await fetch(`${API}${url}`, {
@@ -1312,7 +1311,7 @@ const [now, setNow] = useState(Date.now());
   /*
    * PER-SERVICE GST
    *
-   * The room is taxed at GST_RATE. Each add-on is taxed at the rate the admin
+   * The room is taxed at its own rate. Each add-on is taxed at the rate the admin
    * configured for that service — 5% for Food & Beverage, Laundry, Extra Bed
    * and Room Service — and that rate is frozen onto the line when it is
    * posted.

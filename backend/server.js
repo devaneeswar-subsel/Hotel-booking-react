@@ -2382,7 +2382,7 @@ async function generateAdvanceInvoicePdf(booking) {
             ["Taxable Value", discountedRoomAmount],
           ]
         : []),
-      ["GST (12%)", gstAmount],
+      [`GST (${roomGstPercentOf(booking)}%)`, gstAmount],
       ["Total Amount", totalAmount],
       ["Advance Paid", advancePaid],
       ["Remaining Balance", remainingAmount],
@@ -2787,7 +2787,7 @@ app.get("/api/rooms", async (req, res) => {
   try {
     const { type, min_price, max_price, check_in, check_out } = req.query;
     let q =
-      "SELECT room_id, room_number, room_type, price_per_night, price_double, capacity, description, image_url, image2, image3, image4, image5, is_available, created_at FROM rooms WHERE is_available=1";
+      "SELECT room_id, room_number, room_type, price_per_night, price_double, gst_rate, capacity, description, image_url, image2, image3, image4, image5, is_available, created_at FROM rooms WHERE is_available=1";
     const p = [];
     if (type) {
       q += " AND room_type=?";
@@ -3567,7 +3567,10 @@ await db.query(
           y += 15;
           [
             ["Room Charges", `Rs.${basePrice.toLocaleString()}`],
-            ["GST (12%)", `Rs.${Math.round(gst).toLocaleString()}`],
+            [
+              `GST (${roomGstPercentOf(booking)}%)`,
+              `Rs.${Math.round(gst).toLocaleString()}`,
+            ],
           ].forEach(([label, val]) => {
             doc
               .fillColor("#868E96")
@@ -4047,7 +4050,7 @@ await db.query(
                     white-space:nowrap;
                   "
                 >
-                  GST (12%)
+                  GST (${roomGstPercentOf(booking)}%)
                 </td>
 
                 <td

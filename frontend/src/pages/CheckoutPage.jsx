@@ -10,10 +10,15 @@ import {
   ShieldIcon,
   UserIcon,
 } from "../Icons";
-import { HOTEL_GSTIN } from "../utils/billing";
+import {
+  HOTEL_GSTIN,
+  roomGstRate,
+  roomGstPercent,
+  roomRateFromRoom,
+  roomPercentFromRoom,
+} from "../utils/billing";
 
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.12;
 const VEHICLES = [
   {
     id: "4-seater",
@@ -249,10 +254,13 @@ export default function CheckoutPage({ user, showToast }) {
     const subtotal = Number(checkout?.basePrice || 0);
     const storedGst = Number(checkout?.gst);
     const storedTotal = Number(checkout?.roomTotal);
+    // the rate configured on the room being checked out, 12% if none is set
+    const quoteRate = roomRateFromRoom(checkout?.room || {});
+    const quotePercent = roomPercentFromRoom(checkout?.room || {});
     const gst =
       Number.isFinite(storedGst) && storedGst > 0
         ? storedGst
-        : subtotal * GST_RATE;
+        : subtotal * quoteRate;
     const total =
       Number.isFinite(storedTotal) && storedTotal > 0
         ? storedTotal
@@ -261,6 +269,7 @@ export default function CheckoutPage({ user, showToast }) {
     return {
       subtotal,
       gst,
+      gstPercent: quotePercent,
       total: Math.round(total),
     };
   }, [checkout]);
@@ -381,8 +390,10 @@ export default function CheckoutPage({ user, showToast }) {
     );
     const roomCharges = Number(booking.total_price || 0);
     // Round to paise, matching every other screen.
+    const invoiceGstPercent = roomGstPercent(booking);
     const gst = Number(
-      booking.gst_amount || Math.round(roomCharges * GST_RATE * 100) / 100,
+      booking.gst_amount ||
+        Math.round(roomCharges * roomGstRate(booking) * 100) / 100,
     );
     const total = Number(booking.final_total || roomCharges + gst);
     const invNo = `INV-${formatBookingId(booking)}`;
@@ -546,7 +557,7 @@ export default function CheckoutPage({ user, showToast }) {
 
     [
       ["Room Charges", `Rs.${roomCharges.toLocaleString()}`],
-      ["GST (12%)", `Rs.${Math.round(gst).toLocaleString()}`],
+      [`GST (${invoiceGstPercent}%)`, `Rs.${Math.round(gst).toLocaleString()}`],
     ].forEach(([label, value]) => {
       doc.setTextColor("#868E96");
       doc.setFont("helvetica", "normal");
@@ -809,7 +820,7 @@ export default function CheckoutPage({ user, showToast }) {
                     <span>{formatAmount(pricing.subtotal)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4 text-[#525B65]">
-                    <span>GST (12%)</span>
+                    <span>GST ({pricing.gstPercent}%)</span>
                     <span>{formatAmount(pricing.gst)}</span>
                   </div>
                 </div>
@@ -912,7 +923,10 @@ export default function CheckoutPage({ user, showToast }) {
                       "Room Charges",
                       formatAmount(confirmedBooking.total_price),
                     ],
-                    ["GST (12%)", formatAmount(confirmedBooking.gst_amount)],
+                    [
+                      `GST (${roomGstPercent(confirmedBooking)}%)`,
+                      formatAmount(confirmedBooking.gst_amount),
+                    ],
                     ["Payment ID", confirmedBooking.payment_id || "-"],
                   ].map(([label, value]) => (
                     <div

@@ -2,8 +2,9 @@ import React, { useState } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
+import { roomRateFromRoom, roomPercentFromRoom } from "./utils/billing";
+
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.12;
 
 /* ─────────────────────────────────────────────────────────────────────────────
    GuestBookingModal.jsx
@@ -78,7 +79,11 @@ export default function GuestBookingModal({
       : Number(room.price_per_night || 0);
 
   const roomSubtotal = nightlyRate * nights;
-  const gst = Math.round(roomSubtotal * GST_RATE * 100) / 100;
+  // this room's own GST rate — the backend charges the same rate, so the
+  // amount quoted here matches what Razorpay is asked for
+  const gstMultiplier = roomRateFromRoom(room);
+  const gstPercent = roomPercentFromRoom(room);
+  const gst = Math.round(roomSubtotal * gstMultiplier * 100) / 100;
   const total = Math.round((roomSubtotal + gst) * 100) / 100;
 
   function validate() {
@@ -396,7 +401,7 @@ export default function GuestBookingModal({
                   </span>
                 </div>
                 <div className="flex justify-between text-xs">
-                  <span className="text-gray-400">GST (12%)</span>
+                  <span className="text-gray-400">GST ({gstPercent}%)</span>
                   <span className="font-semibold text-gray-700">
                     {money(gst)}
                   </span>

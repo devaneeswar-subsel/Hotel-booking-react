@@ -5,8 +5,8 @@ import { SearchIcon, UserIcon, ArrowRightIcon } from "./Icons";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { getRoomSlug } from "./utils/roomSlug";
+import { roomRateFromRoom } from "./utils/billing";
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.12; // matches the backend's GST_RATE
 const FALLBACK = {
   Standard:
     "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=700",
@@ -520,7 +520,9 @@ export default function Rooms({
               `Comfortable ${roomName} accommodation at VV Grand Park Residency in Thiruvarur with modern amenities and premium comfort.`;
 
             const roomPrice = Number(room.price_per_night);
-            const roomGst = Math.round(roomPrice * GST_RATE * 100) / 100;
+            // each room carries its own GST rate; 12% only when none is set
+            const roomGst =
+              Math.round(roomPrice * roomRateFromRoom(room) * 100) / 100;
             const roomTotal = Math.round((roomPrice + roomGst) * 100) / 100;
 
             const roomCapacity =

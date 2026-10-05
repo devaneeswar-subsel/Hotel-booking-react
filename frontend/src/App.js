@@ -32,8 +32,14 @@ import {
   ArrowRightIcon,
   MenuIcon,
 } from "lucide-react";
+import {
+  roomGstRate,
+  roomGstPercent,
+  roomRateFromRoom,
+  roomPercentFromRoom,
+} from "./utils/billing";
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.12;
+
 function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
@@ -232,8 +238,11 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
 
   const basePrice = Number(booking.total_price || 0);
 
+  // the rate frozen on this booking when it was sold, never the room's
+  // current one — a repriced room must not change a settled invoice
   const gst = Number(
-    booking.gst_amount || Math.round(basePrice * GST_RATE * 100) / 100,
+    booking.gst_amount ||
+      Math.round(basePrice * roomGstRate(booking) * 100) / 100,
   );
 
   const total = Number(booking.final_total || basePrice + gst);
@@ -284,7 +293,7 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
                 val: `Rs.${basePrice.toLocaleString()}`,
               },
               {
-                label: "GST (12%)",
+                label: `GST (${roomGstPercent(booking)}%)`,
                 val: `Rs.${Math.round(gst).toLocaleString()}`,
               },
               {
@@ -440,7 +449,9 @@ function BookingModal({ room, user, onClose, showToast }) {
       ? Number(room.price_double)
       : Number(room.price_per_night || 0);
   const basePrice = nightlyRate * nights;
-  const gst = Math.round(basePrice * GST_RATE * 100) / 100;
+  // the room's own configured rate, not a hardcoded 12%
+  const quoteGstPercent = roomPercentFromRoom(room);
+  const gst = Math.round(basePrice * roomRateFromRoom(room) * 100) / 100;
   const total = basePrice + gst;
 
   // async function handleSubmit(e) {
@@ -606,7 +617,9 @@ function BookingModal({ room, user, onClose, showToast }) {
           )
         : 1;
     const basePrice = Number(b.total_price);
-    const gst = Math.round(basePrice * GST_RATE * 100) / 100;
+    // the rate this stay was sold at, frozen on the booking
+    const invoiceGstPercent = roomGstPercent(b);
+    const gst = Math.round(basePrice * roomGstRate(b) * 100) / 100;
     const total = Math.round((basePrice + gst) * 100) / 100;
     const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
     const today = new Date().toLocaleDateString("en-IN", {
@@ -724,7 +737,10 @@ function BookingModal({ room, user, onClose, showToast }) {
     const SX = W - 90;
     [
       { label: "Room Charges", val: `Rs.${basePrice.toLocaleString()}` },
-      { label: "GST (12%)", val: `Rs.${Math.round(gst).toLocaleString()}` },
+      {
+        label: `GST (${invoiceGstPercent}%)`,
+        val: `Rs.${Math.round(gst).toLocaleString()}`,
+      },
     ].forEach(({ label, val }) => {
       doc
         .setFont("helvetica", "normal")
@@ -968,7 +984,7 @@ function BookingModal({ room, user, onClose, showToast }) {
                     val: `Rs.${basePrice.toLocaleString()}`,
                   },
                   {
-                    label: "GST (12%)",
+                    label: `GST (${quoteGstPercent}%)`,
                     val: `Rs.${Math.round(gst).toLocaleString()}`,
                   },
                 ].map(({ label, val }) => (
@@ -1433,8 +1449,11 @@ function BookingReceiptModal({ booking, onClose, onDownloadInvoice }) {
   const basePrice = Number(booking.total_price || 0);
   // Round to paise like every other screen; Math.round(x * 0.12) alone rounds
   // to whole rupees and made this figure disagree with the invoice.
+  // the rate frozen on this booking when it was sold, never the room's
+  // current one — a repriced room must not change a settled invoice
   const gst = Number(
-    booking.gst_amount || Math.round(basePrice * GST_RATE * 100) / 100,
+    booking.gst_amount ||
+      Math.round(basePrice * roomGstRate(booking) * 100) / 100,
   );
   const addonCharges = Number(booking.addon_charges || 0);
   const total = Number(booking.final_total || basePrice + gst);
@@ -1488,7 +1507,10 @@ function BookingReceiptModal({ booking, onClose, onDownloadInvoice }) {
                     ],
                   ]
                 : []),
-              ["GST (12%)", `Rs.${Math.round(gst).toLocaleString("en-IN")}`],
+              [
+                `GST (${roomGstPercent(booking)}%)`,
+                `Rs.${Math.round(gst).toLocaleString("en-IN")}`,
+              ],
               ["Payment ID", booking.payment_id || "-"],
             ].map(([label, val]) => (
               <div
@@ -2528,9 +2550,10 @@ function AppContent() {
       booking.total_price || 0
     );
 
+    const invoiceGstPercent = roomGstPercent(booking);
     const gst = Number(
       booking.gst_amount ||
-        Math.round(roomCharges * GST_RATE * 100) / 100
+        Math.round(roomCharges * roomGstRate(booking) * 100) / 100
     );
 
     const total = Number(
@@ -2902,7 +2925,7 @@ function AppContent() {
         `Rs.${roomCharges.toLocaleString()}`,
       ],
       [
-        "GST (12%)",
+        `GST (${invoiceGstPercent}%)`,
         `Rs.${Math.round(
           gst
         ).toLocaleString()}`,

@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { roomRateFromRoom, roomPercentFromRoom } from "./utils/billing";
 
 // ─────────────────────────────────────────────────────────────
 // ICONS
 // ─────────────────────────────────────────────────────────────
-const GST_RATE = 0.12; // matches the backend's GST_RATE
 const IconBed = () => (
   <svg
     width="18"
@@ -461,7 +461,10 @@ export default function RoomDetail({
   }, [room?.image_url, extra]);
 
   const price = Number(room?.price_per_night || 0);
-  const gstAmount = Math.round(price * GST_RATE * 100) / 100;
+  // this room's own GST rate — 12% only when no rate has been set for it
+  const gstMultiplier = roomRateFromRoom(room || {});
+  const gstPercent = roomPercentFromRoom(room || {});
+  const gstAmount = Math.round(price * gstMultiplier * 100) / 100;
   const totalWithGst = Math.round((price + gstAmount) * 100) / 100;
 
   const formattedPrice = price.toLocaleString("en-IN");
@@ -1464,7 +1467,7 @@ export default function RoomDetail({
                 </div>
 
                 <div className="mt-1 text-[0.7rem] text-white/40">
-                  ₹{formattedPrice} + ₹{formattedGst} GST (12%)
+                  ₹{formattedPrice} + ₹{formattedGst} GST ({gstPercent}%)
                 </div>
 
                 <div
@@ -1793,7 +1796,7 @@ export default function RoomDetail({
                     {[1, 2, 3, 5, 7].map((n, index) => {
                       const nightsSubtotal = price * n;
                       const nightsGst =
-                        Math.round(nightsSubtotal * GST_RATE * 100) / 100;
+                        Math.round(nightsSubtotal * gstMultiplier * 100) / 100;
                       const nightsTotal =
                         Math.round((nightsSubtotal + nightsGst) * 100) / 100;
 

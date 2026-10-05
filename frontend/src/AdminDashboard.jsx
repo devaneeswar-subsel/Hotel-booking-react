@@ -29,7 +29,6 @@ import GstConfigTab from "./Components/GstConfigTab";
 import { roomRateFromRoom, roomPercentFromRoom } from "./utils/billing";
 
 const API = process.env.REACT_APP_API_URL;
-const GST_RATE = 0.12;
 function formatBookingId(booking) {
   const year = new Date(booking.created_at || Date.now()).getFullYear();
   return `${year}-${String(booking.booking_id).padStart(4, "0")}`;
@@ -2153,8 +2152,9 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
                           className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-[0.82rem] text-navy outline-none transition focus:border-navy focus:ring-2 focus:ring-navy/10"
                         />
                         <p className="mt-1 text-[0.68rem] text-amber-700">
-                          12% GST is added on top. Leave blank to charge the
-                          normal tariff for the selected nights.
+                          {roomPercentFromRoom(room)}% GST is added on top.
+                          Leave blank to charge the normal tariff for the
+                          selected nights.
                         </p>
                       </div>
                     </div>
@@ -2209,8 +2209,8 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
                       </div>
                     ))}
                     <p className="mt-2 text-[0.68rem] text-gray-500">
-                      12% GST is added. Payment stays pending until collected
-                      at check-in.
+                      {roomPercentFromRoom(room)}% GST is added. Payment stays
+                      pending until collected at check-in.
                     </p>
                   </div>
                 )}
@@ -4024,7 +4024,7 @@ Number(booking.balance_paid || 0)
                               </span>
                             </div>
                             <div className="text-[0.62rem] font-body text-red-500">
-                              +12% GST
+                              +{roomPercentFromRoom(r)}% GST
                             </div>
                           </div>
                           <button

@@ -17,7 +17,10 @@ import {
   nightlyRate as resolveNightlyRate,
   money2,
   GSTIN_PATTERN,
+  roomRateFromRoom,
+  roomPercentFromRoom,
 } from "./utils/billing";
+import { formatRate } from "./utils/addonGst";
 
 const ADVANCE_RATE = 0.3;
 const MANUAL_PAYMENT_MODES = ["Cash", "Online", "Other"];
@@ -439,6 +442,22 @@ export default function AdminBookingForUsers({
     [room, form.guest_count],
   );
 
+  /*
+   * The rate this ROOM is configured at. A booking does not exist yet, so
+   * there is no frozen room_gst_rate to read — roomRateFromRoom is the
+   * helper meant for exactly this case. Falls back to 12% for a room where
+   * no rate has been set, which is every room until an admin sets one.
+   */
+  const roomGstMultiplier = useMemo(
+    () => roomRateFromRoom(room),
+    [room],
+  );
+
+  const roomGstLabel = useMemo(
+    () => roomPercentFromRoom(room),
+    [room],
+  );
+
   const totals = useMemo(() => {
     const bill = computeRoomBill({
       tariff: nightlyRate * nights,
@@ -446,6 +465,7 @@ export default function AdminBookingForUsers({
         ? form.discount_amount
         : 0,
       gstEnabled: true,
+      roomRate: roomGstMultiplier,
     });
 
     const fullAmount = bill.total;
@@ -498,6 +518,7 @@ const remainingAmount = Math.max(
     form.discount_applied,
     nights,
     nightlyRate,
+    roomGstMultiplier,
   ]);
 
   /* -----------------------------------------------------------
@@ -1973,7 +1994,7 @@ console.log("DEBUG advance:", JSON.stringify(form.advance_amount), typeof form.a
 
           <div className="flex items-center justify-between border-t border-[#E9ECEF] py-3 text-[0.9rem]">
             <span className="text-[#868E96]">
-              GST (12%)
+              GST ({formatRate(roomGstLabel)})
             </span>
 
             <span className="font-bold text-[#0F1923]">

@@ -39,7 +39,6 @@ import {
 
 
 const API = process.env.REACT_APP_API_URL || "";
-const GST_RATE = 0.12;
 
 const apiFetch = async (url, options = {}) => {
   const res = await fetch(`${API}${url}`, {
@@ -4069,7 +4068,7 @@ const paginatedBookings = filteredBookings.slice(
                               </span>
                             </div>
                             <div className="text-[0.62rem] font-body text-red-500">
-                              +12% GST
+                              +{roomPercentFromRoom(r)}% GST
                             </div>
                           </div>
                           <button
