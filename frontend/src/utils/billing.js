@@ -26,61 +26,148 @@
    ═══════════════════════════════════════════════════════════════════════ */
 
 /**
- * The DEFAULT room GST rate — what a room is taxed at when the admin has not
- * set a rate for it.
+ * ── THE RATE HISTORY ───────────────────────────────────────────────────────
  *
- * This used to be *the* rate for everything. It is now only a fallback: the
- * room's rate is configured per room (Admin -> Rooms -> Edit) and frozen onto
- * each booking as `room_gst_rate`, and add-ons carry their own rates from the
- * GST Configuration screen.
+ * Hotel accommodation was taxed at a flat 12% up to Rs.7,500 a night (18%
+ * above) until 21 September 2025. From 22 September 2025 the lower slab is
+ * 5%, charged WITHOUT input tax credit; 18% above Rs.7,500 is unchanged.
  *
- * Read a booking's actual rate with roomGstRate() below, never this constant.
- * Mirrors DEFAULT_ROOM_GST_PERCENT / 100 in backend/server.js.
+ * So 12 now means one thing only: what bookings sold under the old regime
+ * were actually charged. It is a fact about the past and never moves.
+ * Mirrors LEGACY_ROOM_GST_PERCENT / 100 in backend/server.js.
  */
-export const GST_RATE = 0.12;
+export const LEGACY_GST_RATE = 0.12;
+
+/**
+ * Kept under its old name because several screens still import it. It is the
+ * LEGACY rate, not today's default — use roomGstRate(booking) for a booking
+ * that exists and roomRateFromRoom(room, guests) for a quote.
+ */
+export const GST_RATE = LEGACY_GST_RATE;
+
+/** The tariff dividing the two accommodation slabs, per night. */
+export const ROOM_GST_SLAB_THRESHOLD = 7500;
+
+/** At or below the threshold: 5%, no ITC. Above: 18%, ITC available. */
+export const ROOM_GST_LOWER_PERCENT = 5;
+export const ROOM_GST_UPPER_PERCENT = 18;
+
+/**
+ * The rate a tariff falls into today. Mirrors slabRateForTariff() on the
+ * server — if these two ever disagree, a quote shown to a guest stops
+ * matching what they are charged.
+ */
+export function slabRatePercent(nightlyTariff) {
+  return Number(nightlyTariff) > ROOM_GST_SLAB_THRESHOLD
+    ? ROOM_GST_UPPER_PERCENT
+    : ROOM_GST_LOWER_PERCENT;
+}
 
 /**
  * The room GST rate that applies to a given booking, as a multiplier.
  *
- * Under Indian GST, hotel accommodation is slab-based — 12% up to Rs.7,500 a
- * night, 18% above — so two bookings on the same bill run can legitimately
- * carry different room rates.
+ * Always read from the BOOKING, never from the room and never from current
+ * law. The rate is stamped onto the booking when it is created and frozen
+ * there: repricing a room, or a rate change in the Finance Act, changes what
+ * the next booking is taxed at and never one already sold.
  *
- * Always read from the BOOKING, never from the room. The rate is stamped onto
- * the booking when it is created and frozen there: repricing a room, or
- * moving it across the slab, changes what the next booking is taxed at and
- * never one already sold. A booking written before the column existed returns
- * the 12% default, which is what it was charged.
+ * A booking written before the column existed returns the 12% legacy rate,
+ * which is what it was charged.
  */
 export function roomGstRate(booking = {}) {
   const pct = booking?.room_gst_rate;
-  return pct == null ? GST_RATE : Number(pct) / 100;
+  return pct == null ? LEGACY_GST_RATE : Number(pct) / 100;
 }
 
 /** The same rate as a percentage, for labels like "GST on Room (18%)". */
 export function roomGstPercent(booking = {}) {
   const pct = booking?.room_gst_rate;
-  return pct == null ? GST_RATE * 100 : Number(pct);
+  return pct == null ? LEGACY_GST_RATE * 100 : Number(pct);
 }
 
 /**
- * The rate on a ROOM record (`gst_rate`), as a multiplier.
+ * The CGST / SGST halves of a rate.
  *
- * Only for quoting a booking that does not exist yet — a price preview on the
- * New Booking form, or the room form's own "price incl. GST" line. Once a
- * booking exists, read roomGstRate(booking) instead: the room may have been
- * repriced since, and the booking's own frozen rate is the one that governs
- * what the guest owes.
+ * A room's GST is ONE rate that prints as two components. Accommodation's
+ * place of supply is the property's own state, so it is always CGST + SGST
+ * and never IGST — a Chennai company booking a Thiruvarur room is still an
+ * intra-state supply, and there is deliberately no IGST branch here.
+ *
+ * Both blank means half each, which is the ordinary case. An explicit pair is
+ * honoured as given. The SECOND half absorbs the rounding remainder so the
+ * two always sum back to the total exactly — without that, an odd rate like
+ * 5.01% would print 2.51 + 2.51 and the invoice would not foot.
+ *
+ * Mirrors splitGstRate() in backend/server.js.
  */
-export function roomRateFromRoom(room = {}) {
-  const pct = room?.gst_rate;
-  return pct == null || pct === "" ? GST_RATE : Number(pct) / 100;
+export function splitGstRate(totalPercent, cgstPercent = null, sgstPercent = null) {
+  const hasExplicit =
+    cgstPercent != null && cgstPercent !== "" &&
+    sgstPercent != null && sgstPercent !== "";
+
+  if (hasExplicit) {
+    const c = Number(cgstPercent);
+    const s = Number(sgstPercent);
+    return { cgst: c, sgst: s, total: money2(c + s) };
+  }
+
+  const total = Number(totalPercent) || 0;
+  const cgst = money2(total / 2);
+  return { cgst, sgst: money2(total - cgst), total: money2(total) };
 }
 
-/** That rate as a percentage, for labels on the same preview screens. */
-export function roomPercentFromRoom(room = {}) {
+/**
+ * The split a BOOKING was billed at. Frozen columns win; otherwise the total
+ * it was sold at is halved. Never reads the room — that may have been
+ * reconfigured since the stay was sold.
+ */
+export function bookingGstSplit(booking = {}) {
+  return splitGstRate(
+    roomGstPercent(booking),
+    booking?.room_cgst_rate,
+    booking?.room_sgst_rate,
+  );
+}
+
+/**
+ * The split to QUOTE for a room, before a booking exists.
+ */
+export function roomGstSplit(room = {}, guestCount = 1) {
+  return splitGstRate(
+    roomPercentFromRoom(room, guestCount),
+    room?.cgst_rate,
+    room?.sgst_rate,
+  );
+}
+
+/**
+ * The rate for a ROOM, as a percentage — for quoting a booking that does not
+ * exist yet: the New Booking form, or the room form's "price incl. GST" line.
+ *
+ * An explicit CGST/SGST pair IS the rate, so it is read first — a room
+ * configured as 2.5 + 2.5 must not be quoted at a stale total left in
+ * gst_rate. Then an explicit total. Otherwise the slab decides, from the
+ * tariff at the occupancy being quoted — a room can sit on either side of
+ * Rs.7,500 between single and double.
+ *
+ * Once a booking exists, read roomGstPercent(booking) instead: the room may
+ * have been repriced, or the law may have moved, and the booking's own frozen
+ * rate is what governs what the guest owes.
+ */
+export function roomPercentFromRoom(room = {}, guestCount = 1) {
+  const c = room?.cgst_rate;
+  const s = room?.sgst_rate;
+  if (c != null && c !== "" && s != null && s !== "") {
+    return money2(Number(c) + Number(s));
+  }
   const pct = room?.gst_rate;
-  return pct == null || pct === "" ? GST_RATE * 100 : Number(pct);
+  if (pct != null && pct !== "") return Number(pct);
+  return slabRatePercent(nightlyRate(room, guestCount));
+}
+
+/** That rate as a multiplier. */
+export function roomRateFromRoom(room = {}, guestCount = 1) {
+  return roomPercentFromRoom(room, guestCount) / 100;
 }
 
 /**

@@ -8,7 +8,12 @@
 //  content genuinely cannot fit (many add-ons).
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { HOTEL_GSTIN, roomGstRate, roomGstPercent } from "./utils/billing";
+import {
+  HOTEL_GSTIN,
+  roomGstRate,
+  roomGstPercent,
+  bookingGstSplit,
+} from "./utils/billing";
 import {
   summariseAddons,
   gstSummaryRows,
@@ -75,6 +80,12 @@ function formatBookingId(booking) {
  * light parts), so the crest prints as a clean black-and-white mark instead of
  * a grey smudge from the gold. This cannot add detail the source file does not
  * have — for the sharpest result use a logo of 1000px or more. */
+/*
+ * SAC for hotel accommodation — 996311, room/accommodation services. Printed
+ * against each night. Add-ons carry their own codes and print theirs.
+ */
+const SAC_ACCOMMODATION = "996311";
+
 const LOGO_MIN_PX = 1200;
 
 async function loadLogo(mono = false) {
@@ -143,6 +154,15 @@ export async function printInvoicePdf(
     showSignature = false,
     // Black & white print (the client's preferred copy). false = navy & gold.
     mono = true,
+    /*
+     * The booking's folio lines, for the night-wise breakdown.
+     *
+     * Optional. Fetched by the caller rather than here so the PDF module
+     * stays free of API calls, and so an invoice still prints when the folio
+     * cannot be reached — it simply omits the night-wise section rather than
+     * failing or inventing one.
+     */
+    folioItems = null,
   } = {},
 ) {
   if (!booking) return;
@@ -247,6 +267,13 @@ export async function printInvoicePdf(
   // PER-ROOM GST: the rate frozen onto THIS booking when it was sold.
   const invoiceRoomRate = roomGstRate(b);
   const invoiceRoomPercent = roomGstPercent(b);
+
+  /*
+   * The CGST / SGST halves this stay was billed at, also frozen onto the
+   * booking. Both are needed on the face of the invoice: the recipient claims
+   * the components, not the combined figure.
+   */
+  const invoiceSplit = bookingGstSplit(b);
 
   const roomGst =
     Math.round(discountedRoomAmount * invoiceRoomRate * 100) / 100;
@@ -647,6 +674,60 @@ export async function printInvoicePdf(
   if (stayLabel) tableRow("Time Stayed", stayLabel, "—");
   tableRow("Guests", guestSummary, "—");
 
+  /*
+   * ── NIGHT-WISE ROOM CHARGES ───────────────────────────────────────────
+   *
+   * The stay broken down the way a GST invoice shows it: one line per night
+   * with that night's tariff and its own CGST and SGST.
+   *
+   * Printed only when the folio is supplied, because the folio is the only
+   * place the real per-night figures exist. A mid-stay rate change, an
+   * extension or an early checkout all live there and none of them can be
+   * recovered by dividing the total by the nights — so when there is no
+   * folio this section is skipped entirely rather than printing a plausible
+   * invention. The summary below is unaffected either way.
+   */
+  const nightLines = (folioItems || []).filter(
+    (r) => r.item_type === "ROOM" && Number(r.voided) !== 1,
+  );
+
+  if (nightLines.length) {
+    sectionRow("ROOM CHARGES — NIGHT-WISE");
+
+    for (const r of nightLines) {
+      const lineTaxable = Number(r.taxable_amount || 0);
+      const lineGst = Number(r.gst_amount || 0);
+      const lineRate = Number(r.gst_rate || 0);
+
+      // halves of THIS line's tax, second absorbing the remainder so the
+      // two always sum back to the line's GST exactly
+      const c = Math.round((lineGst / 2) * 100) / 100;
+      const s = Math.round((lineGst - c) * 100) / 100;
+      const halfRate = Math.round((lineRate / 2) * 100) / 100;
+
+      const when = r.service_date
+        ? new Date(r.service_date).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+          })
+        : "";
+
+      tableRow(
+        r.description || "Room Rent",
+        [
+          when,
+          `SAC ${SAC_ACCOMMODATION}`,
+          invoiceGstEnabled
+            ? `CGST ${formatRate(halfRate)} ${money(c)}   SGST ${formatRate(halfRate)} ${money(s)}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join("   "),
+        money(lineTaxable),
+      );
+    }
+  }
+
   // payment history
   if (advancePaid > 0 || balancePaid > 0) {
     sectionRow("PAYMENT HISTORY");
@@ -772,10 +853,24 @@ export async function printInvoicePdf(
   }
 
   if (invoiceGstEnabled) {
-    sumRow(
-      `GST on Room (${formatRate(invoiceRoomPercent)})`,
-      money(Math.round(finalRoomTaxable * invoiceRoomRate * 100) / 100),
-    );
+    /*
+     * CGST + SGST, not one combined "GST" line.
+     *
+     * A GST invoice has to show the components, because that is what the
+     * recipient claims and what the return is filed on. Accommodation's place
+     * of supply is the hotel's own state, so it is always these two and never
+     * IGST — even for a company registered elsewhere.
+     *
+     * The halves come from the booking's FROZEN split, so a stay sold at 12%
+     * keeps printing 6 + 6 after the room moves to 5%.
+     */
+    const roomGstAmount =
+      Math.round(finalRoomTaxable * invoiceRoomRate * 100) / 100;
+    const roomCgst = Math.round((roomGstAmount / 2) * 100) / 100;
+    const roomSgst = Math.round((roomGstAmount - roomCgst) * 100) / 100;
+
+    sumRow(`CGST (${formatRate(invoiceSplit.cgst)})`, money(roomCgst));
+    sumRow(`SGST (${formatRate(invoiceSplit.sgst)})`, money(roomSgst));
   }
 
   /* CHECKOUT DISCOUNT */
@@ -808,17 +903,32 @@ export async function printInvoicePdf(
     sumRow("Add-on Charges", money(addonTotal));
 
     if (invoiceGstEnabled) {
+      /*
+       * Add-on tax also prints as CGST + SGST. Each rate band is split
+       * separately rather than splitting one combined figure, so a bill
+       * carrying food at 5% and something at 18% shows each band's own
+       * components. Second half absorbs the remainder, so the two always sum
+       * back to that band's tax.
+       */
+      const halves = (gst) => {
+        const c = Math.round((Number(gst) / 2) * 100) / 100;
+        return [c, Math.round((Number(gst) - c) * 100) / 100];
+      };
+
       if (addonSummary.byRate.length > 1) {
         addonSummary.byRate.forEach((r) => {
-          sumRow(`GST on Add-ons (${formatRate(r.gstRate)})`, money(r.gst));
+          const [c, s] = halves(r.gst);
+          const half = formatRate(Math.round((r.gstRate / 2) * 100) / 100);
+          sumRow(`CGST on Add-ons (${half})`, money(c));
+          sumRow(`SGST on Add-ons (${half})`, money(s));
         });
       } else {
-        sumRow(
-          addonSummary.byRate.length === 1
-            ? `GST on Add-ons (${formatRate(addonSummary.byRate[0].gstRate)})`
-            : "GST on Add-ons",
-          money(addonGst),
-        );
+        const [c, s] = halves(addonGst);
+        const band = addonSummary.byRate.length === 1
+          ? ` (${formatRate(Math.round((addonSummary.byRate[0].gstRate / 2) * 100) / 100)})`
+          : "";
+        sumRow(`CGST on Add-ons${band}`, money(c));
+        sumRow(`SGST on Add-ons${band}`, money(s));
       }
     }
   }

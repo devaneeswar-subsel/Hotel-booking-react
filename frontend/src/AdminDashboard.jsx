@@ -26,7 +26,11 @@ import { printInvoicePdf } from "./invoicePdf";
 import { createPortal } from "react-dom";
 import ReportsTab from "./Components/ReportsTab";
 import GstConfigTab from "./Components/GstConfigTab";
-import { roomRateFromRoom, roomPercentFromRoom } from "./utils/billing";
+import {
+  roomRateFromRoom,
+  roomPercentFromRoom,
+  splitGstRate,
+} from "./utils/billing";
 
 const API = process.env.REACT_APP_API_URL;
 function formatBookingId(booking) {
@@ -1118,9 +1122,14 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
     price_per_night: room.price_per_night || "",
     price_double: room.price_double ?? "",
     capacity: room.capacity || 2,
-    // PER-ROOM GST. Empty means "use the 12% default", which is how every
-    // room behaves until someone sets a rate here.
+    // PER-ROOM GST. Empty means "follow the slab" — 5% at or below
+    // Rs.7,500 a night, 18% above.
     gst_rate: room.gst_rate ?? "",
+    // Optional CGST/SGST split. Both empty means half each, which is the
+    // ordinary case and what every room does unless an auditor asks
+    // otherwise.
+    cgst_rate: room.cgst_rate ?? "",
+    sgst_rate: room.sgst_rate ?? "",
     description: room.description || "",
     is_available: room.is_available,
   });
@@ -1132,6 +1141,29 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
     room.image5 || "",
   ]);
   const [loading, setLoading] = useState(false);
+
+  /*
+   * CGST/SGST entry state.
+   *
+   * blankRate() rather than a falsy check, because "0" is a real rate an
+   * admin might enter for an exempt room and must not read as "not filled".
+   */
+  const blankRate = (v) => v === null || v === undefined || v === "";
+  const splitEntered =
+    !blankRate(form.cgst_rate) && !blankRate(form.sgst_rate);
+  // exactly one side filled — the server rejects this, so say so here first
+  const splitHalfEntered =
+    blankRate(form.cgst_rate) !== blankRate(form.sgst_rate);
+
+  /*
+   * What the invoice will actually print. Uses the same helper as the server
+   * and the PDF, so the preview cannot drift from the document.
+   */
+  const derivedSplit = splitGstRate(
+    roomPercentFromRoom(form, 1),
+    form.cgst_rate,
+    form.sgst_rate,
+  );
 
   function setImage(i, val) {
     setImages((prev) => {
@@ -1149,6 +1181,18 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
     if (badSlot !== -1) {
       return showToast(
         `Photo ${badSlot + 1} was not uploaded properly. Please remove it and upload again.`,
+        "error",
+      );
+    }
+
+    /*
+     * Half a split is not a split — the server rejects it, and without this
+     * the admin loses the rest of their edits to a round trip that was never
+     * going to succeed.
+     */
+    if (splitHalfEntered) {
+      return showToast(
+        "Enter both CGST and SGST, or clear both to split the rate in half.",
         "error",
       );
     }
@@ -1316,16 +1360,88 @@ function EditRoomModal({ room, onClose, showToast, onRefresh }) {
                 min={0}
                 max={28}
                 step="0.01"
-                placeholder="12 (default)"
+                placeholder="5 (slab)"
                 value={form.gst_rate}
                 onChange={(e) => setForm({ ...form, gst_rate: e.target.value })}
+                /*
+                 * Read-only once a split is entered: the pair IS the rate and
+                 * the server writes the total from their sum. Leaving it
+                 * editable would let the two disagree on screen, and the
+                 * figure the admin typed would lose silently on save.
+                 */
+                readOnly={splitEntered}
               />
               <div className="mt-1 text-[0.68rem] leading-snug text-gray-400">
-                Leave blank for 12%. Rooms over Rs.7,500 / night are 18% under
-                GST. Changing this affects new bookings only — stays already
-                booked keep the rate they were sold at.
+                {splitEntered ? (
+                  <>Set from CGST + SGST below.</>
+                ) : (
+                  <>
+                    Leave blank to use the slab: 5% at or below Rs.7,500 /
+                    night (no input tax credit), 18% above. Changing this
+                    affects new bookings only — stays already booked keep the
+                    rate they were sold at.
+                  </>
+                )}
               </div>
             </div>
+          </div>
+
+          {/* ── CGST / SGST ──
+              Optional. The rate above is one tax that PRINTS as two halves;
+              these exist only for an uneven split. Accommodation is always
+              intra-state (place of supply is the hotel), so there is no IGST
+              field — it would never apply. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>CGST (%) — optional</label>
+              <input
+                className={inputCls}
+                type="number"
+                min={0}
+                max={28}
+                step="0.01"
+                placeholder={`${derivedSplit.cgst} (half)`}
+                value={form.cgst_rate}
+                onChange={(e) =>
+                  setForm({ ...form, cgst_rate: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className={labelCls}>SGST (%) — optional</label>
+              <input
+                className={inputCls}
+                type="number"
+                min={0}
+                max={28}
+                step="0.01"
+                placeholder={`${derivedSplit.sgst} (half)`}
+                value={form.sgst_rate}
+                onChange={(e) =>
+                  setForm({ ...form, sgst_rate: e.target.value })
+                }
+              />
+            </div>
+          </div>
+          <div
+            className={`-mt-1 text-[0.68rem] leading-snug ${
+              splitHalfEntered ? "text-red-600" : "text-gray-400"
+            }`}
+          >
+            {splitHalfEntered ? (
+              <>Enter both CGST and SGST, or clear both. Half a split cannot be saved.</>
+            ) : splitEntered ? (
+              <>
+                Invoices will print CGST {derivedSplit.cgst}% + SGST{" "}
+                {derivedSplit.sgst}% = {derivedSplit.total}%.
+              </>
+            ) : (
+              <>
+                Leave blank and the rate above is split in half — CGST{" "}
+                {derivedSplit.cgst}% + SGST {derivedSplit.sgst}%. Fill these in
+                only if your auditor wants an uneven split.
+              </>
+            )}
           </div>
 
           {/* Description */}
@@ -1395,9 +1511,27 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
     capacity: 2,
     // PER-ROOM GST. Empty means "use the 12% default".
     gst_rate: "",
+    // optional CGST/SGST split; both blank means half each
+    cgst_rate: "",
+    sgst_rate: "",
     description: "",
     image_url: "",
   });
+
+  /*
+   * Same pair-or-nothing rule as the edit form. "0" is a real rate, so
+   * emptiness is tested explicitly rather than by falsiness.
+   */
+  const blankAddRate = (v) => v === null || v === undefined || v === "";
+  const addSplitEntered =
+    !blankAddRate(form.cgst_rate) && !blankAddRate(form.sgst_rate);
+  const addSplitHalf =
+    blankAddRate(form.cgst_rate) !== blankAddRate(form.sgst_rate);
+  const addSplit = splitGstRate(
+    roomPercentFromRoom(form, 1),
+    form.cgst_rate,
+    form.sgst_rate,
+  );
   const [loading, setLoading] = useState(false);
 
   async function save() {
@@ -1552,15 +1686,74 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
               min={0}
               max={28}
               step="0.01"
-              placeholder="Leave blank for 12%"
+              placeholder="Leave blank for the slab"
               value={form.gst_rate}
               onChange={(e) => setForm({ ...form, gst_rate: e.target.value })}
+              readOnly={addSplitEntered}
             />
             <div className="mt-1 text-[0.68rem] leading-snug text-gray-400">
-              Hotel accommodation is 12% up to Rs.7,500 / night and 18% above.
-              The rate is locked onto each booking when it is made, so changing
-              it later never alters a stay already sold.
+              {addSplitEntered ? (
+                <>Set from CGST + SGST below.</>
+              ) : (
+                <>
+                  Since 22 Sep 2025 accommodation is 5% at or below Rs.7,500 /
+                  night (no input tax credit) and 18% above. Leave blank to
+                  follow that automatically. The rate is locked onto each
+                  booking when it is made, so changing it later never alters a
+                  stay already sold.
+                </>
+              )}
             </div>
+          </div>
+
+          {/* ── CGST / SGST ──
+              Optional, and only for an uneven split. Accommodation is always
+              intra-state, so no IGST field. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>CGST (%) — optional</label>
+              <input
+                className={inputCls}
+                type="number"
+                min={0}
+                max={28}
+                step="0.01"
+                placeholder={`${addSplit.cgst} (half)`}
+                value={form.cgst_rate}
+                onChange={(e) =>
+                  setForm({ ...form, cgst_rate: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className={labelCls}>SGST (%) — optional</label>
+              <input
+                className={inputCls}
+                type="number"
+                min={0}
+                max={28}
+                step="0.01"
+                placeholder={`${addSplit.sgst} (half)`}
+                value={form.sgst_rate}
+                onChange={(e) =>
+                  setForm({ ...form, sgst_rate: e.target.value })
+                }
+              />
+            </div>
+          </div>
+          <div
+            className={`-mt-2 text-[0.68rem] leading-snug ${
+              addSplitHalf ? "text-red-600" : "text-gray-400"
+            }`}
+          >
+            {addSplitHalf ? (
+              <>Enter both CGST and SGST, or clear both.</>
+            ) : (
+              <>
+                Invoices print CGST {addSplit.cgst}% + SGST {addSplit.sgst}% ={" "}
+                {addSplit.total}%.
+              </>
+            )}
           </div>
 
           {/* Capacity */}
@@ -1643,12 +1836,19 @@ function AddRoomModal({ onClose, showToast, onRefresh }) {
                         val: `Rs.${Number(form.price_double).toLocaleString()}`,
                       },
                       {
-                        label: `GST (${roomPercentFromRoom(form)}%) `,
-                        val: `Rs.${Math.round(Number(form.price_double) * roomRateFromRoom(form)).toLocaleString()}`,
+                        /*
+                         * Priced at DOUBLE occupancy, so the slab is read at
+                         * that tariff. A room at Rs.7,400 single and Rs.7,900
+                         * double is genuinely 5% for one guest and 18% for
+                         * two — showing the single-occupancy rate on both
+                         * lines understated the second one.
+                         */
+                        label: `GST (${roomPercentFromRoom(form, 2)}%) `,
+                        val: `Rs.${Math.round(Number(form.price_double) * roomRateFromRoom(form, 2)).toLocaleString()}`,
                       },
                       {
                         label: "Guest pays — 2+ guests",
-                        val: `Rs.${Math.round(Number(form.price_double) * (1 + roomRateFromRoom(form))).toLocaleString()}`,
+                        val: `Rs.${Math.round(Number(form.price_double) * (1 + roomRateFromRoom(form, 2))).toLocaleString()}`,
                         strong: true,
                       },
                     ]

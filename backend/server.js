@@ -167,33 +167,83 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const LEGACY_ADDON_GST_PERCENT = 12;
 
 /*
- * The GST rate a room is taxed at when nobody has set one for it.
+ * ── THE RATE HISTORY, AND WHY THERE ARE TWO CONSTANTS ──────────────────────
  *
- * Under Indian GST, hotel accommodation is slab-based: 12% up to Rs.7,500 a
- * night and 18% above it. Every room in this property sits below that line
- * today, so 12 is both the historical rate and the sensible default — but a
- * suite priced over Rs.7,500 needs 18, which is why the rate is now a
- * per-room field rather than one constant.
+ * Hotel accommodation in India was taxed at a flat 12% up to Rs.7,500 a night
+ * (18% above) until 21 September 2025. From 22 September 2025 the lower slab
+ * became 5%, charged WITHOUT input tax credit; the 18% band above Rs.7,500 is
+ * unchanged and still carries ITC.
  *
- * A room with gst_rate NULL is taxed at this, so every existing room keeps
- * behaving exactly as it did. Keep equal to GST_RATE x 100.
+ * That means 12 now means two completely different things, and they must
+ * never share a constant:
+ *
+ *   LEGACY_ROOM_GST_PERCENT  — what historical bookings were ACTUALLY charged.
+ *                              Used only to stamp rows that predate the
+ *                              room_gst_rate column. It is a fact about the
+ *                              past and must never change.
+ *
+ *   currentDefaultRoomGstPercent() — what a NEW booking is taxed at when the
+ *                              admin has set no explicit rate on the room.
+ *                              It follows the law and will change again.
+ *
+ * They were one constant before, which made the startup backfill below read
+ * the live default: moving the default to 5 would have silently restamped any
+ * unstamped historical booking at 5%, rewriting bills that were charged 12%.
+ * Splitting them makes that class of mistake impossible.
  */
-const DEFAULT_ROOM_GST_PERCENT = 12;
+const LEGACY_ROOM_GST_PERCENT = 12;
+
+/*
+ * The tariff that divides the two accommodation slabs, per night.
+ * At or below this value the room is taxed at the lower rate; above it, 18%.
+ */
+const ROOM_GST_SLAB_THRESHOLD = 7500;
+
+/** Accommodation at or below the threshold. 5% from 22 Sep 2025, no ITC. */
+const ROOM_GST_LOWER_PERCENT = 5;
+
+/** Accommodation above the threshold. 18%, ITC available. */
+const ROOM_GST_UPPER_PERCENT = 18;
+
+/*
+ * The rate a room SHOULD carry today, from the tariff actually being charged.
+ *
+ * Takes the resolved nightly rate, not the room's headline price, because a
+ * room can cross Rs.7,500 between single and double occupancy — the slab
+ * follows the value of the supply, so the same room can be 5% for one guest
+ * and 18% for two.
+ *
+ * This is only the DEFAULT. An explicit rate on the room always wins, because
+ * the admin may have a reason the law does not know about.
+ */
+function slabRateForTariff(nightlyTariff) {
+  return Number(nightlyTariff) > ROOM_GST_SLAB_THRESHOLD
+    ? ROOM_GST_UPPER_PERCENT
+    : ROOM_GST_LOWER_PERCENT;
+}
+
+/*
+ * Kept as a named export of the old meaning so nothing that still refers to
+ * "the default" silently picks up the legacy rate. Anything quoting a real
+ * booking should go through roomRatePercent(room, guests) instead, which
+ * knows the tariff.
+ */
+const DEFAULT_ROOM_GST_PERCENT = ROOM_GST_LOWER_PERCENT;
 
 /*
  * The GST rate a BOOKING is taxed at.
  *
- * Read from the booking, never from the room. Rooms change — a suite gets
- * repriced above the slab and moves to 18% — and when that happens a stay
- * already sold at 12% must keep printing 12%, or a settled invoice stops
- * matching the money taken. bookings.room_gst_rate is stamped at the moment
- * the booking is created and never moves afterwards.
+ * Read from the booking, never from the room, and never from the current law.
+ * Rooms get repriced and rates get rewritten — a stay sold at 12% in August
+ * 2025 must keep printing 12% forever, or a settled invoice stops matching
+ * the money taken and the audit trail breaks.
  *
- * NULL means the booking predates the column; those were all charged 12%.
+ * NULL means the booking predates the column; those were all charged 12%,
+ * which is why this falls back to the LEGACY constant and not to the default.
  */
 function roomGstPercentOf(booking) {
   const r = booking?.room_gst_rate;
-  return r == null ? DEFAULT_ROOM_GST_PERCENT : Number(r);
+  return r == null ? LEGACY_ROOM_GST_PERCENT : Number(r);
 }
 
 /** Same thing as a multiplier, for `taxable * rate` arithmetic. */
@@ -201,10 +251,39 @@ function roomGstFractionOf(booking) {
   return roomGstPercentOf(booking) / 100;
 }
 
-/** The rate configured on a room, for a booking about to be created. */
-function roomRatePercent(room) {
-  const r = room?.gst_rate;
-  return r == null ? DEFAULT_ROOM_GST_PERCENT : Number(r);
+/*
+ * The rate to charge for a room at a KNOWN nightly tariff.
+ *
+ * An explicit gst_rate on the room wins outright — the admin may have a
+ * reason the law does not know about. Otherwise the slab decides.
+ *
+ * Takes the tariff rather than deriving it, because the caller sometimes
+ * knows better: a bulk booking can carry an admin-entered total that
+ * overrides the room's list price, and the slab follows the value actually
+ * being supplied.
+ */
+function roomRateForTariff(room, nightlyTariff) {
+  /*
+   * An explicit CGST/SGST pair IS the rate — the total is their sum. Checked
+   * before gst_rate so that a room configured as 2.5 + 2.5 cannot end up
+   * taxed at a stale total left in gst_rate from before the split was set.
+   */
+  const c = room?.cgst_rate;
+  const s = room?.sgst_rate;
+  if (c != null && c !== "" && s != null && s !== "") {
+    return round2(Number(c) + Number(s));
+  }
+
+  const explicit = room?.gst_rate;
+  if (explicit != null && explicit !== "") return Number(explicit);
+  return slabRateForTariff(nightlyTariff);
+}
+
+/*
+ * The rate to charge a booking about to be created, at a given occupancy.
+ */
+function roomRatePercent(room, guestCount = 1) {
+  return roomRateForTariff(room, resolveNightlyRate(room || {}, guestCount));
 }
 
 /*
@@ -225,16 +304,56 @@ function roomRatePercent(room) {
  */
 async function stampRoomGstRate(bookingId, conn = db) {
   try {
-    await conn.query(
-      `UPDATE bookings b
+    /*
+     * The rate is computed here in JS rather than with a SQL COALESCE,
+     * because the fallback is no longer a constant — it depends on the
+     * tariff this stay was sold at, and a room can sit on either side of
+     * Rs.7,500 depending on occupancy.
+     *
+     * Deriving it the same way calculateBookingAmounts() did is the whole
+     * point: a COALESCE(r.gst_rate, <constant>) here would stamp 5% onto a
+     * suite that was just CHARGED 18%, and the invoice would then contradict
+     * the money taken.
+     */
+    const [rows] = await conn.query(
+      `SELECT b.guest_count, r.gst_rate, r.cgst_rate, r.sgst_rate,
+              r.price_per_night, r.price_double
+         FROM bookings b
          JOIN rooms r ON r.room_id = b.room_id
-          SET b.room_gst_rate = COALESCE(r.gst_rate, ?)
         WHERE b.booking_id = ? AND b.room_gst_rate IS NULL`,
-      [DEFAULT_ROOM_GST_PERCENT, bookingId],
+      [bookingId],
     );
+
+    // Already stamped, or no such booking — either way there is nothing to do.
+    if (rows.length) {
+      const row = rows[0];
+      const total = roomRatePercent(row, row.guest_count);
+
+      /*
+       * The split is frozen only when the room actually HAS one configured.
+       * Writing the derived halves would record a figure nobody chose and
+       * make a later change to how the split is derived unable to reach
+       * these bookings; leaving them NULL keeps "ordinary half-and-half"
+       * expressible as what it is.
+       */
+      const hasSplit =
+        row.cgst_rate != null && row.cgst_rate !== "" &&
+        row.sgst_rate != null && row.sgst_rate !== "";
+
+      await conn.query(
+        `UPDATE bookings
+            SET room_gst_rate = ?, room_cgst_rate = ?, room_sgst_rate = ?
+          WHERE booking_id = ? AND room_gst_rate IS NULL`,
+        [
+          total,
+          hasSplit ? Number(row.cgst_rate) : null,
+          hasSplit ? Number(row.sgst_rate) : null,
+          bookingId,
+        ],
+      );
+    }
   } catch (e) {
-    // Never fail a confirmed booking over this. A booking left unstamped
-    // reads as the 12% default, which is what it was charged anyway.
+    // Never fail a confirmed booking over this.
     console.error(`Could not stamp room GST on booking ${bookingId}:`, e.message);
   }
 
@@ -337,6 +456,16 @@ async function runMigrations() {
        * they were actually charged.
        */
       "room_gst_rate DECIMAL(5,2) DEFAULT NULL",
+      /*
+       * The CGST / SGST halves this stay was billed at, frozen like the total.
+       *
+       * Both NULL means the split was the ordinary half-and-half, which is
+       * what every booking so far used — the invoice derives it rather than
+       * storing a figure nobody chose. They carry a value only when the room
+       * had an uneven split configured at the moment of sale.
+       */
+      "room_cgst_rate DECIMAL(5,2) DEFAULT NULL",
+      "room_sgst_rate DECIMAL(5,2) DEFAULT NULL",
       "gst_number VARCHAR(20) DEFAULT NULL",
       // Billing address printed under BILL TO. Optional — a booking without one
       // prints exactly as it did before.
@@ -366,9 +495,8 @@ async function runMigrations() {
 
     /*
      * ── per-room GST rate ──
-     * The admin sets this on the room form. NULL means "use the default",
-     * so every existing room is taxed at 12% exactly as before and nothing
-     * has to be backfilled here.
+     * The admin sets this on the room form. NULL means "follow the slab" —
+     * 5% at or below Rs.7,500 a night, 18% above.
      */
     try {
       await db.query(
@@ -377,6 +505,33 @@ async function runMigrations() {
     } catch (e) {
       if (e.code !== "ER_DUP_FIELDNAME") {
         console.error("Migration failed for rooms.gst_rate:", e.message);
+      }
+    }
+
+    /*
+     * ── per-room CGST / SGST split ──
+     *
+     * GST on a room is one rate that PRINTS as two halves. Accommodation's
+     * place of supply is the property's own state (IGST Act s.12(3)(b)), so
+     * a Tamil Nadu hotel always bills CGST + SGST and never IGST — even to a
+     * company registered in another state. There is deliberately no IGST
+     * column here, because for this supply there is no case that needs one.
+     *
+     * Both NULL means "split the total in half", which is the ordinary case
+     * and what every existing room does without being touched. They exist
+     * only so an admin can enter an uneven split if their auditor asks for
+     * one; when they are set, the total becomes their sum.
+     */
+    for (const col of [
+      "cgst_rate DECIMAL(5,2) DEFAULT NULL",
+      "sgst_rate DECIMAL(5,2) DEFAULT NULL",
+    ]) {
+      try {
+        await db.query(`ALTER TABLE rooms ADD COLUMN ${col}`);
+      } catch (e) {
+        if (e.code !== "ER_DUP_FIELDNAME") {
+          console.error(`Migration failed for rooms.${col}:`, e.message);
+        }
       }
     }
 
@@ -620,10 +775,16 @@ async function runMigrations() {
      * Stamp every pre-existing booking with the room GST rate it was actually
      * charged at.
      *
-     * Before per-room rates, the room was always taxed at 12%. Writing 12
-     * here means those bookings keep printing and totalling exactly as they
-     * do today, even after the admin sets a different rate on the room they
-     * were booked into.
+     * This writes LEGACY_ROOM_GST_PERCENT (12), never the current default.
+     * Any booking still carrying NULL here was created before the column
+     * existed, which means it was created under the flat-12% regime and was
+     * charged 12% — regardless of what the law says today or what rate the
+     * room now carries.
+     *
+     * Reading the live default here instead would mean that the day the
+     * default moved to 5%, the next restart quietly restamped those rows at
+     * 5% and every one of their invoices started printing a tax figure that
+     * does not match the money that was taken.
      *
      * Only rows with room_gst_rate IS NULL are touched, so this is a no-op on
      * every restart after the first.
@@ -631,11 +792,11 @@ async function runMigrations() {
     try {
       const [bf] = await db.query(
         "UPDATE bookings SET room_gst_rate = ? WHERE room_gst_rate IS NULL",
-        [DEFAULT_ROOM_GST_PERCENT],
+        [LEGACY_ROOM_GST_PERCENT],
       );
       if (bf.affectedRows) {
         console.log(
-          `✅ Stamped ${bf.affectedRows} existing booking(s) at ${DEFAULT_ROOM_GST_PERCENT}% room GST — totals unchanged`,
+          `✅ Stamped ${bf.affectedRows} existing booking(s) at ${LEGACY_ROOM_GST_PERCENT}% room GST — totals unchanged`,
         );
       }
     } catch (e) {
@@ -720,6 +881,78 @@ async function runMigrations() {
         INDEX idx_folio_booking (booking_id, voided),
         INDEX idx_folio_type (booking_id, item_type),
         FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE
+      )`,
+    );
+    /* ════════════════════════════════════════════════════════════════════
+       CREDIT NOTES
+
+       A tax invoice that has been issued is not editable. When the tax on it
+       turns out to be wrong — the 12%-to-5% accommodation change of 22 Sep
+       2025 being the case this was built for — the correction is a separate
+       document that REFERENCES the original, not a rewrite of it.
+
+       So nothing here ever touches the `bookings` row. The booking keeps the
+       frozen room_gst_rate it was sold at and its invoice keeps reprinting
+       exactly as it always did; the credit note sits beside it and records
+       the difference. That is what makes the pair reconcilable afterwards:
+       the original shows what was charged, the note shows what was given
+       back, and both survive.
+
+       THE SERIAL NUMBER IS THE PART THAT MATTERS.
+       A credit note series has to be consecutive — gaps are what an auditor
+       asks about. cn_seq is allocated as MAX+1 within the financial year
+       under a transaction, and UNIQUE(fin_year, cn_seq) is the backstop: if
+       two notes are ever issued at the same instant, the loser gets a
+       duplicate-key error and retries, rather than silently reusing a number
+       or skipping one.
+
+       Indian financial years run April to March, so the year label is
+       derived from the issue date, not the calendar year.
+       ════════════════════════════════════════════════════════════════════ */
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS credit_notes (
+        credit_note_id  INT AUTO_INCREMENT PRIMARY KEY,
+
+        -- the printed serial, e.g. CN/2025-26/0001
+        cn_number       VARCHAR(32)  NOT NULL,
+        fin_year        VARCHAR(9)   NOT NULL,
+        cn_seq          INT          NOT NULL,
+
+        booking_id      INT          NOT NULL,
+
+        -- what this note corrects. Stored rather than derived, because the
+        -- invoice number must stay stable even if the derivation changes.
+        original_invoice_no   VARCHAR(64) NOT NULL,
+        original_invoice_date DATE        DEFAULT NULL,
+
+        issue_date      DATE         NOT NULL,
+        reason          VARCHAR(255) NOT NULL,
+
+        -- the taxable value the tax was charged on. Unchanged by a rate
+        -- correction: only the tax moves, not the value of the supply.
+        taxable_amount  DECIMAL(12,2) NOT NULL,
+
+        original_rate   DECIMAL(5,2)  NOT NULL,
+        revised_rate    DECIMAL(5,2)  NOT NULL,
+        gst_original    DECIMAL(12,2) NOT NULL,
+        gst_revised     DECIMAL(12,2) NOT NULL,
+
+        -- what is being credited back: gst_original - gst_revised
+        gst_credited    DECIMAL(12,2) NOT NULL,
+
+        -- cancelled notes keep their serial, so the series stays gapless
+        status          VARCHAR(12)  NOT NULL DEFAULT 'issued',
+        cancelled_at    DATETIME     DEFAULT NULL,
+        cancel_reason   VARCHAR(255) DEFAULT NULL,
+
+        created_by      VARCHAR(120) DEFAULT NULL,
+        created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+
+        UNIQUE KEY uniq_cn_number (cn_number),
+        UNIQUE KEY uniq_cn_fy_seq (fin_year, cn_seq),
+        INDEX idx_cn_booking (booking_id),
+        INDEX idx_cn_issue (issue_date),
+        FOREIGN KEY (booking_id) REFERENCES bookings(booking_id)
       )`,
     );
     await db.query(
@@ -1876,7 +2109,198 @@ function resolveNightlyRate(room, guestCount) {
   return single;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   CREDIT NOTES — numbering and issue
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/*
+ * The Indian financial year a date falls in, as "2025-26".
+ * April to March, so January 2026 is still 2025-26.
+ */
+function finYearOf(date) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  // getMonth() is 0-based: 3 is April.
+  const startYear = d.getMonth() >= 3 ? y : y - 1;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+/*
+ * The invoice number a booking prints under.
+ *
+ * Mirrors formatBookingId()/invNo in frontend/src/invoicePdf.js. It is
+ * derived rather than stored, so this has to agree with the frontend exactly
+ * — a credit note that references an invoice number the guest's copy does not
+ * carry is useless to both of them.
+ *
+ * The year is taken in IST, not in the server's local zone. The frontend
+ * reads it from the browser, which at this property is IST; a server running
+ * UTC would otherwise disagree for any booking created between midnight and
+ * 05:30 IST on 1 January, and print a different invoice number for the same
+ * booking than the guest's own copy carries.
+ */
+const INVOICE_TZ = "Asia/Kolkata";
+
+function invoiceNoFor(booking) {
+  const raw = booking?.created_at ? new Date(booking.created_at) : null;
+  const d = raw && !Number.isNaN(raw.getTime()) ? raw : new Date();
+  const year = new Intl.DateTimeFormat("en-GB", {
+    timeZone: INVOICE_TZ,
+    year: "numeric",
+  }).format(d);
+  return `INV-${year}-${String(booking.booking_id).padStart(4, "0")}`;
+}
+
+/*
+ * Issue a credit note against a booking, inside a transaction.
+ *
+ * The serial is allocated as MAX(cn_seq)+1 for the financial year while
+ * holding the row lock, and UNIQUE(fin_year, cn_seq) catches the race that
+ * the lock does not. On a duplicate key the caller retries: the series stays
+ * consecutive either way, which is the whole requirement.
+ *
+ * Returns the inserted row. Never mutates the booking.
+ */
+async function issueCreditNote({
+  bookingId,
+  issueDate,
+  reason,
+  taxableAmount,
+  originalRate,
+  revisedRate,
+  originalInvoiceNo,
+  originalInvoiceDate,
+  createdBy,
+}) {
+  const gstOriginal = round2((Number(taxableAmount) * Number(originalRate)) / 100);
+  const gstRevised = round2((Number(taxableAmount) * Number(revisedRate)) / 100);
+  const gstCredited = round2(gstOriginal - gstRevised);
+
+  if (gstCredited <= 0) {
+    const err = new Error(
+      "A credit note must reduce the tax. The revised rate is not lower than the original.",
+    );
+    err.status = 400;
+    throw err;
+  }
+
+  const finYear = finYearOf(issueDate);
+
+  // Two attempts: one for the ordinary case, one for losing the race.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const conn = await db.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      const [[seqRow]] = await conn.query(
+        `SELECT COALESCE(MAX(cn_seq), 0) + 1 AS next_seq
+           FROM credit_notes
+          WHERE fin_year = ?
+          FOR UPDATE`,
+        [finYear],
+      );
+      const seq = Number(seqRow.next_seq);
+      const cnNumber = `CN/${finYear}/${String(seq).padStart(4, "0")}`;
+
+      const [ins] = await conn.query(
+        `INSERT INTO credit_notes
+           (cn_number, fin_year, cn_seq, booking_id,
+            original_invoice_no, original_invoice_date,
+            issue_date, reason, taxable_amount,
+            original_rate, revised_rate,
+            gst_original, gst_revised, gst_credited, created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          cnNumber,
+          finYear,
+          seq,
+          bookingId,
+          originalInvoiceNo,
+          originalInvoiceDate || null,
+          issueDate,
+          reason,
+          round2(taxableAmount),
+          Number(originalRate),
+          Number(revisedRate),
+          gstOriginal,
+          gstRevised,
+          gstCredited,
+          createdBy || null,
+        ],
+      );
+
+      await conn.commit();
+
+      const [[row]] = await db.query(
+        "SELECT * FROM credit_notes WHERE credit_note_id = ?",
+        [ins.insertId],
+      );
+      return row;
+    } catch (e) {
+      await conn.rollback().catch(() => {});
+      // Lost the race for this serial — take the next one.
+      if (e && e.code === "ER_DUP_ENTRY" && attempt < 2) continue;
+      throw e;
+    } finally {
+      conn.release();
+    }
+  }
+
+  const err = new Error("Could not allocate a credit note number. Try again.");
+  err.status = 503;
+  throw err;
+}
+
+/*
+ * The CGST / SGST halves of a rate.
+ *
+ * A room's GST is ONE rate that prints as two components. For accommodation
+ * the place of supply is the property's own state, so it is always CGST+SGST
+ * and never IGST — a Chennai company booking a Thiruvarur room is still an
+ * intra-state supply.
+ *
+ * The ordinary case is half each, and that is what both-NULL means. An
+ * explicit pair is honoured as given, because an auditor asking for an uneven
+ * split is the only reason to set one, and silently re-halving it would throw
+ * away the thing they asked for.
+ *
+ * The halves are rounded to 2dp and the SECOND one absorbs the remainder, so
+ * cgst + sgst always equals the total exactly. Without that, an odd rate like
+ * 5.01% would print 2.51 + 2.51 = 5.02 and the invoice would not foot.
+ */
+function splitGstRate(totalPercent, cgstPercent = null, sgstPercent = null) {
+  const hasExplicit =
+    cgstPercent != null && cgstPercent !== "" &&
+    sgstPercent != null && sgstPercent !== "";
+
+  if (hasExplicit) {
+    const c = Number(cgstPercent);
+    const s = Number(sgstPercent);
+    return { cgst: c, sgst: s, total: round2(c + s) };
+  }
+
+  const total = Number(totalPercent) || 0;
+  const cgst = round2(total / 2);
+  // the remainder, so the two halves always sum back to the total
+  const sgst = round2(total - cgst);
+  return { cgst, sgst, total: round2(total) };
+}
+
+/*
+ * The split a BOOKING was billed at. Frozen columns win; otherwise the
+ * total it was sold at is halved. Never reads the room — that may have been
+ * reconfigured since.
+ */
+function bookingGstSplit(booking) {
+  return splitGstRate(
+    roomGstPercentOf(booking),
+    booking?.room_cgst_rate,
+    booking?.room_sgst_rate,
+  );
+}
+
 async function calculateBookingAmounts({
+
   room_id,
   check_in_date,
   check_out_date,
@@ -1977,13 +2401,14 @@ async function calculateBookingAmounts({
   const taxableAmount = Math.round((roomSubtotal - discountAmount) * 100) / 100;
 
   /*
-   * PER-ROOM GST: the rate comes from the room being booked, defaulting to
-   * 12% for a room where the admin has not set one — which is every room
-   * until they do, so this is unchanged for existing inventory.
+   * PER-ROOM GST: an explicit rate on the room wins; otherwise the slab
+   * decides from the tariff this stay is actually being sold at (5% at or
+   * below Rs.7,500 a night, 18% above). Occupancy is passed because a room
+   * can cross that line between single and double.
    *
    * The caller writes this onto the booking as room_gst_rate, freezing it.
    */
-  const roomGstRate = roomRatePercent(room);
+  const roomGstRate = roomRatePercent(room, guest_count);
   const gstAmount =
     Math.round(taxableAmount * (roomGstRate / 100) * 100) / 100;
 
@@ -2787,7 +3212,7 @@ app.get("/api/rooms", async (req, res) => {
   try {
     const { type, min_price, max_price, check_in, check_out } = req.query;
     let q =
-      "SELECT room_id, room_number, room_type, price_per_night, price_double, gst_rate, capacity, description, image_url, image2, image3, image4, image5, is_available, created_at FROM rooms WHERE is_available=1";
+      "SELECT room_id, room_number, room_type, price_per_night, price_double, gst_rate, cgst_rate, sgst_rate, capacity, description, image_url, image2, image3, image4, image5, is_available, created_at FROM rooms WHERE is_available=1";
     const p = [];
     if (type) {
       q += " AND room_type=?";
@@ -3202,9 +3627,9 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
     const base_price = nights * resolveNightlyRate(room, guest_count);
     const vehicle_price = 0;
     const room_subtotal = base_price + vehicle_price;
-    // PER-ROOM GST — the rate set on this room, or 12% when unset.
+    // PER-ROOM GST — explicit room rate, else the slab for this tariff.
     const gst_amount =
-      Math.round(room_subtotal * (roomRatePercent(room) / 100) * 100) / 100;
+      Math.round(room_subtotal * (roomRatePercent(room, guest_count) / 100) * 100) / 100;
     const total_price = Math.round((room_subtotal + gst_amount) * 100) / 100;
     const [result] = await db.query(
       `INSERT INTO bookings (user_id,room_id,check_in_date,check_out_date,guest_count,total_price,taxable_amount,gst_amount,final_total,vehicle_type,vehicle_price,status) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'pending')`,
@@ -4367,9 +4792,9 @@ app.post("/api/bookings", requireAuth, async (req, res, next) => {
     }
 
     const base_price = nights * resolveNightlyRate(room, guest_count);
-    // PER-ROOM GST — the rate set on this room, or 12% when unset.
+    // PER-ROOM GST — explicit room rate, else the slab for this tariff.
     const gst_amount =
-      Math.round(base_price * (roomRatePercent(room) / 100) * 100) / 100;
+      Math.round(base_price * (roomRatePercent(room, guest_count) / 100) * 100) / 100;
     const total_price = Math.round((base_price + gst_amount) * 100) / 100;
 
     // The availability check and the insert must be one atomic unit. Without
@@ -6400,6 +6825,30 @@ app.patch(
         ],
       );
 
+      /*
+       * Rebuild the folio from the columns just written.
+       *
+       * The checkout discount lands on `bookings` above, but the folio is a
+       * separate set of rows and does not follow on its own. That gap did not
+       * show while the printed bill was built from the booking's columns —
+       * now that the GST invoice is built from the FOLIO, a folio missing
+       * this line prints a bill without the discount and overcharges the
+       * guest by the discount plus its tax.
+       *
+       * rebuildFolioFromColumns reads both discount columns and posts each as
+       * its own line, so this is correct for applying AND for removing.
+       */
+      try {
+        await rebuildFolioFromColumns(req.params.id);
+      } catch (e) {
+        // The booking's own columns are already correct, so the money is
+        // right either way; only the per-night breakdown would be stale.
+        console.error(
+          `Folio rebuild after checkout discount failed for booking ${req.params.id}:`,
+          e.message,
+        );
+      }
+
       res.json({
         message: applied
           ? "Checkout discount applied"
@@ -7531,6 +7980,335 @@ app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
   }
 });
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   CREDIT NOTES — API
+
+   The booking row is never written by anything in this block. A credit note
+   is a separate document that references the invoice; correcting tax by
+   editing the original would destroy the only record of what was actually
+   charged and collected.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/*
+ * The date the lower accommodation slab moved from 12% to 5%.
+ *
+ * Stays that ENDED before this were correctly charged 12% and are not
+ * mis-billed — only stays supplied on or after it are candidates. The date of
+ * supply for accommodation is the stay itself, so this filters on
+ * check_out_date, not on when the booking was made or paid.
+ */
+const SLAB_CHANGE_DATE = "2025-09-22";
+
+/*
+ * Bookings whose frozen room GST rate does not match the slab their tariff
+ * falls into, for stays on or after the rate change.
+ *
+ * This REPORTS, it does not decide. The rate a booking should have carried is
+ * a question with real exceptions — an explicit per-room rate the admin set
+ * deliberately, a stay straddling the change date — so every row comes back
+ * with the figures and the admin chooses what to credit. Nothing is issued
+ * automatically.
+ */
+app.get("/api/admin/gst/affected-bills", requireAdmin, async (req, res) => {
+  try {
+    const from = req.query.from || SLAB_CHANGE_DATE;
+
+    const [rows] = await db.query(
+      `SELECT b.booking_id, b.created_at, b.check_in_date, b.check_out_date,
+              b.guest_count, b.taxable_amount, b.gst_amount, b.total_amount,
+              b.final_total, b.room_gst_rate, b.gst_enabled, b.status,
+              r.room_number, r.room_type, r.price_per_night, r.price_double,
+              r.gst_rate AS room_configured_rate,
+              u.name AS guest_name, u.email AS guest_email,
+              cn.cn_number, cn.credit_note_id, cn.gst_credited
+         FROM bookings b
+         JOIN rooms r ON r.room_id = b.room_id
+         LEFT JOIN users u ON u.user_id = b.user_id
+         LEFT JOIN credit_notes cn
+                ON cn.booking_id = b.booking_id AND cn.status = 'issued'
+        WHERE b.check_out_date >= ?
+          AND b.status NOT IN ('cancelled','pending')
+          AND COALESCE(b.gst_enabled, 1) = 1
+        ORDER BY b.check_out_date DESC, b.booking_id DESC`,
+      [from],
+    );
+
+    const affected = [];
+    let totalExcess = 0;
+    let totalShortfall = 0;
+
+    for (const b of rows) {
+      const charged = b.room_gst_rate == null
+        ? LEGACY_ROOM_GST_PERCENT
+        : Number(b.room_gst_rate);
+
+      // The slab the tariff actually supplied falls into.
+      const nights = Math.max(
+        1,
+        Math.ceil(
+          (new Date(b.check_out_date) - new Date(b.check_in_date)) / 86400000,
+        ),
+      );
+      const taxable = Number(b.taxable_amount || 0);
+      const perNight = nights > 0 ? taxable / nights : taxable;
+      const expected = slabRateForTariff(perNight);
+
+      if (charged === expected) continue;
+
+      const gstCharged = round2((taxable * charged) / 100);
+      const gstExpected = round2((taxable * expected) / 100);
+      const difference = round2(gstCharged - gstExpected);
+
+      /*
+       * THE TWO DIRECTIONS ARE NOT THE SAME PROBLEM, and must never be
+       * netted against each other.
+       *
+       * Over-collected (charged 12% where 5% was due): money taken from the
+       * guest that was not owed. Corrected with a CREDIT NOTE, which is what
+       * this feature issues.
+       *
+       * Under-collected (charged 12% where 18% was due — a suite over
+       * Rs.7,500 billed at the old flat rate): tax that was owed and not
+       * collected. That is a liability, not a refund, and it is corrected
+       * with a DEBIT NOTE or supplementary invoice, which this system does
+       * not issue. Showing one figure for both would hide it.
+       */
+      const overCollected = difference > 0;
+
+      if (!b.cn_number) {
+        if (overCollected) totalExcess = round2(totalExcess + difference);
+        else totalShortfall = round2(totalShortfall + Math.abs(difference));
+      }
+
+      affected.push({
+        booking_id: b.booking_id,
+        invoice_no: invoiceNoFor(b),
+        guest_name: b.guest_name,
+        guest_email: b.guest_email,
+        room_number: b.room_number,
+        room_type: b.room_type,
+        check_in_date: b.check_in_date,
+        check_out_date: b.check_out_date,
+        nights,
+        taxable_amount: round2(taxable),
+        per_night: round2(perNight),
+        charged_rate: charged,
+        expected_rate: expected,
+        gst_charged: gstCharged,
+        gst_expected: gstExpected,
+        difference,
+        direction: overCollected ? "over_collected" : "under_collected",
+        // only an over-collection can be corrected here
+        can_credit: overCollected,
+        remedy: overCollected ? "credit_note" : "debit_note_required",
+        // an explicit rate means somebody chose this deliberately — flagged,
+        // not corrected, because the admin may have had a reason
+        room_configured_rate: b.room_configured_rate,
+        deliberate: b.room_configured_rate != null && b.room_configured_rate !== "",
+        credit_note: b.cn_number || null,
+        credit_note_id: b.credit_note_id || null,
+        gst_credited: b.gst_credited == null ? null : Number(b.gst_credited),
+      });
+    }
+
+    res.json({
+      from,
+      slab_change_date: SLAB_CHANGE_DATE,
+      count: affected.length,
+      // kept separate deliberately — see the comment above
+      uncredited_excess: totalExcess,
+      uncollected_shortfall: totalShortfall,
+      shortfall_note:
+        totalShortfall > 0
+          ? "Some stays were charged LESS tax than was due. That is a liability, not a refund, and needs a debit note or supplementary invoice — this screen cannot issue one. Take these to your auditor."
+          : null,
+      bills: affected,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* Issue a credit note against one booking. */
+app.post("/api/admin/credit-notes", requireAdmin, async (req, res) => {
+  try {
+    const {
+      booking_id,
+      revised_rate,
+      reason,
+      issue_date,
+    } = req.body || {};
+
+    if (!booking_id) {
+      return res.status(400).json({ error: "booking_id is required" });
+    }
+    if (revised_rate === undefined || revised_rate === null || revised_rate === "") {
+      return res.status(400).json({ error: "revised_rate is required" });
+    }
+
+    const revised = Number(revised_rate);
+    if (!Number.isFinite(revised) || revised < 0 || revised > 28) {
+      return res.status(400).json({ error: "Revised rate must be between 0 and 28" });
+    }
+
+    const [[booking]] = await db.query(
+      `SELECT b.*, r.room_number
+         FROM bookings b JOIN rooms r ON r.room_id = b.room_id
+        WHERE b.booking_id = ?`,
+      [booking_id],
+    );
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    // One live note per booking. A second correction on the same bill is
+    // almost always a double-credit by mistake; cancel the first if the
+    // figures were wrong.
+    const [[existing]] = await db.query(
+      "SELECT cn_number FROM credit_notes WHERE booking_id = ? AND status = 'issued' LIMIT 1",
+      [booking_id],
+    );
+    if (existing) {
+      return res.status(409).json({
+        error: `Booking already has credit note ${existing.cn_number}. Cancel it before issuing another.`,
+      });
+    }
+
+    const charged = booking.room_gst_rate == null
+      ? LEGACY_ROOM_GST_PERCENT
+      : Number(booking.room_gst_rate);
+
+    if (revised >= charged) {
+      return res.status(400).json({
+        error: `A credit note must reduce the tax. This bill was charged ${charged}%.`,
+      });
+    }
+
+    const note = await issueCreditNote({
+      bookingId: booking.booking_id,
+      issueDate: issue_date || new Date().toISOString().slice(0, 10),
+      reason: String(reason || "GST rate correction").slice(0, 255),
+      taxableAmount: Number(booking.taxable_amount || 0),
+      originalRate: charged,
+      revisedRate: revised,
+      originalInvoiceNo: invoiceNoFor(booking),
+      originalInvoiceDate: booking.created_at
+        ? new Date(booking.created_at).toISOString().slice(0, 10)
+        : null,
+      createdBy: req.user?.email || req.user?.name || `user:${req.user?.user_id}`,
+    });
+
+    res.status(201).json(note);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+/* Every credit note issued, newest first. */
+app.get("/api/admin/credit-notes", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT cn.*, b.check_in_date, b.check_out_date,
+              r.room_number, u.name AS guest_name, u.email AS guest_email
+         FROM credit_notes cn
+         JOIN bookings b ON b.booking_id = cn.booking_id
+         JOIN rooms r ON r.room_id = b.room_id
+         LEFT JOIN users u ON u.user_id = b.user_id
+        ORDER BY cn.fin_year DESC, cn.cn_seq DESC`,
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/*
+ * Cancel a credit note.
+ *
+ * The row stays and keeps its serial — removing it would put a gap in the
+ * series, which is the first thing an auditor asks about. It is marked
+ * cancelled so the booking can take a corrected note.
+ */
+app.post("/api/admin/credit-notes/:id/cancel", requireAdmin, async (req, res) => {
+  try {
+    const { reason } = req.body || {};
+    const [r] = await db.query(
+      `UPDATE credit_notes
+          SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = ?
+        WHERE credit_note_id = ? AND status = 'issued'`,
+      [String(reason || "Cancelled by admin").slice(0, 255), req.params.id],
+    );
+    if (!r.affectedRows) {
+      return res
+        .status(404)
+        .json({ error: "No live credit note with that id" });
+    }
+    res.json({ message: "Credit note cancelled" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/*
+ * Credit notes as CSV, in the shape GSTR-1 table 9B wants.
+ *
+ * Deliberately a flat export rather than a filing integration: the figures
+ * go to whoever files the return, and they decide what lands on it.
+ */
+app.get("/api/admin/credit-notes/export", requireAdmin, async (req, res) => {
+  try {
+    const { fin_year } = req.query;
+    const [rows] = await db.query(
+      `SELECT cn.*, u.name AS guest_name, b.gst_number AS customer_gst_number
+         FROM credit_notes cn
+         JOIN bookings b ON b.booking_id = cn.booking_id
+         LEFT JOIN users u ON u.user_id = b.user_id
+        ${fin_year ? "WHERE cn.fin_year = ?" : ""}
+        ORDER BY cn.fin_year, cn.cn_seq`,
+      fin_year ? [fin_year] : [],
+    );
+
+    const esc = (v) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const header = [
+      "Credit Note No", "Credit Note Date", "Original Invoice No",
+      "Original Invoice Date", "Recipient", "Recipient GSTIN",
+      "Taxable Value", "Original Rate %", "Revised Rate %",
+      "GST Originally Charged", "GST Now Due", "GST Credited",
+      "Reason", "Status",
+    ].join(",");
+
+    const body = rows.map((r) => [
+      r.cn_number,
+      r.issue_date instanceof Date ? r.issue_date.toISOString().slice(0, 10) : r.issue_date,
+      r.original_invoice_no,
+      r.original_invoice_date instanceof Date
+        ? r.original_invoice_date.toISOString().slice(0, 10)
+        : r.original_invoice_date,
+      r.guest_name,
+      r.customer_gst_number,
+      r.taxable_amount,
+      r.original_rate,
+      r.revised_rate,
+      r.gst_original,
+      r.gst_revised,
+      r.gst_credited,
+      r.reason,
+      r.status,
+    ].map(esc).join(","));
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="credit-notes${fin_year ? `-${fin_year}` : ""}.csv"`,
+    );
+    res.send([header, ...body].join("\n"));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/admin/rooms", requireAdmin, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM rooms ORDER BY room_id ASC");
@@ -7570,8 +8348,38 @@ app.post("/api/admin/rooms", requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "GST rate must be between 0 and 28" });
     }
 
+    /*
+     * Optional CGST/SGST split at creation. Pair or nothing, same rule as the
+     * update route: half a split leaves the room in a state where the total
+     * cannot be derived. When given, the pair IS the rate and gst_rate is
+     * written from their sum.
+     */
+    const blankRate = (v) => v === null || v === undefined || v === "";
+    const cIn = req.body.cgst_rate;
+    const sIn = req.body.sgst_rate;
+    let roomCgst = null;
+    let roomSgst = null;
+    let effectiveGst = roomGst;
+
+    if (!blankRate(cIn) || !blankRate(sIn)) {
+      if (blankRate(cIn) || blankRate(sIn)) {
+        return res.status(400).json({
+          error: "Set CGST and SGST together, or leave both blank to split the total in half",
+        });
+      }
+      roomCgst = Number(cIn);
+      roomSgst = Number(sIn);
+      const bad = (n) => !Number.isFinite(n) || n < 0 || n > 28;
+      if (bad(roomCgst) || bad(roomSgst) || roomCgst + roomSgst > 28) {
+        return res
+          .status(400)
+          .json({ error: "CGST and SGST must each be 0–28, and must not sum above 28" });
+      }
+      effectiveGst = round2(roomCgst + roomSgst);
+    }
+
     const [r] = await db.query(
-      "INSERT INTO rooms (room_number,room_type,price_per_night,price_double,capacity,description,image_url,gst_rate,is_available) VALUES (?,?,?,?,?,?,?,?,1)",
+      "INSERT INTO rooms (room_number,room_type,price_per_night,price_double,capacity,description,image_url,gst_rate,cgst_rate,sgst_rate,is_available) VALUES (?,?,?,?,?,?,?,?,?,?,1)",
       [
         room_number,
         room_type,
@@ -7580,7 +8388,9 @@ app.post("/api/admin/rooms", requireAdmin, async (req, res) => {
         capacity || 2,
         description || null,
         image_url || null,
-        roomGst,
+        effectiveGst,
+        roomCgst,
+        roomSgst,
       ],
     );
     res.status(201).json({ message: "Room added", room_id: r.insertId });
@@ -7652,6 +8462,64 @@ app.patch("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
       fields.push("gst_rate=?");
       values.push(parsed);
     }
+    /*
+     * ── CGST / SGST split ──
+     *
+     * Optional. Sent as a pair or not at all: half a split is not a split,
+     * and accepting one side would leave the room in a state where the total
+     * cannot be derived. Clearing is done by sending both empty.
+     *
+     * When a pair is given it becomes the authority — gst_rate is written to
+     * their sum in the same statement, so the two can never drift apart and
+     * leave the room taxed at a figure the printed halves contradict.
+     */
+    const cgstIn = req.body.cgst_rate;
+    const sgstIn = req.body.sgst_rate;
+    if (cgstIn !== undefined || sgstIn !== undefined) {
+      const blank = (v) => v === null || v === undefined || v === "";
+
+      if (blank(cgstIn) !== blank(sgstIn)) {
+        return res.status(400).json({
+          error: "Set CGST and SGST together, or leave both blank to split the total in half",
+        });
+      }
+
+      if (blank(cgstIn)) {
+        fields.push("cgst_rate=?", "sgst_rate=?");
+        values.push(null, null);
+      } else {
+        const c = Number(cgstIn);
+        const s = Number(sgstIn);
+        const bad = (n) => !Number.isFinite(n) || n < 0 || n > 28;
+        if (bad(c) || bad(s)) {
+          return res
+            .status(400)
+            .json({ error: "CGST and SGST must each be between 0 and 28" });
+        }
+        if (c + s > 28) {
+          return res
+            .status(400)
+            .json({ error: "CGST + SGST cannot exceed 28%" });
+        }
+        fields.push("cgst_rate=?", "sgst_rate=?");
+        values.push(c, s);
+
+        /*
+         * The pair wins over any gst_rate in the same request. Overwriting
+         * the existing assignment rather than appending a second one keeps
+         * the statement free of a duplicate column, which would otherwise
+         * work only because MySQL happens to take the last.
+         */
+        const total = round2(c + s);
+        const existing = fields.indexOf("gst_rate=?");
+        if (existing >= 0) values[existing] = total;
+        else {
+          fields.push("gst_rate=?");
+          values.push(total);
+        }
+      }
+    }
+
     if (req.body.image2 !== undefined) {
       fields.push("image2=?");
       values.push(req.body.image2);
@@ -7754,9 +8622,19 @@ app.post(
           req.body.total_amount !== undefined && req.body.total_amount !== ""
             ? Math.max(0, Number(req.body.total_amount))
             : nightlyRate * nights;
-        // PER-ROOM GST — the rate set on this room, or 12% when unset.
+        /*
+         * PER-ROOM GST — explicit room rate, else the slab for this tariff.
+         *
+         * The slab follows the per-night value of the supply, and a bulk
+         * booking may carry an admin-entered total that overrides the room's
+         * list price. So the rate is decided from what is actually being
+         * charged per night, not from the room's headline tariff.
+         */
+        const effectiveNightly = nights > 0 ? roomSubtotal / nights : roomSubtotal;
         const gstAmount =
-          Math.round(roomSubtotal * (roomRatePercent(room) / 100) * 100) / 100;
+          Math.round(
+            roomSubtotal * (roomRateForTariff(room, effectiveNightly) / 100) * 100,
+          ) / 100;
         const totalAmount = Math.round((roomSubtotal + gstAmount) * 100) / 100;
 
         // reuse an account when the email is known, otherwise make a placeholder

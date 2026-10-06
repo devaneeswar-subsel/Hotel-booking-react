@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
+/*
+ * The guest gets ONE bill: the hotel's own invoice, which now carries the
+ * night-wise GST breakdown as well. There is no separate "GST bill".
+ */
 import { printInvoicePdf } from "./invoicePdf";
 import { GSTIN_PATTERN } from "./utils/billing";
 import {
@@ -2982,22 +2986,44 @@ const roomTotalWithGst = Math.max(
                 : "Confirmed & Check-In"}
           </button>
 
+          {/*
+            THE bill. One document, not two.
+
+            The hotel's own invoice design, now carrying the night-wise GST
+            breakdown that used to need a second document. Handing a guest two
+            bills for one stay is how two bills end up disagreeing — one picks
+            up a late discount and the other does not, and the hotel then has
+            two numbers for the same night.
+
+            The folio is fetched here rather than inside the PDF module so the
+            module stays free of API calls, and so the invoice still prints if
+            the folio cannot be reached — it just omits the night-wise section
+            rather than inventing one.
+          */}
           <button
-            onClick={() =>
-              printInvoicePdf(
-                booking,
-                {
-                  paymentMode:
-                    payMethod,
-                  showToast: toast,
-                  checkoutDiscount:
-                    appliedCheckoutDiscount,
-                  // Staff copy — carries the signature block. The guest's own
-                  // download from the checkout page does not.
-                  showSignature: true,
-                },
-              )
-            }
+            onClick={async () => {
+              let folioItems = null;
+              try {
+                const res = await apiFetch(
+                  `/api/bookings/${booking.booking_id}/folio`,
+                );
+                if (res.ok) {
+                  const data = await res.json();
+                  folioItems = Array.isArray(data?.items) ? data.items : null;
+                }
+              } catch {
+                // invoice still prints, without the night-wise section
+              }
+              printInvoicePdf(booking, {
+                paymentMode: payMethod,
+                showToast: toast,
+                checkoutDiscount: appliedCheckoutDiscount,
+                // Staff copy — carries the signature block. The guest's own
+                // download from the checkout page does not.
+                showSignature: true,
+                folioItems,
+              });
+            }}
             className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-3 text-[0.88rem] font-bold text-navy transition hover:bg-gray-50"
           >
             {I.print}

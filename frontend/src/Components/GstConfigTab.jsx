@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { CheckIcon, XIcon } from "../Icons";
-import { GST_RATE } from "../utils/billing";
+import {
+  ROOM_GST_LOWER_PERCENT,
+  ROOM_GST_UPPER_PERCENT,
+  ROOM_GST_SLAB_THRESHOLD,
+} from "../utils/billing";
 import { formatRate } from "../utils/addonGst";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -22,8 +26,6 @@ import { formatRate } from "../utils/addonGst";
    the money the hotel actually took. Freezing the rate on the charge keeps
    every past bill reconcilable.
    ═══════════════════════════════════════════════════════════════════════ */
-
-const ROOM_GST_PERCENT = GST_RATE * 100;
 
 /* A GST slab that is not one of the real ones is nearly always a typo. */
 const COMMON_SLABS = [0, 5, 12, 18, 28];
@@ -227,8 +229,10 @@ export default function GstConfigTab({ apiFetch, showToast }) {
           Editing a rate affects charges posted <strong>from now on</strong>.
           Charges already on a guest's bill keep the rate they were posted at,
           so settled invoices continue to match the money collected. Room
-          tariff is taxed separately at {formatRate(ROOM_GST_PERCENT)} and is
-          not configured here.
+          tariff is taxed separately — {ROOM_GST_LOWER_PERCENT}% at or below
+          Rs.{ROOM_GST_SLAB_THRESHOLD.toLocaleString("en-IN")} a night and{" "}
+          {ROOM_GST_UPPER_PERCENT}% above, or whatever rate is set on the room
+          itself — and is configured per room under Rooms, not here.
         </div>
       </div>
 

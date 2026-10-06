@@ -445,17 +445,22 @@ export default function AdminBookingForUsers({
   /*
    * The rate this ROOM is configured at. A booking does not exist yet, so
    * there is no frozen room_gst_rate to read — roomRateFromRoom is the
-   * helper meant for exactly this case. Falls back to 12% for a room where
-   * no rate has been set, which is every room until an admin sets one.
+   * helper meant for exactly this case.
+   *
+   * An explicit rate on the room wins; otherwise the slab decides from the
+   * tariff at THIS occupancy (5% at or below Rs.7,500 a night, 18% above).
+   * guest_count is passed because a room can cross that line between single
+   * and double, and the server decides the same way — if these disagree, the
+   * desk quotes a figure the backend then charges differently.
    */
   const roomGstMultiplier = useMemo(
-    () => roomRateFromRoom(room),
-    [room],
+    () => roomRateFromRoom(room, form.guest_count),
+    [room, form.guest_count],
   );
 
   const roomGstLabel = useMemo(
-    () => roomPercentFromRoom(room),
-    [room],
+    () => roomPercentFromRoom(room, form.guest_count),
+    [room, form.guest_count],
   );
 
   const totals = useMemo(() => {
