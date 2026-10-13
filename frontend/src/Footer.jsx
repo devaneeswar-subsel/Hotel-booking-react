@@ -150,6 +150,17 @@ export default function Footer() {
       <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-[10px] text-[0.75rem] text-white/30">
         <span>© 2026 VV Grand Park Residency. All rights reserved.</span>
         <span>Crafted with care for exceptional guests.</span>
+        <span>
+          Powered by:{" "}
+          <a
+            href="https://www.subseltechsolution.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-[#C9A84C]/80 underline-offset-4 transition-colors duration-200 hover:text-[#E8D5A3] hover:underline"
+          >
+            Subsel Tech Solution
+          </a>
+        </span>
       </div>
     </footer>
   );
