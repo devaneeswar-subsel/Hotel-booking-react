@@ -9147,14 +9147,26 @@ app.delete("/api/admin/rooms/:id", requireAdmin, async (req, res, next) => {
     // Never delete a room that still has live bookings — depending on the
     // foreign key those bookings would either vanish or the delete would fail
     // with a raw SQL error. Tell the admin what is blocking it instead.
-    const [[active]] = await db.query(
-      `SELECT COUNT(*) AS n FROM bookings
-        WHERE room_id = ? AND status NOT IN ('cancelled')`,
+    // A 'pending' row is an unpaid checkout that was closed — it never held
+    // the room, so it must not stop the delete. Only a checkout started in
+    // the last hour (the guest may still be on the Razorpay screen) does.
+    const [active] = await db.query(
+      `SELECT booking_id, status FROM bookings
+        WHERE room_id = ?
+          AND (status NOT IN ('cancelled','pending')
+               OR (status = 'pending' AND created_at > DATE_SUB(NOW(), INTERVAL 60 MINUTE)))`,
       [req.params.id],
     );
-    if (Number(active?.n || 0) > 0) {
+    if (active.length) {
+      const paying = active.filter((b) => b.status === "pending").length;
       return res.status(409).json({
-        error: `This room has ${active.n} booking(s). Mark it unavailable instead of deleting it.`,
+        error:
+          paying === active.length
+            ? "A guest checkout for this room was started in the last hour. Try again after an hour."
+            : `This room has ${active.length - paying} booking(s) (${active
+                .filter((b) => b.status !== "pending")
+                .map((b) => `#${b.booking_id}`)
+                .join(", ")}). Mark it unavailable instead of deleting it.`,
       });
     }
     const [result] = await db.query("DELETE FROM rooms WHERE room_id=?", [

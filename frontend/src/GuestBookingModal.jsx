@@ -202,6 +202,12 @@ export default function GuestBookingModal({
         theme: { color: "#0F1923" },
         modal: {
           ondismiss: () => {
+            // release the unpaid checkout, as the signed-in checkout does
+            fetch(`${API}/api/payment/failed`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ booking_id: order.booking_id }),
+            }).catch(() => {});
             setLoading(false);
             showToast?.("Payment cancelled.", "error");
           },
