@@ -15,18 +15,10 @@
 const fs = require("fs");
 const path = require("path");
 const mysql = require("mysql2/promise");
+const { connectionOptions } = require("./db-connect");
 
 async function main() {
-  const url = process.env.MYSQL_URL || process.env.DATABASE_URL;
-  const conn = url
-    ? await mysql.createConnection({ uri: url, ssl: { rejectUnauthorized: false } })
-    : await mysql.createConnection({
-        host: process.env.MYSQLHOST || "127.0.0.1",
-        user: process.env.MYSQLUSER || "root",
-        password: process.env.MYSQLPASSWORD,
-        database: process.env.MYSQLDATABASE || "hotel_db",
-        port: Number(process.env.MYSQLPORT) || 3306,
-      });
+  const conn = await mysql.createConnection(connectionOptions());
 
   const [tables] = await conn.query(
     "SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME",

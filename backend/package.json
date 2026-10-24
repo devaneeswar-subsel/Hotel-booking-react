@@ -6,7 +6,9 @@
   "scripts": {
     "test": "node --test tests/",
     "start": "node server.js",
-    "dump-schema": "node scripts/dump-schema.js"
+    "dump-schema": "node scripts/dump-schema.js",
+    "backup-db": "node scripts/backup-db.js",
+    "restore-db": "node scripts/restore-db.js"
   },
   "keywords": [],
   "author": "",

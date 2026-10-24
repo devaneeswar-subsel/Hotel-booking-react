@@ -56,12 +56,36 @@ from production whenever a table or column is added, and commit it:
 
 ```powershell
 cd backend
-$env:MYSQL_URL = "<MYSQL_PUBLIC_URL from the Railway MySQL service → Variables>"
+$env:MYSQL_URL = "<Public Network URL: Railway → MySQL → Database → Connect → Public Network>"
 npm run dump-schema
 ```
 
 It reads table definitions only — no guest data. Also make sure backups are
 switched on for the MySQL service in Railway.
+
+## Backups (free plan — run by hand)
+
+Railway's free plan has no scheduled database backups, so take one weekly and
+before every big deploy:
+
+```powershell
+cd backend
+$env:MYSQL_URL = "<Public Network URL: Railway → MySQL → Database → Connect → Public Network>"
+npm run backup-db
+```
+
+It writes `backend/backups/vvgrandpark-<date>_<time>.sql.gz` (structure and
+all data). The file contains guest personal data: it is git-ignored, so keep
+copies somewhere private, never in the repo or a chat.
+
+To restore into a NEW, empty database (point `MYSQL_URL` at it first):
+
+```powershell
+npm run restore-db -- backups/vvgrandpark-<date>_<time>.sql.gz
+```
+
+It refuses to touch a database that already has tables unless you add
+`--overwrite`. With Railway Pro, switch on scheduled backups instead.
 
 ## Invoice numbers
 
