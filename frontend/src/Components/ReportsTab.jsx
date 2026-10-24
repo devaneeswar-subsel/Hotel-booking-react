@@ -166,7 +166,7 @@ export default function ReportsTab({ apiFetch, showToast }) {
       doc.setTextColor(180, 170, 150);
 
       doc.text(
-        `Period: ${reportData.startDate} to ${reportData.endDate}`,
+        `Period (booking date): ${reportData.startDate} to ${reportData.endDate}`,
         W - marginX,
         22,
         {
@@ -798,6 +798,10 @@ export default function ReportsTab({ apiFetch, showToast }) {
               Bookings ({reportData.startDate} → {reportData.endDate})
               <span className="text-[0.78rem] font-normal text-[#868E96] ml-2">
                 ({totalRecords} records)
+              </span>
+              {/* A-04 */}
+              <span className="block text-[0.72rem] font-normal text-[#868E96]">
+                By booking date — when the booking was made, not the stay date
               </span>
             </div>
 

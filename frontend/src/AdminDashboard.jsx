@@ -26,6 +26,8 @@ import { printInvoicePdf } from "./invoicePdf";
 import { createPortal } from "react-dom";
 import ReportsTab from "./Components/ReportsTab";
 import GstConfigTab from "./Components/GstConfigTab";
+import ReviewsModeration from "./Components/ReviewsModeration";
+import { confirmDialog } from "./Components/ConfirmDialog";
 import {
   roomRateFromRoom,
   roomPercentFromRoom,
@@ -253,7 +255,7 @@ function BarChart({ data, color = "#C9A84C", height = 64 }) {
     </div>
   );
 }
-function RowActionsMenu({ booking, onDetails, onCancel, onDelete }) {
+function RowActionsMenu({ booking, onDetails, onCancel, onDelete, onResendEmail }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const btnRef = useRef(null);
@@ -323,6 +325,20 @@ function RowActionsMenu({ booking, onDetails, onCancel, onDelete }) {
             >
               Details
             </button>
+            {/* OP-06: re-send the confirmation + invoice email */}
+            {onResendEmail &&
+              (booking.status === "confirmed" ||
+                booking.status === "completed") && (
+                <button
+                  onClick={() => {
+                    setOpen(false);
+                    onResendEmail();
+                  }}
+                  className="block w-full px-3 py-2 text-left text-[0.78rem] hover:bg-gray-50"
+                >
+                  Resend confirmation email
+                </button>
+              )}
             {canCancel && (
               <button
                 onClick={() => {
@@ -2503,10 +2519,10 @@ function RoomBlockedDatesModal({ room, onClose, showToast, onRefresh }) {
             Unblock Selected Dates
           </button>
           <button
-            onClick={() => {
+            onClick={async () => {
               if (reason === "bulk") {
                 const nights = selectedDateKeys.length;
-                const ok = window.confirm(
+                const ok = await confirmDialog(
                   `Create a bulk booking for ${bulk.guest_name.trim()}?\n\n` +
                     `Room ${room.room_number || room.room_id} · ${nights} night${
                       nights === 1 ? "" : "s"
@@ -2583,7 +2599,7 @@ export default function AdminDashboard({
   const [overviewView, setOverviewView] = useState("recent");
 
   async function handleAdminLogout() {
-    if (!window.confirm("Log out of the admin portal?")) return;
+    if (!(await confirmDialog("Log out of the admin portal?", { confirmText: "Log out" }))) return;
 
     if (onLogout) {
       // parent (App.js) owns the session — let it clear state and show login
@@ -2662,6 +2678,20 @@ export default function AdminDashboard({
     }
   }
 
+  // OP-06: a guest says the confirmation never arrived
+  async function resendConfirmation(id) {
+    try {
+      const res = await apiFetch(`/api/admin/bookings/${id}/resend-confirmation`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not send the email");
+      showToast(data.message || "Confirmation email sent", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
   async function deleteBooking(id, booking) {
     const isCancelled = booking?.status === "cancelled";
     const amount = Number(booking?.final_total || booking?.total_price || 0);
@@ -2673,7 +2703,7 @@ export default function AdminDashboard({
           "en-IN",
         )} will be removed from total revenue. This cannot be undone.`;
 
-    if (!window.confirm(warning)) return;
+    if (!(await confirmDialog(warning, { confirmText: "Delete", danger: true }))) return;
     try {
       const res = await apiFetch(`/api/admin/bookings/${id}`, {
         method: "DELETE",
@@ -2697,7 +2727,12 @@ export default function AdminDashboard({
   }
 
   async function deleteRoom(roomId) {
-    if (!window.confirm("Permanently delete this room? This cannot be undone."))
+    if (
+      !(await confirmDialog("Permanently delete this room? This cannot be undone.", {
+        confirmText: "Delete room",
+        danger: true,
+      }))
+    )
       return;
     try {
       const res = await apiFetch(`/api/admin/rooms/${roomId}`, {
@@ -2906,6 +2941,8 @@ Number(booking.balance_paid || 0)
     // Per-service GST rates for add-on charges (Food & Beverage, Laundry,
     // Extra Bed, Room Service and anything the admin adds).
     { id: "gst", label: "GST Configuration", icon: CreditCardIcon },
+    // SC-04: hide spam / fake reviews from the website
+    { id: "reviews", label: "Reviews", icon: CheckIcon },
   ];
 
   const tabs = [...primaryTabs, ...secondaryTabs]; // keep this — Topbar label lookup still needs every id
@@ -3489,6 +3526,7 @@ Number(booking.balance_paid || 0)
                                 }
                                 onCancel={() => setCancelBookingData(b)}
                                 onDelete={() => deleteBooking(b.booking_id, b)}
+                                onResendEmail={() => resendConfirmation(b.booking_id)}
                               />
                             </td>
                           </tr>
@@ -3729,6 +3767,7 @@ Number(booking.balance_paid || 0)
                             onDetails={() => setSelectedBookingId(b.booking_id)}
                             onCancel={() => setCancelBookingData(b)}
                             onDelete={() => deleteBooking(b.booking_id, b)}
+                                onResendEmail={() => resendConfirmation(b.booking_id)}
                           />
                         </td>
                       </tr>
@@ -4233,6 +4272,10 @@ Number(booking.balance_paid || 0)
 
           {tab === "gst" && (
             <GstConfigTab apiFetch={apiFetch} showToast={showToast} />
+          )}
+
+          {tab === "reviews" && (
+            <ReviewsModeration apiFetch={apiFetch} showToast={showToast} />
           )}
 
           {tab === "book" && (

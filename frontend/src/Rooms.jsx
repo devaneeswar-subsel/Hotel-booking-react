@@ -633,6 +633,12 @@ export default function Rooms({
                         document
                           .getElementById("room-search")
                           ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        // U-03: open the check-in picker once the scroll lands
+                        setTimeout(() => {
+                          document
+                            .querySelector("#room-search input")
+                            ?.focus({ preventScroll: true });
+                        }, 450);
                       }}
                     >
                       Check availability

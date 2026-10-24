@@ -1208,12 +1208,29 @@ async function runMigrations() {
       console.error("Folio backfill skipped:", e.message);
     }
 
+    // SC-04: admins can hide a review from the public site
+    try {
+      await db.query("ALTER TABLE reviews ADD COLUMN is_hidden TINYINT DEFAULT 0");
+    } catch (e) {}
+
+    // SC-06: rate-limit hits survive a restart/redeploy
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS rate_limit_hits (
+          id BIGINT AUTO_INCREMENT PRIMARY KEY,
+          bucket VARCHAR(20) NOT NULL,
+          rkey VARCHAR(190) NOT NULL,
+          hit_at BIGINT NOT NULL,
+          INDEX idx_rl_bucket_key (bucket, rkey),
+          INDEX idx_rl_hit_at (hit_at)
+        )`,
+    );
+
     console.log("✅ Migrations done");
   } catch (err) {
     console.error("Migration error:", err.message);
   }
 }
-runMigrations();
+runMigrations().then(() => loadRateLimitHits());
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -1369,6 +1386,54 @@ function ownsOrStaff(req, ownerUserId) {
   return Number(ownerUserId) === Number(req.user?.user_id);
 }
 
+/*
+ * SC-06: the limiters below keep working in memory exactly as before; every
+ * hit is ALSO written to rate_limit_hits, and the last hour is loaded back on
+ * start-up. So a redeploy no longer hands an attacker a fresh set of tries.
+ * All of this is best-effort: a DB hiccup never blocks a login.
+ */
+function persistRateHit(bucket, key, at) {
+  db.query("INSERT INTO rate_limit_hits (bucket, rkey, hit_at) VALUES (?,?,?)", [
+    bucket,
+    String(key).slice(0, 190),
+    at,
+  ]).catch(() => {});
+}
+
+function persistRateClear(bucket, key) {
+  db.query("DELETE FROM rate_limit_hits WHERE bucket=? AND rkey=?", [
+    bucket,
+    String(key).slice(0, 190),
+  ]).catch(() => {});
+}
+
+async function loadRateLimitHits() {
+  try {
+    const since = Date.now() - 60 * 60 * 1000;
+    const [rows] = await db.query(
+      "SELECT bucket, rkey, hit_at FROM rate_limit_hits WHERE hit_at > ? ORDER BY hit_at",
+      [since],
+    );
+    const maps = {
+      login: loginAttempts,
+      otp: otpAttempts,
+      otpreq: otpRequests,
+      guest: guestOrderAttempts,
+    };
+    for (const r of rows) {
+      const map = maps[r.bucket];
+      if (!map) continue;
+      const list = map.get(r.rkey) || [];
+      list.push(Number(r.hit_at));
+      map.set(r.rkey, list);
+    }
+    // old rows are never needed again
+    await db.query("DELETE FROM rate_limit_hits WHERE hit_at <= ?", [since]);
+  } catch (e) {
+    console.error("Rate-limit warm-up skipped:", e.message);
+  }
+}
+
 // ─── LOGIN RATE LIMIT ────────────────────────────────────────────────────────
 // Without this, an admin password can be brute forced at network speed.
 const loginAttempts = new Map();
@@ -1393,6 +1458,7 @@ function loginRateLimit(req, res, next) {
 
   hits.push(now);
   loginAttempts.set(ip, hits);
+  persistRateHit("login", ip, now); // SC-06
 
   if (loginAttempts.size > 5000) {
     for (const [key, times] of loginAttempts) {
@@ -1435,6 +1501,7 @@ function recordOtpAttempt(email) {
   );
   hits.push(now);
   otpAttempts.set(key, hits);
+  persistRateHit("otp", key, now); // SC-06
 
   if (otpAttempts.size > 5000) {
     for (const [k, times] of otpAttempts) {
@@ -1445,6 +1512,7 @@ function recordOtpAttempt(email) {
 
 function clearOtpAttempts(email) {
   otpAttempts.delete(String(email || "").toLowerCase());
+  persistRateClear("otp", String(email || "").toLowerCase()); // SC-06
 }
 
 /*
@@ -1467,6 +1535,7 @@ function otpRequestsExceeded(email) {
   if (hits.length >= OTP_MAX_REQUESTS) return true;
   hits.push(now);
   otpRequests.set(key, hits);
+  persistRateHit("otpreq", key, now); // SC-06
 
   /*
    * BUGFIX: this map had no size cap, unlike loginAttempts, guestOrderAttempts
@@ -1498,6 +1567,7 @@ function clearLoginAttempts(req) {
     req.socket?.remoteAddress ||
     "unknown";
   loginAttempts.delete(ip);
+  persistRateClear("login", ip); // SC-06
 }
 
 // Nightly rate for a room at a given occupancy.
@@ -2357,6 +2427,33 @@ async function checkoutBlocker(bookingId) {
  * the same payment. Whichever claims this first sends the confirmation email;
  * the other skips it.
  */
+/*
+ * S-02: guests' ID numbers (Aadhaar, passport, licence) are sensitive personal
+ * data. Admins keep the full number (they edit it on the check-in screen);
+ * managers' screens never use it, so they get only the last 4 characters.
+ */
+function maskIdProofForRole(row, role) {
+  if (!row || role === "admin" || !row.id_proof_number) return row;
+  const v = String(row.id_proof_number);
+  return { ...row, id_proof_number: `${"•".repeat(Math.max(0, v.length - 4))}${v.slice(-4)}` };
+}
+
+/*
+ * S-03: who is calling a PUBLIC route, if anyone — never rejects, so the
+ * route keeps working for signed-out visitors.
+ */
+function optionalUser(req) {
+  const token =
+    req.cookies?.auth_token ||
+    req.headers?.authorization?.replace("Bearer ", "");
+  if (!token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch (e) {
+    return null;
+  }
+}
+
 async function claimConfirmationEmail(bookingId) {
   try {
     const [r] = await db.query(
@@ -3301,7 +3398,7 @@ async function sendAdvanceInvoiceEmail(booking) {
       )}</li>`,
   ).join("");
 
-  await resend.emails.send({
+  const sent = await resend.emails.send({
     from: "VV Grand Park Residency <bookings@vvgrandpark.com>",
     to: booking.email,
     subject: `Booking Confirmed! ${invNo} - VV Grand Park Residency`,
@@ -3356,6 +3453,9 @@ async function sendAdvanceInvoiceEmail(booking) {
       },
     ],
   });
+  // Resend reports failures in the result instead of throwing — surface
+  // them, so callers (and the admin resend button) know the mail didn't go
+  if (sent?.error) throw new Error(sent.error.message || "Email could not be sent");
 }
 
 app.get("/", (req, res) =>
@@ -3667,7 +3767,19 @@ app.get("/api/rooms/:roomId/booked-dates", async (req, res) => {
       [roomId],
     );
 
-    res.json([...rows, ...blockedRows]);
+    // S-03: the guest calendars only need the dates; real booking ids are
+    // for staff screens (which tell bookings from blocks by booking_id)
+    const viewer = optionalUser(req);
+    const staffViewer = viewer && ["admin", "manager"].includes(viewer.role);
+    res.json(
+      staffViewer
+        ? [...rows, ...blockedRows]
+        : [...rows, ...blockedRows].map(({ check_in_date, check_out_date }) => ({
+            booking_id: null,
+            check_in_date,
+            check_out_date,
+          })),
+    );
   } catch (err) {
     console.error(err);
     res.status(500).json({
@@ -3711,7 +3823,7 @@ app.get("/api/rooms/:id", async (req, res) => {
 app.get("/api/reviews", async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT r.*, u.name AS guest_name, rm.room_type FROM reviews r JOIN users u ON r.user_id=u.user_id JOIN rooms rm ON r.room_id=rm.room_id ORDER BY r.created_at DESC LIMIT 20`,
+      `SELECT r.*, u.name AS guest_name, rm.room_type FROM reviews r JOIN users u ON r.user_id=u.user_id JOIN rooms rm ON r.room_id=rm.room_id WHERE COALESCE(r.is_hidden, 0) = 0 ORDER BY r.created_at DESC LIMIT 20`,
     );
     res.json(rows);
   } catch (err) {
@@ -3764,6 +3876,76 @@ app.post("/api/reviews", requireAuth, async (req, res) => {
     res
       .status(201)
       .json({ message: "Review submitted!", review_id: r.insertId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/*
+ * SC-04: review moderation. Every review still appears on the site straight
+ * away (no change for guests); an admin can hide one that is spam, abusive or
+ * fake, and show it again later. Nothing is deleted.
+ */
+/*
+ * OP-06: send the confirmation + invoice email again (guest says it never
+ * arrived, or typed the wrong address and staff corrected it).
+ */
+app.post(
+  "/api/admin/bookings/:id/resend-confirmation",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const booking = await loadBookingForInvoice(req.params.id);
+      if (!booking) return res.status(404).json({ error: "Booking not found" });
+      if (!["confirmed", "completed"].includes(booking.status))
+        return res
+          .status(400)
+          .json({ error: "Only confirmed bookings have a confirmation to send" });
+      if (!booking.email || /@vvgrandpark\.local$/i.test(booking.email))
+        return res
+          .status(400)
+          .json({ error: "This guest has no email address on file" });
+      await sendAdvanceInvoiceEmail(booking);
+      await db
+        .query("UPDATE bookings SET confirmation_email_at=NOW() WHERE booking_id=?", [
+          req.params.id,
+        ])
+        .catch(() => {});
+      await logBookingEvent(req, req.params.id, "email_resent", booking.email);
+      res.json({ message: `Confirmation sent to ${booking.email}` });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+app.get("/api/admin/reviews", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT r.review_id, r.booking_id, r.rating, r.review_text, r.created_at,
+              COALESCE(r.is_hidden, 0) AS is_hidden,
+              u.name AS guest_name, rm.room_type
+         FROM reviews r
+         JOIN users u ON r.user_id = u.user_id
+         JOIN rooms rm ON r.room_id = rm.room_id
+        ORDER BY r.created_at DESC
+        LIMIT 500`,
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/admin/reviews/:id", requireAdmin, async (req, res) => {
+  try {
+    const hidden = req.body?.is_hidden ? 1 : 0;
+    const [r] = await db.query(
+      "UPDATE reviews SET is_hidden=? WHERE review_id=?",
+      [hidden, req.params.id],
+    );
+    if (!r.affectedRows) return res.status(404).json({ error: "Review not found" });
+    res.json({ message: hidden ? "Review hidden" : "Review visible", is_hidden: hidden });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3823,6 +4005,7 @@ function guestRateLimit(req, res, next) {
 
   hits.push(now);
   guestOrderAttempts.set(ip, hits);
+  persistRateHit("guest", ip, now); // SC-06
 
   // keep the map from growing without bound
   if (guestOrderAttempts.size > 5000) {
@@ -9420,12 +9603,11 @@ app.get("/api/manager/bookings", requireManager, async (req, res) => {
     const [rows] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.status NOT IN ('pending') ORDER BY b.created_at DESC`,
     );
-    res.json(rows);
+    res.json(rows.map((r) => maskIdProofForRole(r, req.user.role))); // S-02
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
 app.get("/api/manager/bookings/:id", requireManager, async (req, res) => {
   try {
     await assignInvoiceNumbers(); // A-01
@@ -9441,7 +9623,7 @@ app.get("/api/manager/bookings/:id", requireManager, async (req, res) => {
     );
     const addonTotals = await getAddonTotals(req.params.id);
     res.json({
-      ...rows[0],
+      ...maskIdProofForRole(rows[0], req.user.role), // S-02
       addons,
       addon_gst_summary: addonTotals.byRate,
       addon_gst_total: addonTotals.gst,
@@ -9559,12 +9741,31 @@ app.patch(
       const blocked = await checkinBlocker(req.params.id);
       if (blocked)
         return res.status(blocked.status).json({ error: blocked.error });
+      // F-04: the stay's check-out date has already passed — this is really
+      // a no-show or late paperwork, so make staff say which
+      const [[late]] = await db.query(
+        "SELECT check_out_date FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      const checkOutKey = late ? istDateKey(late.check_out_date) : null;
+      const isLate = checkOutKey && checkOutKey < istDateKey(new Date());
+      if (isLate && !req.body?.confirm_late_checkin) {
+        return res.status(409).json({
+          code: "LATE_CHECKIN",
+          error: `This stay was due to end on ${checkOutKey}. Check the guest in anyway (late paperwork)?`,
+        });
+      }
       const now = new Date();
       await db.query(
         "UPDATE bookings SET actual_checkin=COALESCE(actual_checkin, ?) WHERE booking_id=?",
         [now, req.params.id],
       );
-      await logBookingEvent(req, req.params.id, "checkin");
+      await logBookingEvent(
+        req,
+        req.params.id,
+        "checkin",
+        isLate ? `after check-out date ${checkOutKey}` : null,
+      );
       res.json({ message: "Checked in successfully", actual_checkin: now });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -9861,6 +10062,13 @@ setInterval(async () => {
     console.error("Pending cleanup failed:", e.message);
   }
 }, 15 * 60 * 1000);
+
+// SC-06: rate-limit rows older than two hours are never read again
+setInterval(() => {
+  db.query("DELETE FROM rate_limit_hits WHERE hit_at < ?", [
+    Date.now() - 2 * 60 * 60 * 1000,
+  ]).catch(() => {});
+}, 30 * 60 * 1000);
 
 // A-01: also number staff-confirmed bookings promptly, even before a screen
 // asks for them

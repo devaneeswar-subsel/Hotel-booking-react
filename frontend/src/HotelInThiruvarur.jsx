@@ -182,8 +182,25 @@ const FAQS = [
   },
 ];
 
+/*
+ * R-08: the tariff FAQ answer, written from the live room prices so Google's
+ * FAQ snippet never quotes an old rate.
+ */
+const TARIFF_QUESTION = "What is the room tariff at your hotel in Thiruvarur?";
+function liveFaqs(cards, isLive) {
+  if (!isLive) return FAQS;
+  const parts = cards.map((c) => {
+    const dbl = /for double occupancy/.test(c.double || "")
+      ? ` (${c.double.replace(" for double occupancy", "")} for two guests)`
+      : "";
+    return `${c.name} from ${c.price}${dbl}`;
+  });
+  const answer = `${parts.join(", ")}, per night plus GST. Booking directly through our website or by phone gets you our best available rate.`;
+  return FAQS.map((f) => (f.q === TARIFF_QUESTION ? { ...f, a: answer } : f));
+}
+
 /* ── structured data for Google ───────────────────────────────────────────── */
-function buildStructuredData() {
+function buildStructuredData(rooms = ROOMS, faqs = FAQS) {
   return {
     "@context": "https://schema.org",
     "@graph": [
@@ -218,7 +235,7 @@ function buildStructuredData() {
           name,
           value: true,
         })),
-        makesOffer: ROOMS.map((room) => ({
+        makesOffer: rooms.map((room) => ({
           "@type": "Offer",
           name: room.name,
           priceCurrency: "INR",
@@ -228,7 +245,7 @@ function buildStructuredData() {
       {
         "@type": "FAQPage",
         "@id": `${PAGE_URL}#faq`,
-        mainEntity: FAQS.map((item) => ({
+        mainEntity: faqs.map((item) => ({
           "@type": "Question",
           name: item.q,
           acceptedAnswer: { "@type": "Answer", text: item.a },
@@ -306,6 +323,16 @@ export default function HotelInThiruvarur() {
     };
   }, []);
   const roomCards = liveRoomCards(liveRooms);
+  const faqs = liveFaqs(roomCards, Array.isArray(liveRooms) && liveRooms.length > 0);
+
+  // R-08: keep Google's structured data on the live prices too
+  useEffect(() => {
+    if (!Array.isArray(liveRooms) || !liveRooms.length) return;
+    const ld = document.getElementById("vv-hotel-ld");
+    if (ld) ld.text = JSON.stringify(buildStructuredData(roomCards, faqs));
+    // roomCards/faqs are derived from liveRooms
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveRooms]);
   const livePrices = (liveRooms || [])
     .map((r) => Number(r.price_per_night))
     .filter((n) => n > 0);
@@ -368,6 +395,7 @@ export default function HotelInThiruvarur() {
 
     const ld = document.createElement("script");
     ld.type = "application/ld+json";
+    ld.id = "vv-hotel-ld"; // R-08: refreshed with live prices below
     ld.text = JSON.stringify(buildStructuredData());
     document.head.appendChild(ld);
     created.push(ld);
@@ -613,7 +641,7 @@ export default function HotelInThiruvarur() {
               Hotel in Thiruvarur — FAQs
             </h2>
             <div className="space-y-2.5">
-              {FAQS.map((item, i) => (
+              {faqs.map((item, i) => (
                 <Faq
                   key={item.q}
                   item={item}

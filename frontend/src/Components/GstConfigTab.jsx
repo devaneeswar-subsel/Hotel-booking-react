@@ -1,3 +1,4 @@
+import { confirmDialog } from "./ConfirmDialog";
 import React, { useState, useEffect, useCallback } from "react";
 import { CheckIcon, XIcon } from "../Icons";
 import {
@@ -133,7 +134,7 @@ export default function GstConfigTab({ apiFetch, showToast }) {
     const question = charged
       ? `"${svc.name}" has been charged on ${charged} booking(s), so it will be deactivated rather than deleted — past bills keep their history. Continue?`
       : `Delete "${svc.name}"? It has never been charged, so nothing is affected.`;
-    if (!window.confirm(question)) return;
+    if (!(await confirmDialog(question, { danger: !charged }))) return;
 
     setSavingId(svc.catalog_id);
     try {

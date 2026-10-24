@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { confirmDialog } from "./Components/ConfirmDialog";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import {
@@ -492,10 +493,20 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   }, [bookingId]); // eslint-disable-line
 
   async function handleCheckin() {
-    const res = await apiFetch(`/api/manager/bookings/${bookingId}/checkin`, {
+    let res = await apiFetch(`/api/manager/bookings/${bookingId}/checkin`, {
       method: "PATCH",
     });
-    const data = await res.json();
+    let data = await res.json();
+    // F-04: the stay's dates are already over
+    if (res.status === 409 && data.code === "LATE_CHECKIN") {
+      if (!(await confirmDialog(data.error, { confirmText: "Check in anyway" })))
+        return;
+      res = await apiFetch(`/api/manager/bookings/${bookingId}/checkin`, {
+        method: "PATCH",
+        body: JSON.stringify({ confirm_late_checkin: true }),
+      });
+      data = await res.json();
+    }
     if (!res.ok) return showToast(data.error, "error");
     showToast("Guest checked in!", "success");
     fetchBooking();
@@ -503,7 +514,11 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   }
 
   async function handleCheckout() {
-    if (!window.confirm("Confirm checkout? This will calculate final bill."))
+    if (
+      !(await confirmDialog("Confirm checkout? This will calculate final bill.", {
+        confirmText: "Check out",
+      }))
+    )
       return;
     let res = await apiFetch(`/api/manager/bookings/${bookingId}/checkout`, {
       method: "PATCH",
@@ -512,9 +527,10 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     // F-02: money still owed — make it a conscious choice, not a surprise
     if (res.status === 409 && data.code === "BALANCE_DUE") {
       if (
-        !window.confirm(
-          `${data.error}\n\nCollect it first, or press OK to check out with the balance outstanding.`,
-        )
+        !(await confirmDialog(
+          `${data.error}\n\nCollect it first, or check out with the balance outstanding.`,
+          { confirmText: "Check out anyway", danger: true },
+        ))
       )
         return;
       res = await apiFetch(`/api/manager/bookings/${bookingId}/checkout`, {
@@ -547,7 +563,12 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
       let data = await res.json();
       // F-01: charging a guest who has already left
       if (res.status === 409 && data.code === "AFTER_CHECKOUT") {
-        if (!window.confirm(`${data.error}\n\nAdd it as a late charge?`)) return;
+        if (
+          !(await confirmDialog(`${data.error}\n\nAdd it as a late charge?`, {
+            confirmText: "Add late charge",
+          }))
+        )
+          return;
         res = await apiFetch(`/api/manager/bookings/${bookingId}/addons`, {
           method: "POST",
           body: JSON.stringify({ ...payload, confirm_after_checkout: true }),
@@ -610,7 +631,13 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     let data = await res.json();
     // F-01: changing the bill of a guest who has already left
     if (res.status === 409 && data.code === "AFTER_CHECKOUT") {
-      if (!window.confirm(`${data.error}\n\nRemove it anyway?`)) return;
+      if (
+        !(await confirmDialog(`${data.error}\n\nRemove it anyway?`, {
+          confirmText: "Remove",
+          danger: true,
+        }))
+      )
+        return;
       res = await apiFetch(
         `/api/manager/bookings/${bookingId}/addons/${addonId}`,
         {
@@ -2183,7 +2210,7 @@ function ReportsTab({ showToast }) {
       doc.setTextColor(180, 170, 150);
 
       doc.text(
-        `Period: ${reportData.startDate} to ${reportData.endDate}`,
+        `Period (booking date): ${reportData.startDate} to ${reportData.endDate}`,
         W - marginX,
         22,
         {
@@ -3086,6 +3113,10 @@ function ReportsTab({ showToast }) {
 
               <span className="text-[0.78rem] font-normal text-[#868E96] ml-2">
                 ({totalRecords} records)
+              </span>
+              {/* A-04: bookings are grouped by the date they were made */}
+              <span className="block text-[0.72rem] font-normal text-[#868E96]">
+                By booking date — when the booking was made, not the stay date
               </span>
             </div>
 
