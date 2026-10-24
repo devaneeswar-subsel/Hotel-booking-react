@@ -345,6 +345,11 @@ export default function CheckoutPage({ user, showToast }) {
             });
             const verifyData = await verifyRes.json();
             if (!verifyRes.ok) {
+              // dates were blocked/sold while paying — the stay is gone, so
+              // don't leave the stale checkout around to be retried
+              if (verifyData.refunded) {
+                sessionStorage.removeItem("vvgrandpark_checkout");
+              }
               throw new Error(verifyData.error || "Payment verification failed");
             }
             sessionStorage.removeItem("vvgrandpark_checkout");

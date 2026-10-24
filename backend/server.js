@@ -3557,6 +3557,12 @@ app.post("/api/payment/guest/verify", guestRateLimit, async (req, res) => {
       return res.json({ success: true, message: "Already confirmed" });
     }
 
+    // the room may have been blocked or sold while the guest was paying
+    const unavailable = await confirmIfStillFree(booking_id, razorpay_payment_id);
+    if (unavailable) {
+      return res.status(409).json({ error: unavailable, refunded: true });
+    }
+
     await db.query(
       `UPDATE bookings
           SET status='confirmed',
@@ -3612,14 +3618,19 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
     if (!roomRows.length)
       return res.status(404).json({ error: "Room not found or unavailable" });
     const room = roomRows[0];
-    const [conflicts] = await db.query(
-      `SELECT booking_id FROM bookings WHERE room_id=? AND status NOT IN ('cancelled','pending') AND check_in_date<? AND check_out_date>?`,
-      [room_id, check_out_date, check_in_date],
-    );
-    if (conflicts.length)
-      return res
-        .status(409)
-        .json({ error: "Room already booked for these dates" });
+    /*
+     * BLOCKED-DATE FIX: this route only looked at other bookings, never at
+     * room_blocked_dates. It is the route the guest Checkout page uses, so a
+     * room the admin had blocked (maintenance, owner hold, etc.) could still
+     * be paid for and confirmed. findDateConflict checks both.
+     */
+    const dateConflict = await findDateConflict(db, {
+      room_id,
+      check_in_date,
+      check_out_date,
+    });
+    if (dateConflict)
+      return res.status(409).json({ error: dateConflict });
     const nights = Math.ceil(
       (new Date(check_out_date) - new Date(check_in_date)) / 86400000,
     );
@@ -3751,6 +3762,12 @@ if (!Number.isFinite(bookingTotal) || bookingTotal <= 0) {
     error: "Invalid booking total.",
   });
 }
+
+    // the room may have been blocked or sold while the guest was paying
+    const unavailable = await confirmIfStillFree(booking_id, razorpay_payment_id);
+    if (unavailable) {
+      return res.status(409).json({ error: unavailable, refunded: true });
+    }
 
 await db.query(
   `UPDATE bookings
@@ -6177,6 +6194,97 @@ async function findDateConflict(
 }
 
 /*
+ * Last availability check before an online payment confirms a booking.
+ *
+ * The create-order routes check availability, but the guest can then sit on
+ * the Razorpay screen for minutes. If the admin blocks the room, or another
+ * guest's payment for the same nights lands first, the booking must not be
+ * confirmed. The room row is locked so two payments for the same room are
+ * verified one after the other, never side by side.
+ *
+ * Returns null when the booking was confirmed (status only — the caller then
+ * writes the payment columns), or an error message when the dates are gone.
+ * In that case the booking is cancelled and a full refund is requested.
+ */
+async function confirmIfStillFree(bookingId, razorpayPaymentId) {
+  const conn = await db.getConnection();
+  let conflict = null;
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query(
+      `SELECT booking_id, room_id,
+              DATE_FORMAT(check_in_date, '%Y-%m-%d')  AS check_in_date,
+              DATE_FORMAT(check_out_date, '%Y-%m-%d') AS check_out_date,
+              payment_status
+         FROM bookings WHERE booking_id=?`,
+      [bookingId],
+    );
+    if (!rows.length) {
+      await conn.rollback();
+      return "Booking not found";
+    }
+    const b = rows[0];
+    // already auto-cancelled and refunded on an earlier verify call
+    if (String(b.payment_status || "").startsWith("REFUND")) {
+      await conn.rollback();
+      return "These dates are no longer available. Your payment refund is already in progress";
+    }
+    await conn.query("SELECT room_id FROM rooms WHERE room_id=? FOR UPDATE", [
+      b.room_id,
+    ]);
+    // this booking is still 'pending', so findDateConflict never matches itself
+    conflict = await findDateConflict(conn, {
+      room_id: b.room_id,
+      check_in_date: b.check_in_date,
+      check_out_date: b.check_out_date,
+      lock: true,
+    });
+    if (conflict) {
+      await conn.query(
+        `UPDATE bookings
+            SET status='cancelled', payment_id=?, payment_status='REFUND_INITIATED',
+                notes=CONCAT(COALESCE(notes,''), ?)
+          WHERE booking_id=?`,
+        [
+          razorpayPaymentId,
+          ` [Auto-cancelled at payment: ${conflict}. Refund requested for ${razorpayPaymentId}]`,
+          bookingId,
+        ],
+      );
+    } else {
+      await conn.query(
+        "UPDATE bookings SET status='confirmed' WHERE booking_id=?",
+        [bookingId],
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+
+  if (conflict) {
+    try {
+      await razorpay.payments.refund(razorpayPaymentId, {
+        notes: { booking_id: String(bookingId), reason: conflict },
+      });
+    } catch (e) {
+      // payment may still be only authorised, or refund API unavailable —
+      // the booking note records it so staff can refund from the dashboard
+      console.error(`Refund for booking ${bookingId} failed:`, e?.error || e);
+      await db.query(
+        "UPDATE bookings SET payment_status='REFUND_PENDING' WHERE booking_id=?",
+        [bookingId],
+      );
+    }
+    return `${conflict}. Your payment will be refunded in full within 5-7 working days.`;
+  }
+  return null;
+}
+
+/*
  * What the guest still owes on a booking.
  *
  * Shared by the manual "Mark as Paid" route and by the online balance
@@ -8580,6 +8688,27 @@ app.post(
       }
       const reasonLabel = BLOCK_REASONS[reasonKey];
       const note = req.body.note ? String(req.body.note).slice(0, 255) : null;
+
+      /*
+       * A night already sold to a guest cannot be blocked. The admin calendar
+       * stops this on screen, but the API has to enforce it too — otherwise a
+       * stale screen hides a real booking behind a maintenance hold.
+       */
+      const [soldNights] = await db.query(
+        `SELECT booking_id FROM bookings
+          WHERE room_id = ?
+            AND status NOT IN ('cancelled','pending')
+            AND (${validDates
+              .map(() => "(check_in_date <= ? AND check_out_date > ?)")
+              .join(" OR ")})
+          LIMIT 1`,
+        [roomId, ...validDates.flatMap((d) => [d, d])],
+      );
+      if (soldNights.length) {
+        return res.status(409).json({
+          error: `Booking #${soldNights[0].booking_id} already covers one of these nights — cancel or move it first`,
+        });
+      }
 
       let bookingId = null;
 

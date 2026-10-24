@@ -22,6 +22,7 @@ import RoomDetail from "./Roomdetail";
 import CheckoutPage from "./pages/CheckoutPage";
 import AdminDashboard from "./AdminDashboard";
 import ManagerDashboard from "./ManagerDashboard";
+import WhatsAppButton, { StaffViewMarker } from "./Components/WhatsAppButton";
 import { XIcon, CheckIcon, BookingIcon, DownloadIcon } from "./Icons";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -549,6 +550,20 @@ function BookingModal({ room, user, onClose, showToast }) {
     if (nights <= 0) {
       showToast("Check-out must be after check-in!", "error");
       return;
+    }
+
+    // the calendar greys these out, but a typed date bypasses filterDate —
+    // never send a booked or admin-blocked night through to checkout
+    const night = parseLocalDate(form.check_in_date);
+    for (let i = 0; i < nights; i += 1) {
+      if (occupiedNights.has(night.toDateString())) {
+        showToast(
+          "This room is not available on one or more selected dates.",
+          "error",
+        );
+        return;
+      }
+      night.setDate(night.getDate() + 1);
     }
 
     const checkoutData = {
@@ -3443,6 +3458,7 @@ function AppContent() {
   ) {
     return (
       <>
+        <StaffViewMarker />
         <ManagerDashboard
           managerUser={user}
           onLogout={handleLogout}
@@ -3470,6 +3486,7 @@ function AppContent() {
   ) {
     return (
       <>
+        <StaffViewMarker />
         <AdminDashboard
           adminUser={user}
           onClose={() =>
@@ -3714,6 +3731,9 @@ export default function App() {
         />
 
       </Routes>
+
+      {/* floating WhatsApp enquiry button on every guest-facing page */}
+      <WhatsAppButton />
     </BrowserRouter>
   );
 }
