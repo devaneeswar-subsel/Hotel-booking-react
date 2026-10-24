@@ -1,7 +1,12 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import Rooms from './Rooms';
 
-describe('Rooms fallback behavior', () => {
+/*
+ * OP-03 / OP-02: when the API is down the room list must NOT invent rooms or
+ * prices (the old fallback showed fixed tariffs that did not match the real
+ * ones). It shows an error with a way to reach the hotel instead.
+ */
+describe('Rooms when the backend is unavailable', () => {
   beforeEach(() => {
     Object.defineProperty(global, 'fetch', {
       writable: true,
@@ -18,7 +23,7 @@ describe('Rooms fallback behavior', () => {
     jest.resetAllMocks();
   });
 
-  test('renders a fallback catalog when the backend is unavailable', async () => {
+  test('shows an error and no made-up rooms or prices', async () => {
     render(
       <Rooms
         user={null}
@@ -29,13 +34,12 @@ describe('Rooms fallback behavior', () => {
     );
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalled();
     });
 
-    await waitFor(() => {
-      expect(screen.getAllByText(/Standard AC Room/i).length).toBeGreaterThan(1);
-    });
-
-    expect(screen.getByText(/₹2,500/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/couldn't load room details/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/₹2,500/)).not.toBeInTheDocument();
   });
 });

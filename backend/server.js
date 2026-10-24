@@ -45,8 +45,107 @@ app.use(
   }),
 );
 
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+/*
+ * PY-01: Razorpay webhook. The browser's verify call is not enough — if the
+ * guest's tab closes, the phone locks or the network drops right after
+ * paying, the money is captured but the booking stays 'pending' and the room
+ * can be sold again. Razorpay calls this server-to-server instead.
+ *
+ * Registered BEFORE express.json because the signature is computed over the
+ * raw body. Does nothing until RAZORPAY_WEBHOOK_SECRET is set and the webhook
+ * (events: payment.captured, order.paid) is added in the Razorpay dashboard,
+ * pointing at https://<backend>/api/payment/webhook.
+ *
+ * Only guest/user checkout orders (receipt guest_* / booking_*) are handled;
+ * admin advance (ADV-*) and balance (BAL-*) orders keep their existing flows.
+ */
+app.post(
+  "/api/payment/webhook",
+  express.raw({ type: "*/*", limit: "1mb" }),
+  async (req, res) => {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) return res.status(503).json({ error: "Webhook not configured" });
+    try {
+      const signature = String(req.headers["x-razorpay-signature"] || "");
+      const expected = crypto
+        .createHmac("sha256", secret)
+        .update(req.body)
+        .digest("hex");
+      if (
+        signature.length !== expected.length ||
+        !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+      ) {
+        return res.status(400).json({ error: "Invalid signature" });
+      }
+
+      const event = JSON.parse(req.body.toString("utf8"));
+      if (!["payment.captured", "order.paid"].includes(event.event)) {
+        return res.json({ ok: true, ignored: event.event });
+      }
+
+      const payment = event.payload?.payment?.entity;
+      if (!payment?.id || !payment?.order_id) return res.json({ ok: true });
+      const order =
+        event.payload?.order?.entity ||
+        (await razorpay.orders.fetch(payment.order_id));
+      const receipt = String(order?.receipt || "");
+      if (!/^(guest|booking)_\d+$/.test(receipt)) {
+        return res.json({ ok: true, ignored: "not a checkout order" });
+      }
+      const bookingId = Number(order?.notes?.booking_id);
+      if (!bookingId) return res.json({ ok: true });
+
+      const [rows] = await db.query(
+        "SELECT status, payment_status FROM bookings WHERE booking_id=?",
+        [bookingId],
+      );
+      if (!rows.length) return res.json({ ok: true });
+      const { status, payment_status } = rows[0];
+      // already confirmed by the browser's verify call, or already refunded
+      if (
+        status === "confirmed" ||
+        status === "completed" ||
+        String(payment_status || "").startsWith("REFUND")
+      ) {
+        return res.json({ ok: true, already: status });
+      }
+
+      const unavailable = await confirmIfStillFree(bookingId, payment.id);
+      if (unavailable) return res.json({ ok: true, refunded: true });
+
+      const paid = Math.round(Number(payment.amount || 0)) / 100;
+      await db.query(
+        `UPDATE bookings
+            SET payment_id=?, payment_status='PAID',
+                advance_amount=?, advance_paid=?, balance_paid=0, remaining_amount=0,
+                advance_payment_id=?, advance_order_id=?,
+                advance_payment_mode='Online', advance_paid_at=NOW()
+          WHERE booking_id=?`,
+        [payment.id, paid, paid, payment.id, payment.order_id, bookingId],
+      );
+      await logBookingEvent(null, bookingId, "webhook_confirm", payment.id);
+
+      const booking = await loadBookingForInvoice(bookingId);
+      if (booking) {
+        sendAdvanceInvoiceEmail(booking).catch((e) =>
+          console.error("Webhook confirmation email error:", e.message),
+        );
+      }
+      res.json({ ok: true, confirmed: bookingId });
+    } catch (err) {
+      console.error("Razorpay webhook error:", err);
+      // 500 makes Razorpay retry later, which is what we want on a DB blip
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  },
+);
+
+// SC-07: only the photo upload / room editor need large bodies; everything
+// else is capped at 2 MB so a public endpoint cannot be fed 50 MB payloads.
+// (body-parser skips a body that an earlier parser already read.)
+app.use(["/api/upload", "/api/admin/rooms"], express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ limit: "2mb", extended: true }));
 // cookieParser MUST run before any authenticated route is registered,
 // otherwise req.cookies is undefined and requireAuth rejects valid sessions.
 app.use(cookieParser());
@@ -619,6 +718,31 @@ async function runMigrations() {
       );
     } catch (e) {}
 
+    // AD-07: who did what to a booking (check-in, cancel, refund, delete...)
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS booking_events (
+          event_id INT AUTO_INCREMENT PRIMARY KEY,
+          booking_id INT NOT NULL,
+          action VARCHAR(40) NOT NULL,
+          actor_user_id INT DEFAULT NULL,
+          actor_role VARCHAR(20) DEFAULT NULL,
+          details VARCHAR(500) DEFAULT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_booking_events_booking (booking_id)
+        )`,
+    );
+
+    // PY-03: refunds recorded on the booking instead of only in Razorpay
+    for (const col of [
+      "refund_amount DECIMAL(10,2) DEFAULT NULL",
+      "refund_reference VARCHAR(100) DEFAULT NULL",
+      "refunded_at DATETIME DEFAULT NULL",
+    ]) {
+      try {
+        await db.query(`ALTER TABLE bookings ADD COLUMN ${col}`);
+      } catch (e) {}
+    }
+
     /* ═══════════════════════════════════════════════════════════════════════
        ADD-ON GST CONFIGURATION  —  the ORDER / ORDER ITEM model
        ═══════════════════════════════════════════════════════════════════════
@@ -1158,8 +1282,25 @@ function requireAuth(req, res, next) {
   }
 }
 
+/*
+ * SC-02: the role inside the JWT is only what it was at login (7-day token).
+ * Staff routes re-read it from the database, so a manager who is removed or
+ * demoted loses access on their next request instead of up to a week later.
+ */
+async function refreshStaffRole(req) {
+  const [rows] = await db.query("SELECT role FROM users WHERE user_id=?", [
+    req.user.user_id,
+  ]);
+  req.user.role = rows.length ? rows[0].role : null;
+}
+
 function requireAdmin(req, res, next) {
-  requireAuth(req, res, () => {
+  requireAuth(req, res, async () => {
+    try {
+      await refreshStaffRole(req);
+    } catch (e) {
+      return res.status(500).json({ error: "Could not verify access" });
+    }
     if (req.user.role !== "admin")
       return res.status(403).json({ error: "Admin access required" });
     next();
@@ -1167,7 +1308,12 @@ function requireAdmin(req, res, next) {
 }
 
 function requireManager(req, res, next) {
-  requireAuth(req, res, () => {
+  requireAuth(req, res, async () => {
+    try {
+      await refreshStaffRole(req);
+    } catch (e) {
+      return res.status(500).json({ error: "Could not verify access" });
+    }
     if (req.user.role !== "admin" && req.user.role !== "manager")
       return res.status(403).json({ error: "Manager access required" });
     next();
@@ -2091,14 +2237,100 @@ async function recalcBookingTotals(bookingId) {
 
 // True when a date string is before today. Compared date-only in local time so
 // a booking made at 11pm for "today" is still accepted.
+/*
+ * BK-08: the hotel runs on India time, the server (Railway) on UTC. "Today"
+ * must be the IST calendar date, otherwise between 00:00 and 05:30 IST the
+ * server still thinks it is yesterday.
+ */
+function istDateKey(value = new Date()) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  // en-CA formats as YYYY-MM-DD
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+function addDaysKey(key, days) {
+  const [y, m, d] = key.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+}
+
 function isPastDate(dateStr) {
   if (!dateStr) return false;
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  return target < today;
+  const target = istDateKey(dateStr);
+  if (!target) return false;
+  return target < istDateKey(new Date());
+}
+
+/*
+ * AD-01 / AD-02: check-in and check-out used to update the row whatever state
+ * it was in — checking in a CANCELLED booking quietly revived it (even if the
+ * room had been resold), and check-out turned cancelled rows into 'completed'
+ * revenue. These guards return { status, error }, or null when allowed.
+ */
+async function checkinBlocker(bookingId) {
+  const [rows] = await db.query(
+    "SELECT status, actual_checkin, actual_checkout, check_in_date FROM bookings WHERE booking_id=?",
+    [bookingId],
+  );
+  if (!rows.length) return { status: 404, error: "Booking not found" };
+  const b = rows[0];
+  if (b.status === "cancelled")
+    return { status: 400, error: "This booking is cancelled and cannot be checked in" };
+  if (b.status === "pending")
+    return { status: 400, error: "Payment for this booking is not complete" };
+  if (b.actual_checkout)
+    return { status: 400, error: "This guest has already checked out" };
+  // allow arrival up to one day early, never a booking weeks ahead
+  const checkInKey = istDateKey(b.check_in_date);
+  if (checkInKey && checkInKey > addDaysKey(istDateKey(new Date()), 1)) {
+    return {
+      status: 400,
+      error: `Check-in is booked for ${checkInKey} — too early to check in`,
+    };
+  }
+  return null;
+}
+
+async function checkoutBlocker(bookingId) {
+  const [rows] = await db.query(
+    "SELECT status, actual_checkout FROM bookings WHERE booking_id=?",
+    [bookingId],
+  );
+  if (!rows.length) return { status: 404, error: "Booking not found" };
+  const b = rows[0];
+  if (b.status === "cancelled")
+    return { status: 400, error: "This booking is cancelled and cannot be checked out" };
+  if (b.status === "pending")
+    return { status: 400, error: "Payment for this booking is not complete" };
+  if (b.actual_checkout)
+    return { status: 409, error: "This guest has already checked out" };
+  return null;
+}
+
+/*
+ * AD-07: a small audit trail. Best-effort — a logging failure must never
+ * fail the action it is recording.
+ */
+async function logBookingEvent(req, bookingId, action, details = null) {
+  try {
+    await db.query(
+      `INSERT INTO booking_events (booking_id, action, actor_user_id, actor_role, details)
+       VALUES (?,?,?,?,?)`,
+      [
+        Number(bookingId),
+        String(action).slice(0, 40),
+        req?.user?.user_id || null,
+        req?.user?.role || (req ? "guest" : "system"),
+        details ? String(details).slice(0, 500) : null,
+      ],
+    );
+  } catch (e) {
+    console.error("booking_events log failed:", e.message);
+  }
 }
 
 function resolveNightlyRate(room, guestCount) {
@@ -2448,7 +2680,14 @@ async function calculateBookingAmounts({
   };
 }
 
-async function findOrCreateGuestUser({ name, email, phone }) {
+/*
+ * `trusted` = the caller is staff (admin/manager booking screens), who may
+ * correct a returning guest's name or email. The public guest checkout passes
+ * trusted:false — an unauthenticated form must never change an existing
+ * account, otherwise anyone who knows a guest's phone number could swap in
+ * their own email and take the account over through Forgot password (SC-01).
+ */
+async function findOrCreateGuestUser({ name, email, phone }, { trusted = true } = {}) {
   const normalizedName = String(name || "").trim();
   const normalizedEmail = String(email || "")
     .trim()
@@ -2487,6 +2726,7 @@ async function findOrCreateGuestUser({ name, email, phone }) {
       err.status = 400;
       throw err;
     }
+    if (!trusted) return existing[0].user_id;
     await db.query(
       "UPDATE users SET name=?, email=COALESCE(?, email), phone=? WHERE user_id=?",
       [
@@ -3013,9 +3253,23 @@ app.get("/api/auth/me", requireAuth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { name, email, password, phone } = req.body;
+    const { name, password } = req.body;
+    // SC-03: one spelling per address, and the same phone format the guest
+    // checkout and staff lookup use, so a returning guest is matched
+    const email = String(req.body.email || "").trim().toLowerCase();
+    // Indian mobiles are stored as 10 digits; anything else (an overseas
+    // guest) is kept as typed rather than rejected
+    const rawPhone = req.body.phone ? String(req.body.phone).trim() : "";
+    const normalizedPhone = normalizeCustomerPhone(rawPhone);
+    const phone = !rawPhone
+      ? null
+      : INDIAN_MOBILE_PATTERN.test(normalizedPhone)
+        ? normalizedPhone
+        : rawPhone;
     if (!name || !email || !password)
       return res.status(400).json({ error: "name, email, password required" });
+    if (!EMAIL_PATTERN.test(email))
+      return res.status(400).json({ error: "Enter a valid email address" });
     if (password.length < 6)
       return res
         .status(400)
@@ -3040,7 +3294,8 @@ app.post("/api/auth/register", async (req, res) => {
 
 app.post("/api/auth/login", loginRateLimit, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = String(req.body.email || "").trim(); // SC-03
     if (!email || !password)
       return res.status(400).json({ error: "email and password required" });
     const [rows] = await db.query(
@@ -3107,7 +3362,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     );
     if (!users.length) return res.json(NEUTRAL);
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = crypto.randomInt(100000, 1000000).toString(); // SC-08: CSPRNG
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db.query("DELETE FROM password_otps WHERE email=?", [email]);
     await db.query(
@@ -3118,7 +3373,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       from: "VV Grand Park Residency <bookings@vvgrandpark.com>",
       to: email,
       subject: "Password Reset OTP — VV Grand Park Residency",
-      html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid #e9ecef"><div style="background:#0F1923;padding:28px 32px;text-align:center"><h1 style="color:#C9A84C;font-size:1.4rem;margin:0;letter-spacing:2px">VV GRAND PARK</h1><p style="color:rgba(255,255,255,0.5);font-size:0.75rem;margin:4px 0 0;letter-spacing:3px">RESIDENCY</p></div><div style="padding:32px;text-align:center;background:#fff"><h2 style="color:#0F1923;margin-bottom:8px">Password Reset OTP</h2><p style="color:#868E96;font-size:0.9rem;margin-bottom:24px">Hello ${users[0].name}, use this OTP to reset your password. Valid for <strong>10 minutes</strong>.</p><div style="background:#0F1923;border-radius:12px;padding:20px 32px;display:inline-block;margin-bottom:24px"><span style="font-size:2.5rem;font-weight:700;color:#C9A84C;letter-spacing:8px">${otp}</span></div><p style="color:#C0392B;font-size:0.8rem">Do not share this OTP with anyone.</p></div><div style="background:#0F1923;padding:16px;text-align:center"><p style="color:rgba(255,255,255,0.3);font-size:0.72rem;margin:0">VV Grand Park Residency · vvgrandpark.com</p></div></div>`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid #e9ecef"><div style="background:#0F1923;padding:28px 32px;text-align:center"><h1 style="color:#C9A84C;font-size:1.4rem;margin:0;letter-spacing:2px">VV GRAND PARK</h1><p style="color:rgba(255,255,255,0.5);font-size:0.75rem;margin:4px 0 0;letter-spacing:3px">RESIDENCY</p></div><div style="padding:32px;text-align:center;background:#fff"><h2 style="color:#0F1923;margin-bottom:8px">Password Reset OTP</h2><p style="color:#868E96;font-size:0.9rem;margin-bottom:24px">Hello ${escapeHtml(users[0].name)}, use this OTP to reset your password. Valid for <strong>10 minutes</strong>.</p><div style="background:#0F1923;border-radius:12px;padding:20px 32px;display:inline-block;margin-bottom:24px"><span style="font-size:2.5rem;font-weight:700;color:#C9A84C;letter-spacing:8px">${otp}</span></div><p style="color:#C0392B;font-size:0.8rem">Do not share this OTP with anyone.</p></div><div style="background:#0F1923;padding:16px;text-align:center"><p style="color:rgba(255,255,255,0.3);font-size:0.72rem;margin:0">VV Grand Park Residency · vvgrandpark.com</p></div></div>`,
     });
     if (error) {
       console.error("Resend error:", error);
@@ -3211,6 +3466,20 @@ app.post("/api/auth/reset-password", async (req, res) => {
 app.get("/api/rooms", async (req, res) => {
   try {
     const { type, min_price, max_price, check_in, check_out } = req.query;
+    // BK-07: a reversed or malformed range skipped the availability filter
+    // and listed every room as free
+    if (check_in || check_out) {
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      if (
+        !DATE_RE.test(String(check_in || "")) ||
+        !DATE_RE.test(String(check_out || "")) ||
+        String(check_out) <= String(check_in)
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Check-out must be after check-in" });
+      }
+    }
     let q =
       "SELECT room_id, room_number, room_type, price_per_night, price_double, gst_rate, cgst_rate, sgst_rate, capacity, description, image_url, image2, image3, image4, image5, is_available, created_at FROM rooms WHERE is_available=1";
     const p = [];
@@ -3324,8 +3593,8 @@ app.post("/api/reviews", requireAuth, async (req, res) => {
     // user_id comes from the verified token, never from the body — otherwise
     // a logged-in guest can post a review in another guest's name.
     const user_id = req.user.user_id;
-    const { booking_id, room_id, rating, review_text } = req.body;
-    if (!booking_id || !room_id || !rating || !review_text)
+    const { booking_id, rating, review_text } = req.body;
+    if (!booking_id || !rating || !review_text)
       return res.status(400).json({ error: "All fields required" });
     if (rating < 1 || rating > 5)
       return res.status(400).json({ error: "Rating must be 1-5" });
@@ -3337,6 +3606,18 @@ app.post("/api/reviews", requireAuth, async (req, res) => {
       return res
         .status(403)
         .json({ error: "You can only review your own confirmed bookings" });
+    // SC-04: review the room that was actually booked, and only once the
+    // stay has started — not the same day it was paid for
+    const room_id = booking[0].room_id;
+    if (
+      booking[0].status !== "completed" &&
+      !booking[0].actual_checkin &&
+      istDateKey(booking[0].check_in_date) > istDateKey(new Date())
+    ) {
+      return res
+        .status(400)
+        .json({ error: "You can review your stay once it has started" });
+    }
     const [existing] = await db.query(
       "SELECT review_id FROM reviews WHERE booking_id=?",
       [booking_id],
@@ -3436,7 +3717,9 @@ app.post(
 
       // validates name/email/phone and reuses an existing guest account when the
       // email is already known, so repeat visitors keep one booking history
-      const userId = await findOrCreateGuestUser(customer || {});
+      const userId = await findOrCreateGuestUser(customer || {}, {
+        trusted: false,
+      });
 
       const amounts = await calculateBookingAmounts({
         room_id,
@@ -3531,10 +3814,9 @@ app.post("/api/payment/guest/verify", guestRateLimit, async (req, res) => {
       .digest("hex");
 
     if (expected !== razorpay_signature) {
-      await db.query(
-        "UPDATE bookings SET status='cancelled' WHERE booking_id=? AND status='pending'",
-        [booking_id],
-      );
+      // PY-09: no auth on this route, so a bad signature must not be able to
+      // cancel someone else's pending checkout by id. The row is left alone;
+      // the hourly pending cleanup removes it if no payment ever arrives.
       return res.status(400).json({ error: "Payment verification failed." });
     }
 
@@ -3554,7 +3836,13 @@ app.post("/api/payment/guest/verify", guestRateLimit, async (req, res) => {
       return res.status(404).json({ error: "Booking not found" });
 
     if (rows[0].status === "confirmed") {
-      return res.json({ success: true, message: "Already confirmed" });
+      // the Razorpay webhook may have confirmed it first — still hand the
+      // success screen its booking
+      return res.json({
+        success: true,
+        message: "Already confirmed",
+        booking: await loadBookingForInvoice(booking_id),
+      });
     }
 
     // the room may have been blocked or sold while the guest was paying
@@ -3611,6 +3899,14 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "You can only book for yourself" });
     if (!Object.prototype.hasOwnProperty.call(VEHICLE_PRICES, vehicle_type))
       return res.status(400).json({ error: "Invalid vehicle type" });
+    // BK-03: same checks the guest checkout already does
+    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+    if (!DATE_RE.test(String(check_in_date)) || !DATE_RE.test(String(check_out_date)))
+      return res.status(400).json({ error: "Invalid dates" });
+    if (isPastDate(check_in_date))
+      return res
+        .status(400)
+        .json({ error: "Check-in date cannot be in the past" });
     const [roomRows] = await db.query(
       "SELECT * FROM rooms WHERE room_id=? AND is_available=1",
       [room_id],
@@ -3618,6 +3914,11 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
     if (!roomRows.length)
       return res.status(404).json({ error: "Room not found or unavailable" });
     const room = roomRows[0];
+    const requestedGuests = Math.max(1, Number(guest_count) || 1);
+    if (requestedGuests > Number(room.capacity || requestedGuests))
+      return res
+        .status(400)
+        .json({ error: `This room allows up to ${room.capacity} guests` });
     /*
      * BLOCKED-DATE FIX: this route only looked at other bookings, never at
      * room_blocked_dates. It is the route the guest Checkout page uses, so a
@@ -3745,7 +4046,16 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
         already.length &&
         ["confirmed", "completed"].includes(already[0].status)
       ) {
-        return res.json({ success: true, message: "Already confirmed" });
+        // the Razorpay webhook may have confirmed it first
+        const [doneRows] = await db.query(
+          `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number, r.price_per_night, r.image_url FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.booking_id=?`,
+          [booking_id],
+        );
+        return res.json({
+          success: true,
+          message: "Already confirmed",
+          booking: doneRows[0],
+        });
       }
       return res
         .status(403)
@@ -4725,13 +5035,14 @@ app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Booking not found" });
 
     const booking = bookings[0];
-    const canManageBookings =
-      req.user.role === "admin" || req.user.role === "manager";
-    if (
-      !canManageBookings &&
-      Number(booking.user_id) !== Number(req.user.user_id)
-    ) {
-      return res.status(403).json({ error: "You cannot cancel this booking" });
+    // BK-02: guests are told on My Bookings to phone the hotel to cancel, so
+    // the cancellation policy and any refund are applied by staff. The API
+    // used to let a guest cancel their own paid booking (even a past no-show)
+    // directly, skipping both.
+    if (!isStaff(req)) {
+      return res.status(403).json({
+        error: "Please call the hotel on +91 93849 82510 to cancel your booking",
+      });
     }
     if (booking.actual_checkin) {
       return res
@@ -4758,6 +5069,29 @@ app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
     if (!result.affectedRows)
       return res.status(404).json({ error: "Booking not found" });
 
+    // PY-03: staff can record the refund given (Razorpay refund id, UPI ref,
+    // cash) at the moment of cancelling. Both fields are optional.
+    const refundAmount = Number(req.body?.refund_amount);
+    if (Number.isFinite(refundAmount) && refundAmount > 0) {
+      await db.query(
+        `UPDATE bookings SET refund_amount=?, refund_reference=?, refunded_at=NOW()
+          WHERE booking_id=?`,
+        [
+          Math.round(refundAmount * 100) / 100,
+          req.body?.refund_reference
+            ? String(req.body.refund_reference).slice(0, 100)
+            : null,
+          req.params.id,
+        ],
+      );
+    }
+    await logBookingEvent(
+      req,
+      req.params.id,
+      "cancel",
+      refundAmount > 0 ? `refund ${refundAmount} ${req.body?.refund_reference || ""}` : null,
+    );
+
     res.json({
       message: "Booking cancelled successfully",
       vehicle_status: hasActiveVehicle ? "cancelled" : booking.vehicle_status,
@@ -4769,6 +5103,14 @@ app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
 
 app.post("/api/bookings", requireAuth, async (req, res, next) => {
   try {
+    // BK-01: this route confirms a booking WITHOUT taking payment. Only the
+    // admin and manager screens use it; guests must go through Razorpay
+    // (/api/payment/create-order), otherwise anyone signed in could book free.
+    if (!isStaff(req)) {
+      return res
+        .status(403)
+        .json({ error: "Please complete payment to book this room" });
+    }
     // Staff may book on behalf of a guest; a guest may only book for themself.
     // Taking user_id straight from the body would let any logged-in user
     // create bookings in someone else's name.
@@ -5923,198 +6265,9 @@ app.post(
   }
 );
 
-app.post(
-  "/api/admin/bookings/manual-advance-confirm",
-  requireManager,
-  async (req, res) => {
-    try {
-      const {
-        room_id,
-        check_in_date,
-        check_out_date,
-        guest_count,
-        customer,
-        vehicle_type = "none",
-        advance_amount,
-        payment_mode,
-        discount_applied = false,
-        discount_amount = 0,
-        pickup_location,
-        dropoff_location,
-      } = req.body;
-
-      if (!room_id || !check_in_date || !check_out_date) {
-        return res.status(400).json({ error: "Missing required fields" });
-      }
-      if (
-        advance_amount === undefined ||
-        advance_amount === null ||
-        String(advance_amount).trim() === ""
-      ) {
-        return res.status(400).json({ error: "Advance amount is required" });
-      }
-
-      const selectedPaymentMode =
-        MANUAL_ADVANCE_PAYMENT_MODES[
-          String(payment_mode || "")
-            .trim()
-            .toLowerCase()
-        ];
-      if (!selectedPaymentMode) {
-        return res
-          .status(400)
-          .json({ error: "Select Cash, Online or Other payment mode" });
-      }
-
-      const validVehicleTypes = ["none", "4-seater", "7-seater", "12-seater"];
-      if (!validVehicleTypes.includes(vehicle_type)) {
-        return res.status(400).json({ error: "Invalid vehicle type" });
-      }
-
-     const normalizedAdvanceAmount =
-  advance_amount === undefined ||
-  advance_amount === null ||
-  String(advance_amount).trim() === ""
-    ? 0
-    : Number(advance_amount);
-
-if (!Number.isFinite(normalizedAdvanceAmount) || normalizedAdvanceAmount < 0) {
-  return res.status(400).json({
-    error: "Enter a valid advance amount",
-  });
-}
-
-const amounts = await calculateBookingAmounts({
-  room_id,
-  check_in_date,
-  check_out_date,
-  advance_amount: normalizedAdvanceAmount,
-  guest_count,
-  discount_applied,
-  discount_amount,
-  gst_enabled: req.body.gst_enabled !== false,
-  allowPastDates: true,
-});
-      const requestedGuests = Math.max(1, Number(guest_count) || 1);
-      if (requestedGuests > Number(amounts.room.capacity || requestedGuests)) {
-        return res.status(400).json({
-          error: `This room allows up to ${amounts.room.capacity} guests`,
-        });
-      }
-
-      // This route had no availability check at all, so two members of staff
-      // could sell the same room for the same nights, and a room blocked for
-      // maintenance could still be booked from the admin screen.
-      const conflict = await findDateConflict(db, {
-        room_id,
-        check_in_date,
-        check_out_date,
-      });
-      if (conflict) {
-        return res.status(409).json({ error: conflict });
-      }
-
-      const userId = await findOrCreateGuestUser(customer || {});
-      const manualPaymentId = `${selectedPaymentMode.toUpperCase()}-${Date.now()}-${req.user.user_id}`;
-
-      const gstNumberRaw = String(customer?.gst_number || "")
-        .trim()
-        .toUpperCase();
-      if (gstNumberRaw && !GSTIN_REGEX.test(gstNumberRaw)) {
-        return res
-          .status(400)
-          .json({ error: "Enter a valid 15-character GSTIN" });
-      }
-      const gstNumber = gstNumberRaw || null;
-
-      // Optional billing address. Collapsed to single spaces so a pasted
-      // multi-line address prints as one clean block on the invoice.
-      const customerAddress =
-        String(customer?.customer_address || customer?.address || "")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, 255) || null;
-
-      const [result] = await db.query(
-        `INSERT INTO bookings (
-    user_id, room_id, check_in_date, check_out_date, guest_count,
-    total_price, taxable_amount, gst_amount, final_total, total_amount,
-    discount_applied, discount_amount,
-    advance_amount, advance_paid, balance_paid, remaining_amount,
-    payment_status, payment_id, advance_payment_id, advance_order_id,
-    payment_method, booking_source, vehicle_type, vehicle_price,
-    vehicle_status, pickup_location, dropoff_location, gst_enabled, gst_number,
-    customer_address, status
-  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')`,
-        [
-          userId,
-          room_id,
-          check_in_date,
-          check_out_date,
-          requestedGuests,
-          amounts.roomSubtotal,
-          amounts.taxableAmount,
-          amounts.gstAmount,
-          amounts.totalAmount,
-          amounts.totalAmount,
-          amounts.discountApplied ? 1 : 0,
-          amounts.discountAmount,
-          amounts.advanceAmount,
-          amounts.advanceAmount,
-          0,
-          amounts.remainingAmount,
-          amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
-          manualPaymentId,
-          manualPaymentId,
-          null,
-          `${selectedPaymentMode} Advance`,
-          req.user.role === "admin"
-            ? "ADMIN_MANUAL_ADVANCE"
-            : "MANAGER_MANUAL_ADVANCE",
-          vehicle_type,
-          0,
-          vehicle_type === "none" ? "not_required" : "pending",
-          pickup_location || null,
-          dropoff_location || null,
-          amounts.gstEnabled ? 1 : 0,
-          gstNumber,
-          customerAddress,
-        ],
-      );
-
-      const bookingId = result.insertId;
-      // freeze the room's GST rate onto this booking, before the invoice is
-      // built from it
-      await stampRoomGstRate(bookingId);
-      loadBookingForInvoice(bookingId)
-        .then((booking) => booking && sendAdvanceInvoiceEmail(booking))
-        .catch((emailErr) =>
-          console.error(
-            "Manual booking invoice email error:",
-            emailErr.message,
-          ),
-        );
-
-      res.status(201).json({
-        message: "Booking confirmed with manual advance payment",
-        booking_id: bookingId,
-        totalAmount: amounts.totalAmount,
-        discountApplied: amounts.discountApplied,
-        discountAmount: amounts.discountAmount,
-        discountedRoomAmount: amounts.discountedRoomAmount,
-        advanceAmount: amounts.advanceAmount,
-        advancePaid: amounts.advanceAmount,
-        remainingAmount: amounts.remainingAmount,
-        invoiceEmail: customer?.email,
-        paymentMode: selectedPaymentMode,
-        paymentStatus: amounts.remainingAmount > 0 ? "PARTIALLY_PAID" : "PAID",
-        bookingStatus: "CONFIRMED",
-      });
-    } catch (err) {
-      res.status(err.status || 500).json({ error: err.message });
-    }
-  },
-);
+// AD-03: a second copy of POST /api/admin/bookings/manual-advance-confirm used
+// to sit here. Express only ever ran the first registration (above), so
+// this ~190-line copy was dead code; removed so fixes land in one place.
 
 // Adds a column if it is missing. The startup migration normally handles this,
 // but it only runs at boot — if the server was not restarted after an update,
@@ -6232,6 +6385,18 @@ async function confirmIfStillFree(bookingId, razorpayPaymentId) {
     await conn.query("SELECT room_id FROM rooms WHERE room_id=? FOR UPDATE", [
       b.room_id,
     ]);
+    // The browser's verify call and the Razorpay webhook can arrive together.
+    // Whichever gets the room lock second must see the first one's result —
+    // otherwise its own confirmed row looks like a clash and it refunds a
+    // perfectly good booking.
+    const [[current]] = await conn.query(
+      "SELECT status FROM bookings WHERE booking_id=? FOR UPDATE",
+      [bookingId],
+    );
+    if (current && ["confirmed", "completed"].includes(current.status)) {
+      await conn.commit();
+      return null;
+    }
     // this booking is still 'pending', so findDateConflict never matches itself
     conflict = await findDateConflict(conn, {
       room_id: b.room_id,
@@ -6267,9 +6432,20 @@ async function confirmIfStillFree(bookingId, razorpayPaymentId) {
 
   if (conflict) {
     try {
-      await razorpay.payments.refund(razorpayPaymentId, {
+      const refund = await razorpay.payments.refund(razorpayPaymentId, {
         notes: { booking_id: String(bookingId), reason: conflict },
       });
+      // PY-03: keep the refund on the booking, not only in Razorpay
+      await db.query(
+        `UPDATE bookings SET refund_amount=?, refund_reference=?, refunded_at=NOW()
+          WHERE booking_id=?`,
+        [
+          refund?.amount ? Number(refund.amount) / 100 : null,
+          refund?.id || null,
+          bookingId,
+        ],
+      );
+      await logBookingEvent(null, bookingId, "auto_refund", refund?.id);
     } catch (e) {
       // payment may still be only authorised, or refund API unavailable —
       // the booking note records it so staff can refund from the dashboard
@@ -7143,16 +7319,20 @@ app.patch(
 app.patch("/api/bookings/:id/checkin", requireAdmin, async (req, res) => {
   try {
     const bookingId = req.params.id;
+    const blocked = await checkinBlocker(bookingId);
+    if (blocked) return res.status(blocked.status).json({ error: blocked.error });
     const now = new Date();
 
     // save the guest details FIRST — if this fails we must not leave the
     // booking marked as checked in with no details behind it
     const guests = await saveCheckinDetails(bookingId, req.body);
 
+    // a repeat check-in (details re-saved) keeps the original arrival time
     await db.query(
-      "UPDATE bookings SET actual_checkin=?, status='confirmed' WHERE booking_id=?",
+      "UPDATE bookings SET actual_checkin=COALESCE(actual_checkin, ?) WHERE booking_id=?",
       [now, bookingId],
     );
+    await logBookingEvent(req, bookingId, "checkin");
 
     res.json({
       message: "Checked in successfully",
@@ -7183,6 +7363,8 @@ app.patch("/api/bookings/:id/checkout", requireAdmin, async (req, res) => {
     ]);
     if (!rows.length)
       return res.status(404).json({ error: "Booking not found" });
+    const blocked = await checkoutBlocker(req.params.id);
+    if (blocked) return res.status(blocked.status).json({ error: blocked.error });
     const booking = rows[0];
     const now = new Date();
     const checkinTime = booking.actual_checkin
@@ -7198,6 +7380,7 @@ app.patch("/api/bookings/:id/checkout", requireAdmin, async (req, res) => {
       `UPDATE bookings SET actual_checkout=?, hours_spent=?, status='completed' WHERE booking_id=?`,
       [now, hoursSpent, req.params.id],
     );
+    await logBookingEvent(req, req.params.id, "checkout");
     // recalc writes addon_charges, gst_amount, final_total, total_amount and
     // remaining_amount together — the old query left the last two stale
     const totals = await recalcBookingTotals(req.params.id);
@@ -8056,7 +8239,10 @@ app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
   try {
     const [booking] = await db.query(
       `SELECT status, actual_checkin, actual_checkout,
-              COALESCE(final_total, total_price, 0) AS revenue
+              COALESCE(final_total, total_price, 0) AS revenue,
+              COALESCE(advance_paid, 0) AS advance_paid,
+              COALESCE(balance_paid, 0) AS balance_paid,
+              payment_id, payment_status
          FROM bookings WHERE booking_id=?`,
       [req.params.id],
     );
@@ -8064,6 +8250,24 @@ app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
       return res.status(404).json({ error: "Booking not found" });
 
     const bk = booking[0];
+
+    /*
+     * PY-02: a booking that took money or was stayed in has an invoice in the
+     * GST series. Deleting it leaves a gap the auditor will ask about and
+     * silently rewrites past revenue. Those are cancelled + credit-noted
+     * instead; only rows that never took money and never had a guest can go.
+     */
+    const tookMoney =
+      Number(bk.advance_paid) > 0 ||
+      Number(bk.balance_paid) > 0 ||
+      Boolean(bk.payment_id);
+    // (payment_status alone is not used: the column defaults to 'PAID')
+    if (tookMoney || bk.actual_checkin || bk.status === "completed") {
+      return res.status(409).json({
+        error:
+          "This booking has a payment or stay recorded, so it is part of the invoice series and cannot be deleted. Cancel it and issue a credit note instead.",
+      });
+    }
 
     // a guest who is still in the room must be checked out first, otherwise
     // the room silently frees up while it is actually occupied
@@ -8079,6 +8283,7 @@ app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
     const removedRevenue =
       bk.status === "cancelled" ? 0 : Number(bk.revenue || 0);
     await db.query("DELETE FROM bookings WHERE booking_id=?", [req.params.id]);
+    await logBookingEvent(req, req.params.id, "delete", `status was ${bk.status}`);
     res.json({
       message: "Booking deleted successfully",
       removedRevenue,
@@ -8651,7 +8856,21 @@ app.patch("/api/admin/rooms/:id", requireAdmin, async (req, res) => {
       `UPDATE rooms SET ${fields.join(",")} WHERE room_id=?`,
       values,
     );
-    res.json({ message: "Room updated" });
+    // AD-05: taking a room offline does not touch its future bookings — tell
+    // the admin which guests are still booked into it so they can be moved.
+    let futureBookings = [];
+    if (is_available !== undefined && Number(is_available) === 0) {
+      const [fb] = await db.query(
+        `SELECT booking_id, DATE_FORMAT(check_in_date, '%Y-%m-%d') AS check_in_date
+           FROM bookings
+          WHERE room_id=? AND status NOT IN ('cancelled','pending','completed')
+            AND check_out_date >= CURDATE()
+          ORDER BY check_in_date`,
+        [req.params.id],
+      );
+      futureBookings = fb;
+    }
+    res.json({ message: "Room updated", futureBookings });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -8751,6 +8970,13 @@ app.post(
           req.body.total_amount !== undefined && req.body.total_amount !== ""
             ? Math.max(0, Number(req.body.total_amount))
             : nightlyRate * nights;
+        // AD-06: a Rs.0 bulk booking must say why (complimentary, staff...)
+        if (!(roomSubtotal > 0) && !note) {
+          return res.status(400).json({
+            error:
+              "Enter the bulk booking amount, or add a note explaining why it is free",
+          });
+        }
         /*
          * PER-ROOM GST — explicit room rate, else the slab for this tariff.
          *
@@ -8820,9 +9046,14 @@ app.post(
         bookingId = result.insertId;
         // freeze the room's GST rate onto this bulk booking
         await stampRoomGstRate(bookingId);
+        await logBookingEvent(req, bookingId, "bulk_create", note);
       }
 
-      await db.query(
+      // OP-04: the booking and its blocked nights must land together. If the
+      // block insert fails, undo the bulk booking instead of leaving a
+      // confirmed stay whose nights are still on sale.
+      try {
+        await db.query(
         `INSERT INTO room_blocked_dates
          (room_id, blocked_date, block_reason, block_note, booking_id)
        VALUES ${validDates.map(() => "(?,?,?,?,?)").join(",")}
@@ -8838,6 +9069,14 @@ app.post(
           bookingId,
         ]),
       );
+      } catch (blockErr) {
+        if (bookingId) {
+          await db
+            .query("DELETE FROM bookings WHERE booking_id=?", [bookingId])
+            .catch(() => {});
+        }
+        throw blockErr;
+      }
 
       res.json({
         message:
@@ -9108,11 +9347,15 @@ app.patch(
   requireManager,
   async (req, res) => {
     try {
+      const blocked = await checkinBlocker(req.params.id);
+      if (blocked)
+        return res.status(blocked.status).json({ error: blocked.error });
       const now = new Date();
       await db.query(
-        "UPDATE bookings SET actual_checkin=?, status='confirmed' WHERE booking_id=?",
+        "UPDATE bookings SET actual_checkin=COALESCE(actual_checkin, ?) WHERE booking_id=?",
         [now, req.params.id],
       );
+      await logBookingEvent(req, req.params.id, "checkin");
       res.json({ message: "Checked in successfully", actual_checkin: now });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -9129,11 +9372,13 @@ app.patch(
         "SELECT * FROM bookings WHERE booking_id=?",
         [req.params.id],
       );
-      if (!rows.length)
-        return res.status(404).json({ error: "Booking not found" });
-      const booking = rows[0];
-      const now = new Date();
-      const checkinTime = booking.actual_checkin
+    if (!rows.length)
+      return res.status(404).json({ error: "Booking not found" });
+    const blocked = await checkoutBlocker(req.params.id);
+    if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+    const booking = rows[0];
+    const now = new Date();
+    const checkinTime = booking.actual_checkin
         ? new Date(booking.actual_checkin)
         : new Date(booking.check_in_date);
       const hoursSpent =
@@ -9146,6 +9391,7 @@ app.patch(
         `UPDATE bookings SET actual_checkout=?, hours_spent=?, status='completed' WHERE booking_id=?`,
         [now, hoursSpent, req.params.id],
       );
+      await logBookingEvent(req, req.params.id, "checkout");
       const totals = await recalcBookingTotals(req.params.id);
       res.json({
         message: "Checked out successfully",
@@ -9264,7 +9510,7 @@ app.get("/api/manager/reports", requireManager, async (req, res) => {
       endDate = new Date().toISOString().slice(0, 10);
     }
     const [bookings] = await db.query(
-      `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.status NOT IN ('pending','cancelled') AND DATE(b.created_at) BETWEEN ? AND ? ORDER BY b.created_at ASC`,
+      `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.status NOT IN ('pending','cancelled') AND DATE(COALESCE(CONVERT_TZ(b.created_at, @@session.time_zone, '+05:30'), b.created_at)) BETWEEN ? AND ? ORDER BY b.created_at ASC`,
       [startDate, endDate],
     );
     const [[summary]] = await db.query(
@@ -9280,7 +9526,7 @@ app.get("/api/manager/reports", requireManager, async (req, res) => {
      COUNT(CASE WHEN status='confirmed' THEN 1 END) AS confirmed
    FROM bookings
    WHERE status NOT IN ('pending','cancelled')
-     AND DATE(created_at) BETWEEN ? AND ?`,
+     AND DATE(COALESCE(CONVERT_TZ(created_at, @@session.time_zone, '+05:30'), created_at)) BETWEEN ? AND ?`,
   [startDate, endDate],
 );
     res.json({ bookings, summary, startDate, endDate, type: type || "custom" });
@@ -9336,3 +9582,23 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () =>
   console.log(`🚀 VV Grand Park API running on http://localhost:${PORT}`),
 );
+
+/*
+ * BK-09: a checkout abandoned by closing the tab left its 'pending' row
+ * forever. Only the guest and logged-in checkouts create pending rows, and
+ * nothing counts them, so tidying them after an hour changes no screen. If
+ * Razorpay still reports a payment later, the webhook / verify path confirms
+ * (or refunds) a cancelled row exactly as it does a pending one.
+ */
+setInterval(async () => {
+  try {
+    const [r] = await db.query(
+      `UPDATE bookings SET status='cancelled'
+        WHERE status='pending' AND created_at < DATE_SUB(NOW(), INTERVAL 60 MINUTE)`,
+    );
+    if (r.affectedRows)
+      console.log(`Cleared ${r.affectedRows} abandoned pending booking(s)`);
+  } catch (e) {
+    console.error("Pending cleanup failed:", e.message);
+  }
+}, 15 * 60 * 1000);

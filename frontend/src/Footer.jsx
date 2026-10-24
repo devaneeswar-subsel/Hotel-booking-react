@@ -122,7 +122,7 @@ export default function Footer() {
             </li>
             <li className="mb-[11px]">
               <a
-                href="tel: +919003251115"
+                href="tel:+919003251115"
                 className="flex items-center gap-2 text-[0.82rem] text-white/45 transition-colors duration-200 hover:text-[#E8D5A3]"
               >
                 <PhoneIcon size={13} color="rgba(255,255,255,0.4)" />

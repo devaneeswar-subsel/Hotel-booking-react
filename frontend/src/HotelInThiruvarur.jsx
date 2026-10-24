@@ -19,6 +19,42 @@ const PAGE_TITLE =
 const PAGE_DESCRIPTION =
   "Looking for a hotel in Thiruvarur? VV Grand Park Residency offers clean, comfortable AC rooms near Thyagaraja Temple and Navajeevan Hospital. Deluxe rooms from ₹2,000 + GST. Free parking, free Wi-Fi, 24/7 front desk. Book direct on +91 93849 82510.";
 
+/*
+ * UI-02: the prices above are only a fallback. The page reads the live
+ * tariff from /api/rooms so it never advertises an old "from" price after the
+ * admin changes a room's rate.
+ */
+const API = process.env.REACT_APP_API_URL;
+const formatInr = (n) => `₹${Number(n).toLocaleString("en-IN")}`;
+const FALLBACK_FROM = "₹2,000";
+
+function liveRoomCards(liveRooms) {
+  if (!Array.isArray(liveRooms) || !liveRooms.length) return ROOMS;
+  return ROOMS.map((card) => {
+    const matches = liveRooms.filter(
+      (r) =>
+        String(r.room_type || "").toLowerCase() === card.name.toLowerCase(),
+    );
+    const singles = matches
+      .map((r) => Number(r.price_per_night))
+      .filter((n) => n > 0);
+    if (!singles.length) return card;
+    const single = Math.min(...singles);
+    const doubles = matches
+      .map((r) => Number(r.price_double))
+      .filter((n) => n > 0);
+    const dbl = doubles.length ? Math.min(...doubles) : 0;
+    return {
+      ...card,
+      price: formatInr(single),
+      double:
+        dbl && dbl !== single
+          ? `${formatInr(dbl)} for double occupancy`
+          : "Same rate for single or double occupancy",
+    };
+  });
+}
+
 const hotelPageAliases = {
   "/hotel-in-thiruvarur": true,
   "/hotels-in-thiruvarur": true,
@@ -44,7 +80,7 @@ const ROOMS = [
   {
     name: "Deluxe Room",
     price: "₹2,000",
-    priceNote: "single occupancy + 12% GST",
+    priceNote: "single occupancy + GST",
     double: "₹2,300 for double occupancy",
     detail:
       "A comfortable air-conditioned room with a double bed, TV, hot water and free Wi-Fi. Suited to couples, solo travellers and short business stays in Thiruvarur.",
@@ -52,7 +88,7 @@ const ROOMS = [
   {
     name: "Suite Room",
     price: "₹4,500",
-    priceNote: "per night + 12% GST",
+    priceNote: "per night + GST",
     double: "Same rate for single or double occupancy",
     detail:
       "A larger room with additional seating space, ideal for families visiting Thiruvarur for temple functions, weddings or longer stays.",
@@ -60,7 +96,7 @@ const ROOMS = [
   {
     name: "Suite with Balcony",
     price: "₹4,500",
-    priceNote: "per night + 12% GST",
+    priceNote: "per night + GST",
     double: "Same rate for single or double occupancy",
     detail:
       "Our suite with a private balcony, offering extra light and open space. A good choice for guests staying several nights in Thiruvarur.",
@@ -126,7 +162,7 @@ const FAQS = [
   },
   {
     q: "What is the room tariff at your hotel in Thiruvarur?",
-    a: "Deluxe rooms start at ₹2,000 plus 12% GST for single occupancy and ₹2,300 plus 12% GST for two guests. Suite rooms and the suite with balcony are ₹4,500 plus 12% GST. Booking directly through our website or by phone gets you our best available rate.",
+    a: "Deluxe rooms start at ₹2,000 plus GST for single occupancy and ₹2,300 plus GST for two guests. Suite rooms and the suite with balcony are ₹4,500 plus GST. Booking directly through our website or by phone gets you our best available rate.",
   },
   {
     q: "Do you have a parking facility?",
@@ -255,6 +291,40 @@ function Faq({ item, open, onToggle }) {
 export default function HotelInThiruvarur() {
   const [openFaq, setOpenFaq] = useState(0);
 
+  // UI-02: live tariff
+  const [liveRooms, setLiveRooms] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API}/api/rooms`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setLiveRooms(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const roomCards = liveRoomCards(liveRooms);
+  const livePrices = (liveRooms || [])
+    .map((r) => Number(r.price_per_night))
+    .filter((n) => n > 0);
+  const fromPrice = livePrices.length
+    ? formatInr(Math.min(...livePrices))
+    : FALLBACK_FROM;
+
+  // keep the tab title and meta description on the live "from" price
+  useEffect(() => {
+    if (fromPrice === FALLBACK_FROM) return;
+    document.title = PAGE_TITLE.replace(FALLBACK_FROM, fromPrice);
+    const meta = document.head.querySelector('meta[name="description"]');
+    if (meta)
+      meta.setAttribute(
+        "content",
+        PAGE_DESCRIPTION.replace(FALLBACK_FROM, fromPrice),
+      );
+  }, [fromPrice]);
+
   // inject title, meta, canonical and JSON-LD; clean up on unmount so the
   // rest of the SPA is not left with this page's tags
   useEffect(() => {
@@ -379,7 +449,7 @@ export default function HotelInThiruvarur() {
             Experience comfort, convenience and warm hospitality at VV Grand
             Park Residency — a preferred hotel in Thiruvarur for business
             travellers, families and temple visitors. Clean air-conditioned
-            rooms from ₹2,000 per night, minutes from the Thyagaraja Temple.
+            rooms from {fromPrice} per night, minutes from the Thyagaraja Temple.
           </p>
 
           <div className="mt-7 grid max-w-3xl grid-cols-2 gap-3 sm:grid-cols-5">
@@ -453,7 +523,7 @@ export default function HotelInThiruvarur() {
           </h2>
 
           <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {ROOMS.map((room) => (
+            {roomCards.map((room) => (
               <article
                 key={room.name}
                 className="rounded-2xl border border-[#E8E0D1] bg-[#FBF9F5] p-5"

@@ -593,6 +593,9 @@ function StatCard({
 /* ── CANCEL WARNING MODAL ── */
 function CancelWarningModal({ booking, onConfirm, onClose }) {
   const checkedIn = Boolean(booking.actual_checkin);
+  // PY-03: optional — record the refund given at the time of cancelling
+  const [refundAmount, setRefundAmount] = useState("");
+  const [refundRef, setRefundRef] = useState("");
 
   return (
     <div className="fixed inset-0 z-[800] flex items-center justify-center bg-[rgba(15,25,35,0.8)] p-4 backdrop-blur-md">
@@ -653,6 +656,32 @@ function CancelWarningModal({ booking, onConfirm, onClose }) {
               : "Are you sure you want to cancel this booking? The guest will need to be notified separately."}
           </p>
 
+          {!checkedIn && (
+            <div className="mb-5 grid grid-cols-2 gap-2">
+              <label className="text-xs text-gray-500">
+                Refund given (₹, optional)
+                <input
+                  type="number"
+                  min="0"
+                  value={refundAmount}
+                  onChange={(e) => setRefundAmount(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-slate-900"
+                  placeholder="0"
+                />
+              </label>
+              <label className="text-xs text-gray-500">
+                Refund ref (optional)
+                <input
+                  type="text"
+                  value={refundRef}
+                  onChange={(e) => setRefundRef(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-slate-900"
+                  placeholder="Razorpay / UPI / cash"
+                />
+              </label>
+            </div>
+          )}
+
           <div className="flex gap-3">
             <button
               onClick={onClose}
@@ -662,7 +691,12 @@ function CancelWarningModal({ booking, onConfirm, onClose }) {
             </button>
 
             <button
-              onClick={onConfirm}
+              onClick={() =>
+                onConfirm({
+                  refund_amount: refundAmount,
+                  refund_reference: refundRef,
+                })
+              }
               disabled={checkedIn}
               title={checkedIn ? "Checked-in bookings cannot be cancelled" : ""}
               className="flex-1 rounded-lg bg-red-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
@@ -2593,7 +2627,7 @@ export default function AdminDashboard({
   const userTotalPages = Math.ceil(users.length / itemsPerPage);
 
   const paginatedUsers = getPaginatedData(users, userPage);
-  async function confirmCancelBooking(id) {
+  async function confirmCancelBooking(id, refund = {}) {
     const bookingToCancel =
       cancelBookingData ||
       bookings.find((booking) => booking.booking_id === id);
@@ -2606,6 +2640,7 @@ export default function AdminDashboard({
     try {
       const res = await apiFetch(`/api/bookings/${id}/cancel`, {
         method: "PATCH",
+        body: JSON.stringify(refund || {}),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -2671,16 +2706,31 @@ export default function AdminDashboard({
 
   async function toggleRoom(roomId, current) {
     try {
-      await apiFetch(`/api/admin/rooms/${roomId}`, {
+      const res = await apiFetch(`/api/admin/rooms/${roomId}`, {
         method: "PATCH",
         body: JSON.stringify({ is_available: current ? 0 : 1 }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Update failed");
       setAllRooms((r) =>
         r.map((x) =>
           x.room_id === roomId ? { ...x, is_available: current ? 0 : 1 } : x,
         ),
       );
-      showToast(`Room ${current ? "blocked" : "unblocked"}`, "success");
+      const upcoming = Array.isArray(data.futureBookings)
+        ? data.futureBookings
+        : [];
+      if (current && upcoming.length) {
+        // AD-05: the room is offline but guests are still booked into it
+        showToast(
+          `Room blocked — but ${upcoming.length} upcoming booking(s) still use it: ${upcoming
+            .map((b) => `#${b.booking_id} (${b.check_in_date})`)
+            .join(", ")}. Move or cancel them.`,
+          "error",
+        );
+      } else {
+        showToast(`Room ${current ? "blocked" : "unblocked"}`, "success");
+      }
     } catch (err) {
       showToast(err.message, "error");
     }
@@ -4276,7 +4326,9 @@ Number(booking.balance_paid || 0)
       {cancelBookingData && (
         <CancelWarningModal
           booking={cancelBookingData}
-          onConfirm={() => confirmCancelBooking(cancelBookingData.booking_id)}
+          onConfirm={(refund) =>
+            confirmCancelBooking(cancelBookingData.booking_id, refund)
+          }
           onClose={() => setCancelBookingData(null)}
         />
       )}

@@ -131,8 +131,14 @@ function InfoIcon({ size = 18, color = "currentColor" }) {
   );
 }
 
+// PY-06: show paise when there are any, so the Pay button matches exactly
+// what Razorpay charges (the server total is not rounded to whole rupees)
 function formatAmount(amount) {
-  return `Rs.${Math.round(Number(amount) || 0).toLocaleString("en-IN")}`;
+  const n = Math.round((Number(amount) || 0) * 100) / 100;
+  return `Rs.${n.toLocaleString("en-IN", {
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function parseLocalDate(dateStr) {
@@ -255,8 +261,9 @@ export default function CheckoutPage({ user, showToast }) {
     const storedGst = Number(checkout?.gst);
     const storedTotal = Number(checkout?.roomTotal);
     // the rate configured on the room being checked out, 12% if none is set
-    const quoteRate = roomRateFromRoom(checkout?.room || {});
-    const quotePercent = roomPercentFromRoom(checkout?.room || {});
+    const guests = checkout?.form?.guest_count || 1;
+    const quoteRate = roomRateFromRoom(checkout?.room || {}, guests);
+    const quotePercent = roomPercentFromRoom(checkout?.room || {}, guests);
     const gst =
       Number.isFinite(storedGst) && storedGst > 0
         ? storedGst
@@ -270,7 +277,7 @@ export default function CheckoutPage({ user, showToast }) {
       subtotal,
       gst,
       gstPercent: quotePercent,
-      total: Math.round(total),
+      total: Math.round(total * 100) / 100,
     };
   }, [checkout]);
 

@@ -91,11 +91,23 @@ const apiFetch = async (url, options = {}) => {
 };
 
 function Toast({ msg, type, onHide }) {
+  // UI-01: errors (payment failed, dates gone + refund) stay long enough to
+  // read after the Razorpay popup closes; tap to dismiss any toast
+  const duration = type === "error" ? 8000 : 3500;
   useEffect(() => {
-    const t = setTimeout(onHide, 3500);
+    const t = setTimeout(onHide, duration);
     return () => clearTimeout(t);
-  }, [onHide]);
-  return <div className={`toast ${type}`}>{msg}</div>;
+  }, [onHide, duration]);
+  return (
+    <div
+      className={`toast ${type}`}
+      role={type === "error" ? "alert" : "status"}
+      onClick={onHide}
+      style={{ cursor: "pointer" }}
+    >
+      {msg}
+    </div>
+  );
 }
 
 function StarRating({ value, onChange }) {
@@ -425,11 +437,16 @@ function BookingSuccessRoute() {
   );
 }
 
-function BookingModal({ room, user, onClose, showToast }) {
+function BookingModal({ room, user, onClose, showToast, prefill = null }) {
+  // BK-05: start from the searched dates and party size when there are any
+  const prefillGuests = Math.max(
+    1,
+    Number(prefill?.adults || 0) + Number(prefill?.children || 0) || 1,
+  );
   const [form, setForm] = useState({
-    check_in_date: "",
-    check_out_date: "",
-    guest_count: 1,
+    check_in_date: prefill?.check_in || "",
+    check_out_date: prefill?.check_out || "",
+    guest_count: Math.min(prefillGuests, Number(room?.capacity) || prefillGuests),
   });
   const [loading] = useState(false);
   const [confirmedBooking] = useState(null);
@@ -451,8 +468,11 @@ function BookingModal({ room, user, onClose, showToast }) {
       : Number(room.price_per_night || 0);
   const basePrice = nightlyRate * nights;
   // the room's own configured rate, not a hardcoded 12%
-  const quoteGstPercent = roomPercentFromRoom(room);
-  const gst = Math.round(basePrice * roomRateFromRoom(room) * 100) / 100;
+  // PY-05: the rate depends on the guest count (double rate can cross the
+  // Rs.7,500 slab) — the server charges it that way, so quote it that way
+  const quoteGstPercent = roomPercentFromRoom(room, form.guest_count);
+  const gst =
+    Math.round(basePrice * roomRateFromRoom(room, form.guest_count) * 100) / 100;
   const total = basePrice + gst;
 
   // async function handleSubmit(e) {
@@ -2228,9 +2248,16 @@ const [visibleBookings, setVisibleBookings] = useState(5);
                   b.booking_id,
                 );
 
+              // SC-04: same rule as the server — once the stay has started
+              const stayStarted =
+                b.status === "completed" ||
+                Boolean(b.actual_checkin) ||
+                String(b.check_in_date || "").slice(0, 10) <=
+                  new Date().toLocaleDateString("en-CA");
               const canReview =
                 (b.status === "confirmed" ||
                   b.status === "completed") &&
+                stayStarted &&
                 !isReviewed;
 
               return (
@@ -2486,6 +2513,63 @@ const [visibleBookings, setVisibleBookings] = useState(5);
   );
 }
 
+const KNOWN_APP_PATHS = new Set([
+  "/",
+  "/index.html",
+  "/admin",
+  "/manager",
+  "/my-bookings",
+  "/checkout",
+  "/rooms",
+]);
+
+function isKnownAppPath(pathname = "/") {
+  const p = pathname.replace(/\/+$/, "") || "/";
+  return KNOWN_APP_PATHS.has(p) || p.startsWith("/booking-success/");
+}
+
+function NotFoundPage() {
+  useEffect(() => {
+    const previousTitle = document.title;
+    document.title = "Page not found | VV Grand Park Residency";
+    const robots = document.createElement("meta");
+    robots.name = "robots";
+    robots.content = "noindex";
+    document.head.appendChild(robots);
+    return () => {
+      document.title = previousTitle;
+      robots.remove();
+    };
+  }, []);
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0F1923] px-6 text-center">
+      <div className="mb-3 font-['Playfair_Display'] text-[1.2rem] tracking-[2px] text-[#C9A84C]">
+        VV GRAND PARK
+      </div>
+      <h1 className="m-0 text-2xl font-semibold text-white">
+        This page doesn't exist
+      </h1>
+      <p className="mt-2 max-w-md text-sm text-white/60">
+        The link may be mistyped or out of date.
+      </p>
+      <div className="mt-6 flex flex-wrap justify-center gap-3">
+        <a
+          href="/"
+          className="rounded-lg bg-[#C9A84C] px-5 py-2.5 text-sm font-semibold text-[#0F1923] no-underline"
+        >
+          Go to home
+        </a>
+        <a
+          href="/#rooms"
+          className="rounded-lg border border-white/20 px-5 py-2.5 text-sm font-semibold text-white no-underline"
+        >
+          See rooms
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function AppContent() {
   const legalPolicy = getLegalPolicyByPath(
     window.location.pathname
@@ -2502,6 +2586,7 @@ function AppContent() {
   // room a signed-out visitor is booking as a guest
   const [guestBookingRoom, setGuestBookingRoom] = useState(null);
   const [guestBookingPrefill, setGuestBookingPrefill] = useState(null);
+  const [bookingPrefill, setBookingPrefill] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   // const [showBookings, setShowBookings] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -3339,6 +3424,11 @@ function AppContent() {
       />
     );
   }
+  // UI-04: a mistyped URL used to show the homepage silently (a "soft 404"
+  // to Google). Every path the app actually serves is listed here.
+  if (!isKnownAppPath(currentPath)) {
+    return <NotFoundPage />;
+  }
 
   // ------------------------------------------------------------
   // AUTH LOADING
@@ -3596,7 +3686,10 @@ function AppContent() {
       <Rooms
         user={user}
         availableRoomIds={availableRoomIds}
-        onBookClick={(room) => setBookingRoom(room)}
+        onBookClick={(room, search) => {
+          setBookingPrefill(search || null);
+          setBookingRoom(room);
+        }}
         onAuthPrompt={(room, search) => {
           if (!room) return setShowAuth(true);
           setGuestBookingPrefill(search || null);
@@ -3662,7 +3755,11 @@ function AppContent() {
         <BookingModal
           room={bookingRoom}
           user={user}
-          onClose={() => setBookingRoom(null)}
+          prefill={bookingPrefill}
+          onClose={() => {
+            setBookingRoom(null);
+            setBookingPrefill(null);
+          }}
           showToast={showToast}
         />
       )}

@@ -20,38 +20,7 @@ const FALLBACK = {
     "https://images.unsplash.com/photo-1631049552057-403cdb8f0658?w=700",
 };
 
-const FALLBACK_ROOMS = [
-  {
-    room_id: "fallback-standard-ac",
-    room_number: "110",
-    room_type: "Deluxe Room",
-    price_per_night: 2500,
-    capacity: 2,
-    description:
-      "Comfortable Deluxe Room at VV Grand Park Residency with a cozy stay, modern amenities, and a relaxing atmosphere in Thiruvarur.",
-    image_url: FALLBACK.Standard,
-  },
-  {
-    room_id: "fallback-suite-room",
-    room_number: "205",
-    room_type: "Suite Room",
-    price_per_night: 5000,
-    capacity: 3,
-    description:
-      "Premium Suite Room designed for a refined stay with spacious interiors, tasteful décor, and an elevated guest experience.",
-    image_url: FALLBACK.Suite,
-  },
-  {
-    room_id: "fallback-suite-balcony",
-    room_number: "310",
-    room_type: "Suite with Balcony",
-    price_per_night: 5600,
-    capacity: 4,
-    description:
-      "Elegant Suite with Balcony offering extra space, scenic views, and luxurious amenities for a memorable stay in Thiruvarur.",
-    image_url: FALLBACK.Luxury,
-  },
-];
+// OP-03: the hard-coded FALLBACK_ROOMS list (fixed prices, stock photos) was removed.
 
 export default function Rooms({
   user,
@@ -112,8 +81,12 @@ export default function Rooms({
 
       setRooms(Array.isArray(data) ? data : []);
     } catch {
-      setRooms(FALLBACK_ROOMS);
-      setError("");
+      // OP-03: never show made-up rooms and prices when the API is down —
+      // they did not match the real tariff. Say so and offer a phone number.
+      setRooms([]);
+      setError(
+        "We couldn't load room details right now. Please refresh, or call +91 93849 82510 / WhatsApp us to book.",
+      );
     } finally {
       setLoading(false);
     }
@@ -159,7 +132,9 @@ export default function Rooms({
       return;
     }
 
-    onBookClick(room);
+    // BK-05: hand over the searched dates/guests so the booking form is
+    // pre-filled, the same as the guest checkout already was
+    onBookClick(room, search);
   }
 
   const fadeUp = (delay = 0) => ({
@@ -311,7 +286,9 @@ export default function Rooms({
       </motion.p>
 
       {/* Availability search */}
-      <RoomSearchBar onSearch={handleSearch} searching={searching} />
+      <div id="room-search" className="scroll-mt-24">
+        <RoomSearchBar onSearch={handleSearch} searching={searching} />
+      </div>
 
       {/* What the search found */}
       {search && !searching && (
@@ -339,6 +316,9 @@ export default function Rooms({
                         {g.capacity === 1 ? "" : "s"} — you will need{" "}
                         <strong>{g.needed} rooms</strong> for {totalGuests}{" "}
                         guests. {g.rooms.length} available on these dates.
+                        {/* BK-06: each room is a separate checkout */}{" "}
+                        Each room is booked and paid separately — book them
+                        one after another, or WhatsApp us to hold them together.
                       </li>
                     ))}
                 </ul>
@@ -633,9 +613,20 @@ export default function Rooms({
                 {/* Booking button must stay outside Link */}
                 <div className="px-4 pb-4">
                   {isShowcase ? (
-                    <p className="m-0 text-center text-[0.78rem] text-[#8A95A3]">
-                      Search your dates above to check availability
-                    </p>
+                    // UI-08: a real call to action instead of plain text
+                    <button
+                      type="button"
+                      className="w-full rounded-lg border border-[#C9A84C] bg-transparent px-4 py-2.5 text-[0.82rem] font-semibold text-[#8A6A22] transition hover:bg-[#C9A84C]/10"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        document
+                          .getElementById("room-search")
+                          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                    >
+                      Check availability
+                    </button>
                   ) : (
                     <button
                       className="book-btn"

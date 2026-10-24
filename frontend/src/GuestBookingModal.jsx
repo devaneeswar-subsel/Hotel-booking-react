@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
@@ -64,6 +64,51 @@ export default function GuestBookingModal({
     setErrors((e) => ({ ...e, [key]: "" }));
   };
 
+  /*
+   * BK-04: nights already sold or blocked by the admin, so they are greyed
+   * out here exactly as in the signed-in booking calendar. Before this the
+   * guest only found out when they pressed Pay.
+   */
+  const [occupiedNights, setOccupiedNights] = useState(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API}/api/rooms/${room.room_id}/booked-dates`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        const nights = new Set();
+        rows.forEach((b) => {
+          const start = new Date(b.check_in_date);
+          const end = new Date(b.check_out_date);
+          if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()))
+            return;
+          const cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+          const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+          while (cur < last) {
+            nights.add(cur.toDateString());
+            cur.setDate(cur.getDate() + 1);
+          }
+        });
+        setOccupiedNights(nights);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [room.room_id]);
+
+  // true when any night from check-in up to (not including) check-out is taken
+  const rangeHasOccupied = (checkIn, checkOut) => {
+    if (!checkIn || !checkOut) return false;
+    const night = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
+    const last = new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate());
+    while (night < last) {
+      if (occupiedNights.has(night.toDateString())) return true;
+      night.setDate(night.getDate() + 1);
+    }
+    return false;
+  };
+
   const nights =
     form.check_in && form.check_out
       ? Math.max(
@@ -102,6 +147,8 @@ export default function GuestBookingModal({
       next.phone = "Enter a valid 10-digit mobile number";
 
     if (nights <= 0) next.dates = "Check-out must be after check-in";
+    else if (rangeHasOccupied(form.check_in, form.check_out))
+      next.dates = "This room is not available on one or more selected dates";
 
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -298,6 +345,9 @@ export default function GuestBookingModal({
                           update("check_out", new Date(d.getTime() + 86400000));
                       }}
                       minDate={today}
+                      filterDate={(date) =>
+                        !occupiedNights.has(date.toDateString())
+                      }
                       dateFormat="dd/MM/yyyy"
                       className={inputCls}
                     />
@@ -308,6 +358,9 @@ export default function GuestBookingModal({
                       selected={form.check_out}
                       onChange={(d) => update("check_out", d)}
                       minDate={new Date(form.check_in.getTime() + 86400000)}
+                      filterDate={(date) =>
+                        !rangeHasOccupied(form.check_in, date)
+                      }
                       dateFormat="dd/MM/yyyy"
                       className={inputCls}
                     />
