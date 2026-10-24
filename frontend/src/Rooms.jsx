@@ -499,10 +499,20 @@ export default function Rooms({
               room.description ||
               `Comfortable ${roomName} accommodation at VV Grand Park Residency in Thiruvarur with modern amenities and premium comfort.`;
 
-            const roomPrice = Number(room.price_per_night);
+            // G-04: after a search, quote for the guests this room would
+            // hold (double rate + its GST slab), the same figure the booking
+            // form will show next
+            const cardGuests = search
+              ? Math.min(totalGuests, capacityOf(room))
+              : 1;
+            const roomPrice =
+              cardGuests >= 2 && Number(room.price_double || 0) > 0
+                ? Number(room.price_double)
+                : Number(room.price_per_night);
             // each room carries its own GST rate; 12% only when none is set
             const roomGst =
-              Math.round(roomPrice * roomRateFromRoom(room) * 100) / 100;
+              Math.round(roomPrice * roomRateFromRoom(room, cardGuests) * 100) /
+              100;
             const roomTotal = Math.round((roomPrice + roomGst) * 100) / 100;
 
             const roomCapacity =

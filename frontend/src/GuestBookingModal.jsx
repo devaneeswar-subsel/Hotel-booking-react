@@ -126,8 +126,9 @@ export default function GuestBookingModal({
   const roomSubtotal = nightlyRate * nights;
   // this room's own GST rate — the backend charges the same rate, so the
   // amount quoted here matches what Razorpay is asked for
-  const gstMultiplier = roomRateFromRoom(room);
-  const gstPercent = roomPercentFromRoom(room);
+  // R-01: the rate depends on the guest count, exactly as the server charges
+  const gstMultiplier = roomRateFromRoom(room, form.guest_count);
+  const gstPercent = roomPercentFromRoom(room, form.guest_count);
   const gst = Math.round(roomSubtotal * gstMultiplier * 100) / 100;
   const total = Math.round((roomSubtotal + gst) * 100) / 100;
 

@@ -126,7 +126,7 @@ app.post(
       await logBookingEvent(null, bookingId, "webhook_confirm", payment.id);
 
       const booking = await loadBookingForInvoice(bookingId);
-      if (booking) {
+      if (booking && (await claimConfirmationEmail(bookingId))) {
         sendAdvanceInvoiceEmail(booking).catch((e) =>
           console.error("Webhook confirmation email error:", e.message),
         );
@@ -730,6 +730,43 @@ async function runMigrations() {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           INDEX idx_booking_events_booking (booking_id)
         )`,
+    );
+
+    /*
+     * A-01: a real invoice series. Invoice numbers used to be derived from
+     * booking_id (INV-<calendar year>-<id>), so every abandoned checkout left
+     * a gap and the series reset in January. New bookings get a consecutive
+     * number per Indian financial year (Apr-Mar), assigned only once the
+     * booking is confirmed. Bookings that existed before this release keep
+     * the number already printed on their invoices.
+     */
+    try {
+      await db.query("ALTER TABLE bookings ADD COLUMN invoice_no VARCHAR(40) DEFAULT NULL");
+    } catch (e) {}
+    try {
+      await db.query("ALTER TABLE bookings ADD UNIQUE INDEX uq_bookings_invoice_no (invoice_no)");
+    } catch (e) {}
+    try {
+      await db.query("ALTER TABLE bookings ADD COLUMN confirmation_email_at DATETIME DEFAULT NULL");
+    } catch (e) {}
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS invoice_counters (
+          fy VARCHAR(9) PRIMARY KEY,
+          last_no INT NOT NULL
+        )`,
+    );
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS app_settings (
+         setting_key VARCHAR(60) PRIMARY KEY,
+         setting_value VARCHAR(255) DEFAULT NULL,
+         applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+       )`,
+    );
+    // the first booking id that uses the new series — fixed once, never moves
+    await db.query(
+      `INSERT IGNORE INTO app_settings (setting_key, setting_value)
+       SELECT 'invoice_series_from_booking_id', CAST(COALESCE(MAX(booking_id), 0) + 1 AS CHAR)
+         FROM bookings`,
     );
 
     // PY-03: refunds recorded on the booking instead of only in Razorpay
@@ -2315,6 +2352,24 @@ async function checkoutBlocker(bookingId) {
  * AD-07: a small audit trail. Best-effort — a logging failure must never
  * fail the action it is recording.
  */
+/*
+ * R-06: the browser's verify call and the Razorpay webhook can both confirm
+ * the same payment. Whichever claims this first sends the confirmation email;
+ * the other skips it.
+ */
+async function claimConfirmationEmail(bookingId) {
+  try {
+    const [r] = await db.query(
+      "UPDATE bookings SET confirmation_email_at=NOW() WHERE booking_id=? AND confirmation_email_at IS NULL",
+      [bookingId],
+    );
+    return r.affectedRows === 1;
+  } catch (e) {
+    // column missing (migration not run yet) — behave as before and send
+    return true;
+  }
+}
+
 async function logBookingEvent(req, bookingId, action, details = null) {
   try {
     await db.query(
@@ -2373,7 +2428,82 @@ function finYearOf(date) {
  */
 const INVOICE_TZ = "Asia/Kolkata";
 
+/*
+ * A-01: the stored series number wins; older bookings fall back to the
+ * format already printed on their invoices.
+ */
 function invoiceNoFor(booking) {
+  if (booking?.invoice_no) return booking.invoice_no;
+  return legacyInvoiceNoFor(booking);
+}
+
+// Indian financial year label for a date, e.g. 2026-10-25 -> "2026-27"
+function financialYearOf(value) {
+  const key = istDateKey(value || new Date()) || istDateKey(new Date());
+  const [y, m] = key.split("-").map(Number);
+  const start = m >= 4 ? y : y - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+}
+
+let invoiceSeriesFrom = null;
+async function getInvoiceSeriesFrom() {
+  if (invoiceSeriesFrom !== null) return invoiceSeriesFrom;
+  const [[row]] = await db.query(
+    "SELECT setting_value FROM app_settings WHERE setting_key='invoice_series_from_booking_id'",
+  );
+  const n = Number(row?.setting_value);
+  if (Number.isFinite(n) && n > 0) invoiceSeriesFrom = n;
+  return invoiceSeriesFrom;
+}
+
+/*
+ * Give every confirmed booking in the new range its invoice number, in
+ * booking order, one FY counter at a time. Runs before any screen or PDF
+ * reads bookings, so a document never shows a booking without its number.
+ * A MySQL named lock keeps two requests from handing out the same number.
+ */
+async function assignInvoiceNumbers() {
+  let conn;
+  try {
+    const from = await getInvoiceSeriesFrom();
+    if (!from) return;
+    conn = await db.getConnection();
+    const [[lock]] = await conn.query(
+      "SELECT GET_LOCK('vv_invoice_seq', 10) AS ok",
+    );
+    if (!lock?.ok) return;
+    try {
+      const [rows] = await conn.query(
+        `SELECT booking_id, created_at FROM bookings
+          WHERE invoice_no IS NULL AND booking_id >= ?
+            AND status IN ('confirmed','completed')
+          ORDER BY booking_id LIMIT 500`,
+        [from],
+      );
+      for (const r of rows) {
+        const fy = financialYearOf(r.created_at);
+        const [res] = await conn.query(
+          `INSERT INTO invoice_counters (fy, last_no) VALUES (?, 1)
+           ON DUPLICATE KEY UPDATE last_no = LAST_INSERT_ID(last_no + 1)`,
+          [fy],
+        );
+        const seq = res.affectedRows === 1 ? 1 : Number(res.insertId);
+        await conn.query(
+          "UPDATE bookings SET invoice_no=? WHERE booking_id=? AND invoice_no IS NULL",
+          [`INV-${fy}-${String(seq).padStart(4, "0")}`, r.booking_id],
+        );
+      }
+    } finally {
+      await conn.query("SELECT RELEASE_LOCK('vv_invoice_seq')");
+    }
+  } catch (e) {
+    console.error("Invoice numbering failed:", e.message);
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+function legacyInvoiceNoFor(booking) {
   const raw = booking?.created_at ? new Date(booking.created_at) : null;
   const d = raw && !Number.isNaN(raw.getTime()) ? raw : new Date();
   const year = new Intl.DateTimeFormat("en-GB", {
@@ -2848,6 +2978,7 @@ function escapeHtml(value) {
 }
 
 async function loadBookingForInvoice(bookingId) {
+  await assignInvoiceNumbers(); // A-01
   const [rows] = await db.query(
     `SELECT b.*, u.name AS guest_name, u.email, u.phone,
             r.room_type, r.room_number, r.price_per_night, r.image_url
@@ -2861,7 +2992,7 @@ async function loadBookingForInvoice(bookingId) {
 }
 
 async function generateAdvanceInvoicePdf(booking) {
-  const invNo = `INV-${formatBookingId(booking)}`;
+  const invNo = invoiceNoFor(booking);
   const nights = Math.max(
     1,
     Math.ceil(
@@ -3149,7 +3280,7 @@ async function generateAdvanceInvoicePdf(booking) {
 async function sendAdvanceInvoiceEmail(booking) {
   if (!booking?.email) return;
 
-  const invNo = `INV-${formatBookingId(booking)}`;
+  const invNo = invoiceNoFor(booking);
   const pdfBuffer = await generateAdvanceInvoicePdf(booking);
   const totalAmount = Number(
     booking.total_amount || booking.final_total || booking.total_price || 0,
@@ -3867,7 +3998,7 @@ app.post("/api/payment/guest/verify", guestRateLimit, async (req, res) => {
     const booking = await loadBookingForInvoice(booking_id);
 
     // confirmation email in the background — never block the response
-    if (booking) {
+    if (booking && (await claimConfirmationEmail(booking_id))) {
       sendAdvanceInvoiceEmail(booking).catch((e) =>
         console.error("Guest booking invoice email error:", e.message),
       );
@@ -4047,6 +4178,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
         ["confirmed", "completed"].includes(already[0].status)
       ) {
         // the Razorpay webhook may have confirmed it first
+        await assignInvoiceNumbers(); // A-01
         const [doneRows] = await db.query(
           `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number, r.price_per_night, r.image_url FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.booking_id=?`,
           [booking_id],
@@ -4113,6 +4245,7 @@ await db.query(
     req.user.user_id,
   ],
 );
+    await assignInvoiceNumbers(); // A-01
     const [rows] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number, r.price_per_night, r.image_url FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.booking_id=?`,
       [booking_id],
@@ -4122,6 +4255,8 @@ await db.query(
     // Send booking confirmation email with PDF in background
     (async () => {
       try {
+        // R-06: skip if the webhook already sent it
+        if (!(await claimConfirmationEmail(booking_id))) return;
         const nights = Math.ceil(
           (new Date(booking.check_out_date) - new Date(booking.check_in_date)) /
             86400000,
@@ -4136,7 +4271,7 @@ await db.query(
         const total = Number(
           booking.final_total || Math.round((basePrice + gst) * 100) / 100,
         );
-        const invNo = `INV-${formatBookingId(booking)}`;
+        const invNo = invoiceNoFor(booking);
 
         // Generate PDF
         const pdfBuffer = await new Promise((resolve, reject) => {
@@ -4976,6 +5111,7 @@ app.post("/api/payment/failed", guestRateLimit, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 app.get("/api/bookings/user/:user_id", requireAuth, async (req, res, next) => {
   try {
+    await assignInvoiceNumbers(); // A-01
     if (!ownsOrStaff(req, req.params.user_id)) {
       return res
         .status(403)
@@ -4985,6 +5121,15 @@ app.get("/api/bookings/user/:user_id", requireAuth, async (req, res, next) => {
       `SELECT b.*, r.room_type, r.price_per_night, r.image_url FROM bookings b JOIN rooms r ON b.room_id=r.room_id WHERE b.user_id=? AND b.status != 'pending' ORDER BY b.created_at DESC`,
       [req.params.user_id],
     );
+    // U-02: staff-only notes stay off the guest's own copy
+    if (!isStaff(req)) {
+      for (const r of rows) {
+        delete r.notes;
+        delete r.checkout_discount_reason;
+        delete r.checkout_discount_by;
+        delete r.refund_reference;
+      }
+    }
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -5028,7 +5173,7 @@ app.patch(
 app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
   try {
     const [bookings] = await db.query(
-      "SELECT booking_id, user_id, status, actual_checkin, vehicle_type, vehicle_status FROM bookings WHERE booking_id=?",
+      "SELECT booking_id, user_id, status, actual_checkin, vehicle_type, vehicle_status, COALESCE(advance_paid,0) AS advance_paid, COALESCE(balance_paid,0) AS balance_paid FROM bookings WHERE booking_id=?",
       [req.params.id],
     );
     if (!bookings.length)
@@ -5051,6 +5196,15 @@ app.patch("/api/bookings/:id/cancel", requireAuth, async (req, res) => {
     }
     if (booking.status === "cancelled") {
       return res.status(400).json({ error: "Booking is already cancelled" });
+    }
+    // U-01: a refund can't exceed what the guest actually paid
+    const paidSoFar =
+      Number(booking.advance_paid || 0) + Number(booking.balance_paid || 0);
+    const askedRefund = Number(req.body?.refund_amount);
+    if (Number.isFinite(askedRefund) && askedRefund > paidSoFar + 0.005) {
+      return res.status(400).json({
+        error: `Refund can't be more than the Rs.${paidSoFar.toLocaleString("en-IN")} paid on this booking`,
+      });
     }
 
     // If a vehicle is attached and hasn't already been picked up/completed/cancelled,
@@ -6893,6 +7047,12 @@ app.patch(
       // Same helper the online balance routes use, so a cash settlement and a
       // Razorpay settlement can never disagree about what was owed. This block
       // used to be a copy of that logic and had already started to drift.
+      // F-03: no income against a stay that was cancelled or never paid for
+      if (["cancelled", "pending"].includes(booking.status)) {
+        return res.status(400).json({
+          error: `Cannot record a payment on a ${booking.status} booking`,
+        });
+      }
       const { currentBalancePaid, remaining } = outstandingBalance(booking);
       const newBalancePaid =
         Math.round((currentBalancePaid + remaining) * 100) / 100;
@@ -6901,7 +7061,7 @@ app.patch(
       // there is no driver or timezone conversion to get wrong
       const balanceMode = String(req.body?.payment_mode || "Cash").slice(0, 40);
 
-      await db.query(
+      const [upd] = await db.query(
         `UPDATE bookings
           SET balance_paid = ?,
               remaining_amount = 0,
@@ -6910,12 +7070,16 @@ app.patch(
               balance_paid_at = NOW(),
               advance_payment_mode = COALESCE(advance_payment_mode, payment_method),
               advance_paid_at = COALESCE(advance_paid_at, created_at)
-        WHERE booking_id = ?`,
-        [newBalancePaid, balanceMode, req.params.id],
+        WHERE booking_id = ? AND COALESCE(balance_paid, 0) = ?`,
+        [newBalancePaid, balanceMode, req.params.id, currentBalancePaid],
       );
 
-      // the money lands on the folio as its own line
-      await postFolioPayment(req.params.id, remaining, "Balance payment", balanceMode);
+      // the money lands on the folio as its own line — F-03: only when this
+      // request actually moved balance_paid, so a double click posts it once
+      if (upd.affectedRows === 1 && remaining > 0) {
+        await postFolioPayment(req.params.id, remaining, "Balance payment", balanceMode);
+        await logBookingEvent(req, req.params.id, "balance_paid", `${remaining} ${balanceMode}`);
+      }
 
       const [saved] = await db.query(
         `SELECT balance_paid, balance_payment_mode, balance_paid_at,
@@ -7133,6 +7297,7 @@ app.patch(
         );
       }
 
+      await logBookingEvent(req, req.params.id, "checkout_discount", String(requestedDiscount)); // R-07
       res.json({
         message: applied
           ? "Checkout discount applied"
@@ -7365,6 +7530,22 @@ app.patch("/api/bookings/:id/checkout", requireAdmin, async (req, res) => {
       return res.status(404).json({ error: "Booking not found" });
     const blocked = await checkoutBlocker(req.params.id);
     if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+    // F-02: never let a guest leave with money owed without staff saying so.
+    // The manager screen asks first; the admin check-in screen already shows
+    // the payment summary, so there it is recorded in the audit log.
+    const preTotals = await recalcBookingTotals(req.params.id);
+    const dueAtCheckout = Number(preTotals?.remainingAmount || 0);
+    if (
+      dueAtCheckout > 0 &&
+      req.originalUrl.startsWith("/api/manager/") &&
+      !req.body?.confirm_balance_due
+    ) {
+      return res.status(409).json({
+        code: "BALANCE_DUE",
+        remaining: dueAtCheckout,
+        error: `Rs.${dueAtCheckout.toLocaleString("en-IN")} is still due on this booking.`,
+      });
+    }
     const booking = rows[0];
     const now = new Date();
     const checkinTime = booking.actual_checkin
@@ -7380,7 +7561,12 @@ app.patch("/api/bookings/:id/checkout", requireAdmin, async (req, res) => {
       `UPDATE bookings SET actual_checkout=?, hours_spent=?, status='completed' WHERE booking_id=?`,
       [now, hoursSpent, req.params.id],
     );
-    await logBookingEvent(req, req.params.id, "checkout");
+    await logBookingEvent(
+      req,
+      req.params.id,
+      "checkout",
+      dueAtCheckout > 0 ? `left with Rs.${dueAtCheckout} due` : null,
+    );
     // recalc writes addon_charges, gst_amount, final_total, total_amount and
     // remaining_amount together — the old query left the last two stale
     const totals = await recalcBookingTotals(req.params.id);
@@ -7980,6 +8166,7 @@ app.post("/api/bookings/:id/addons", requireAdmin, async (req, res) => {
     // gst_amount, final_total, total_amount AND remaining_amount together, so
     // no screen can read a stale figure after this call.
     const totals = await recalcBookingTotals(req.params.id);
+    await logBookingEvent(req, req.params.id, "addon_add"); // R-07
     res.status(201).json({
       ...line,
       amount: line.taxableAmount,
@@ -8008,8 +8195,6 @@ app.delete(
         return res.status(400).json({ error: "Cannot remove a paid add-on" });
       // void on the folio BEFORE the row goes, while the link still exists
       await voidAddonFolioLine(req.params.id, req.params.addon_id, "Charge removed by admin");
-      // void on the folio BEFORE the row goes, while the link still exists
-      await voidAddonFolioLine(req.params.id, req.params.addon_id, "Charge removed by manager");
       await db.query(
         "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=?",
         [req.params.addon_id, req.params.id],
@@ -8021,6 +8206,7 @@ app.delete(
       // one helper keeps total_amount and remaining_amount in step with
       // final_total; updating only the latter left the screens stale
       const totals = await recalcBookingTotals(req.params.id);
+      await logBookingEvent(req, req.params.id, "addon_remove", `addon ${req.params.addon_id}`); // R-07
       res.json({
         message: "Addon removed",
         new_addon_total: totals.addonCharges,
@@ -8195,6 +8381,7 @@ app.get("/api/admin/users/:id", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/bookings", requireAdmin, async (req, res) => {
   try {
+    await assignInvoiceNumbers(); // A-01
     const [rows] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.status NOT IN ('pending') ORDER BY b.created_at DESC`,
     );
@@ -8206,6 +8393,7 @@ app.get("/api/admin/bookings", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
   try {
+    await assignInvoiceNumbers(); // A-01
     const [rows] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number, r.price_per_night, r.image_url FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.booking_id=?`,
       [req.params.id],
@@ -8265,7 +8453,7 @@ app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
     if (tookMoney || bk.actual_checkin || bk.status === "completed") {
       return res.status(409).json({
         error:
-          "This booking has a payment or stay recorded, so it is part of the invoice series and cannot be deleted. Cancel it and issue a credit note instead.",
+          "This booking has a payment or stay recorded, so its invoice must stay on record and it cannot be deleted. Cancel it instead — record any refund in the cancel window.",
       });
     }
 
@@ -8324,10 +8512,11 @@ const SLAB_CHANGE_DATE = "2025-09-22";
  */
 app.get("/api/admin/gst/affected-bills", requireAdmin, async (req, res) => {
   try {
+    await assignInvoiceNumbers(); // A-01
     const from = req.query.from || SLAB_CHANGE_DATE;
 
     const [rows] = await db.query(
-      `SELECT b.booking_id, b.created_at, b.check_in_date, b.check_out_date,
+      `SELECT b.booking_id, b.invoice_no, b.created_at, b.check_in_date, b.check_out_date,
               b.guest_count, b.taxable_amount, b.gst_amount, b.total_amount,
               b.final_total, b.room_gst_rate, b.gst_enabled, b.status,
               r.room_number, r.room_type, r.price_per_night, r.price_double,
@@ -8471,6 +8660,12 @@ app.post("/api/admin/credit-notes", requireAdmin, async (req, res) => {
       [booking_id],
     );
     if (!booking) return res.status(404).json({ error: "Booking not found" });
+    // A-03: only an invoiced stay can be credited
+    if (!["confirmed", "completed"].includes(booking.status)) {
+      return res.status(400).json({
+        error: "A credit note can only be issued against a confirmed or completed booking",
+      });
+    }
 
     // One live note per booking. A second correction on the same bill is
     // almost always a double-credit by mistake; cancel the first if the
@@ -8497,14 +8692,14 @@ app.post("/api/admin/credit-notes", requireAdmin, async (req, res) => {
 
     const note = await issueCreditNote({
       bookingId: booking.booking_id,
-      issueDate: issue_date || new Date().toISOString().slice(0, 10),
+      issueDate: issue_date || istDateKey(new Date()), // A-02: India date
       reason: String(reason || "GST rate correction").slice(0, 255),
       taxableAmount: Number(booking.taxable_amount || 0),
       originalRate: charged,
       revisedRate: revised,
       originalInvoiceNo: invoiceNoFor(booking),
       originalInvoiceDate: booking.created_at
-        ? new Date(booking.created_at).toISOString().slice(0, 10)
+        ? istDateKey(booking.created_at)
         : null,
       createdBy: req.user?.email || req.user?.name || `user:${req.user?.user_id}`,
     });
@@ -8594,10 +8789,10 @@ app.get("/api/admin/credit-notes/export", requireAdmin, async (req, res) => {
 
     const body = rows.map((r) => [
       r.cn_number,
-      r.issue_date instanceof Date ? r.issue_date.toISOString().slice(0, 10) : r.issue_date,
+      r.issue_date instanceof Date ? istDateKey(r.issue_date) : r.issue_date,
       r.original_invoice_no,
       r.original_invoice_date instanceof Date
-        ? r.original_invoice_date.toISOString().slice(0, 10)
+        ? istDateKey(r.original_invoice_date)
         : r.original_invoice_date,
       r.guest_name,
       r.customer_gst_number,
@@ -9221,6 +9416,7 @@ app.post("/api/manager/login", loginRateLimit, async (req, res) => {
 
 app.get("/api/manager/bookings", requireManager, async (req, res) => {
   try {
+    await assignInvoiceNumbers(); // A-01
     const [rows] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.status NOT IN ('pending') ORDER BY b.created_at DESC`,
     );
@@ -9232,6 +9428,7 @@ app.get("/api/manager/bookings", requireManager, async (req, res) => {
 
 app.get("/api/manager/bookings/:id", requireManager, async (req, res) => {
   try {
+    await assignInvoiceNumbers(); // A-01
     const [rows] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number, r.price_per_night, r.image_url FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.booking_id=?`,
       [req.params.id],
@@ -9388,6 +9585,22 @@ app.patch(
       return res.status(404).json({ error: "Booking not found" });
     const blocked = await checkoutBlocker(req.params.id);
     if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+    // F-02: never let a guest leave with money owed without staff saying so.
+    // The manager screen asks first; the admin check-in screen already shows
+    // the payment summary, so there it is recorded in the audit log.
+    const preTotals = await recalcBookingTotals(req.params.id);
+    const dueAtCheckout = Number(preTotals?.remainingAmount || 0);
+    if (
+      dueAtCheckout > 0 &&
+      req.originalUrl.startsWith("/api/manager/") &&
+      !req.body?.confirm_balance_due
+    ) {
+      return res.status(409).json({
+        code: "BALANCE_DUE",
+        remaining: dueAtCheckout,
+        error: `Rs.${dueAtCheckout.toLocaleString("en-IN")} is still due on this booking.`,
+      });
+    }
     const booking = rows[0];
     const now = new Date();
     const checkinTime = booking.actual_checkin
@@ -9403,7 +9616,12 @@ app.patch(
         `UPDATE bookings SET actual_checkout=?, hours_spent=?, status='completed' WHERE booking_id=?`,
         [now, hoursSpent, req.params.id],
       );
-      await logBookingEvent(req, req.params.id, "checkout");
+      await logBookingEvent(
+      req,
+      req.params.id,
+      "checkout",
+      dueAtCheckout > 0 ? `left with Rs.${dueAtCheckout} due` : null,
+    );
       const totals = await recalcBookingTotals(req.params.id);
       res.json({
         message: "Checked out successfully",
@@ -9431,7 +9649,7 @@ app.post(
       if (!amount && !unit_price)
         return res.status(400).json({ error: "label and amount required" });
       const [[bk]] = await db.query(
-        "SELECT status FROM bookings WHERE booking_id=?",
+        "SELECT status, actual_checkout FROM bookings WHERE booking_id=?",
         [req.params.id],
       );
       if (!bk) return res.status(404).json({ error: "Booking not found" });
@@ -9439,9 +9657,23 @@ app.post(
         return res
           .status(400)
           .json({ error: "Cannot add charges to a cancelled booking" });
+      // F-01: the guest has left with a final bill — a late charge must be
+      // a deliberate choice, confirmed on screen
+      if (bk.actual_checkout && !req.body?.confirm_after_checkout) {
+        return res.status(409).json({
+          code: "AFTER_CHECKOUT",
+          error: "This guest has already checked out. Adding a charge changes the final bill they were given.",
+        });
+      }
 
       const line = await insertAddonLine(req.params.id, req.body);
       const totals = await recalcBookingTotals(req.params.id);
+      await logBookingEvent(
+        req,
+        req.params.id,
+        "addon_add",
+        bk.actual_checkout ? "after checkout" : null,
+      ); // R-07
       res.status(201).json({
         ...line,
         amount: line.taxableAmount,
@@ -9476,7 +9708,21 @@ app.delete(
       if (!addon) return res.status(404).json({ error: "Add-on not found" });
       if (Number(addon.paid) === 1)
         return res.status(400).json({ error: "Cannot remove a paid add-on" });
+      const [[bk]] = await db.query(
+        "SELECT actual_checkout FROM bookings WHERE booking_id=?",
+        [req.params.id],
+      );
+      // F-01: same rule as adding
+      if (bk?.actual_checkout && !req.body?.confirm_after_checkout) {
+        return res.status(409).json({
+          code: "AFTER_CHECKOUT",
+          error: "This guest has already checked out. Removing a charge changes the final bill they were given.",
+        });
+      }
 
+      // F-06: void the folio line too, as the admin route does — otherwise
+      // the folio still carries a charge that no longer exists
+      await voidAddonFolioLine(req.params.id, req.params.addon_id, "Charge removed by manager");
       await db.query(
         "DELETE FROM booking_addons WHERE addon_id=? AND booking_id=?",
         [req.params.addon_id, req.params.id],
@@ -9488,6 +9734,7 @@ app.delete(
       // one helper keeps total_amount and remaining_amount in step with
       // final_total; updating only the latter left the screens stale
       const totals = await recalcBookingTotals(req.params.id);
+      await logBookingEvent(req, req.params.id, "addon_remove", `addon ${req.params.addon_id}`); // R-07
       res.json({
         message: "Addon removed",
         new_addon_total: totals.addonCharges,
@@ -9510,16 +9757,16 @@ app.get("/api/manager/reports", requireManager, async (req, res) => {
       startDate = start_date;
       endDate = end_date;
     } else if (type === "weekly") {
-      const day = now.getDay();
-      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-      const mon = new Date(now.setDate(diff));
-      startDate = mon.toISOString().slice(0, 10);
-      endDate = new Date().toISOString().slice(0, 10);
+      // A-02/AD-04: "this week" and "today" are India dates
+      const today = istDateKey(now);
+      const [ty, tm, td] = today.split("-").map(Number);
+      const weekday = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay();
+      startDate = addDaysKey(today, weekday === 0 ? -6 : 1 - weekday);
+      endDate = today;
     } else {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1)
-        .toISOString()
-        .slice(0, 10);
-      endDate = new Date().toISOString().slice(0, 10);
+      const today = istDateKey(now);
+      startDate = `${today.slice(0, 7)}-01`;
+      endDate = today;
     }
     const [bookings] = await db.query(
       `SELECT b.*, u.name AS guest_name, u.email, u.phone, r.room_type, r.room_number FROM bookings b JOIN users u ON b.user_id=u.user_id JOIN rooms r ON b.room_id=r.room_id WHERE b.status NOT IN ('pending','cancelled') AND DATE(COALESCE(CONVERT_TZ(b.created_at, @@session.time_zone, '+05:30'), b.created_at)) BETWEEN ? AND ? ORDER BY b.created_at ASC`,
@@ -9614,3 +9861,9 @@ setInterval(async () => {
     console.error("Pending cleanup failed:", e.message);
   }
 }, 15 * 60 * 1000);
+
+// A-01: also number staff-confirmed bookings promptly, even before a screen
+// asks for them
+setInterval(() => {
+  assignInvoiceNumbers();
+}, 5 * 60 * 1000);

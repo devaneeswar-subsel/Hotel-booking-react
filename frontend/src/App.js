@@ -388,6 +388,13 @@ function PaymentSuccess({ booking, onClose, onDownloadInvoice }) {
   );
 }
 
+// a•••••@gmail.com — enough to recognise, not enough to read off a screen
+function maskEmail(email = "") {
+  const [user, domain] = String(email).split("@");
+  if (!domain) return email;
+  return `${user.slice(0, 1)}•••••@${domain}`;
+}
+
 function BookingSuccessRoute() {
   let booking = null;
   try {
@@ -423,6 +430,21 @@ function BookingSuccessRoute() {
               {Math.round(Number(booking.final_total || 0)).toLocaleString(
                 "en-IN",
               )}
+            </p>
+            {/* G-02: say where the confirmation went — a returning guest's
+                booking uses the email already on file for their phone */}
+            {booking.email && (
+              <p className="text-xs text-gray-500">
+                Confirmation and invoice sent to{" "}
+                <strong className="text-[#0F1923]">
+                  {maskEmail(booking.email)}
+                </strong>
+              </p>
+            )}
+            {/* G-03: guest-checkout accounts have no password yet */}
+            <p className="text-xs text-gray-500">
+              To see this booking later, sign in with this email using
+              &ldquo;Forgot password&rdquo;.
             </p>
           </div>
         )}
@@ -656,7 +678,7 @@ function BookingModal({ room, user, onClose, showToast, prefill = null }) {
     const invoiceGstPercent = roomGstPercent(b);
     const gst = Math.round(basePrice * roomGstRate(b) * 100) / 100;
     const total = Math.round((basePrice + gst) * 100) / 100;
-    const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
+    const invNo = b.invoice_no || `INV-${formatBookingId(b)}`; // A-01
     const today = new Date().toLocaleDateString("en-IN", {
       day: "numeric",
       month: "long",
@@ -2525,7 +2547,12 @@ const KNOWN_APP_PATHS = new Set([
 
 function isKnownAppPath(pathname = "/") {
   const p = pathname.replace(/\/+$/, "") || "/";
-  return KNOWN_APP_PATHS.has(p) || p.startsWith("/booking-success/");
+  // R-04: /booking-success with or without an id is a real page
+  return (
+    KNOWN_APP_PATHS.has(p) ||
+    p === "/booking-success" ||
+    p.startsWith("/booking-success/")
+  );
 }
 
 function NotFoundPage() {
@@ -2661,7 +2688,7 @@ function AppContent() {
         roomCharges + gst
     );
 
-    const invNo = `INV-${formatBookingId(booking)}`;
+    const invNo = booking.invoice_no || `INV-${formatBookingId(booking)}`; // A-01
 
     const guestName =
       booking.guest_name ||
@@ -3454,7 +3481,7 @@ function AppContent() {
   // ------------------------------------------------------------
   if (
     currentPath.startsWith(
-      "/booking-success/"
+      "/booking-success"
     )
   ) {
     return (

@@ -505,10 +505,24 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   async function handleCheckout() {
     if (!window.confirm("Confirm checkout? This will calculate final bill."))
       return;
-    const res = await apiFetch(`/api/manager/bookings/${bookingId}/checkout`, {
+    let res = await apiFetch(`/api/manager/bookings/${bookingId}/checkout`, {
       method: "PATCH",
     });
-    const data = await res.json();
+    let data = await res.json();
+    // F-02: money still owed — make it a conscious choice, not a surprise
+    if (res.status === 409 && data.code === "BALANCE_DUE") {
+      if (
+        !window.confirm(
+          `${data.error}\n\nCollect it first, or press OK to check out with the balance outstanding.`,
+        )
+      )
+        return;
+      res = await apiFetch(`/api/manager/bookings/${bookingId}/checkout`, {
+        method: "PATCH",
+        body: JSON.stringify({ confirm_balance_due: true }),
+      });
+      data = await res.json();
+    }
     if (!res.ok) return showToast(data.error, "error");
     showToast(
       `Checked out! Total: Rs.${Number(data.final_total).toLocaleString()}`,
@@ -526,11 +540,20 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
   async function addAddon(payload) {
     setAddonLoading(true);
     try {
-      const res = await apiFetch(`/api/manager/bookings/${bookingId}/addons`, {
+      let res = await apiFetch(`/api/manager/bookings/${bookingId}/addons`, {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      let data = await res.json();
+      // F-01: charging a guest who has already left
+      if (res.status === 409 && data.code === "AFTER_CHECKOUT") {
+        if (!window.confirm(`${data.error}\n\nAdd it as a late charge?`)) return;
+        res = await apiFetch(`/api/manager/bookings/${bookingId}/addons`, {
+          method: "POST",
+          body: JSON.stringify({ ...payload, confirm_after_checkout: true }),
+        });
+        data = await res.json();
+      }
       if (!res.ok) return showToast(data.error, "error");
       showToast(
         `Added: ${data.label} — Rs.${Number(data.taxableAmount ?? data.amount).toLocaleString("en-IN")} + ${formatRate(data.gstRate)} GST`,
@@ -580,11 +603,23 @@ function BookingDetailModal({ bookingId, onClose, showToast, onRefresh }) {
     // 404'd and the charge was never actually removed, while the toast below
     // still reported success. The backend route guards paid charges, so a
     // settled add-on is refused rather than silently deleted.
-    const res = await apiFetch(
+    let res = await apiFetch(
       `/api/manager/bookings/${bookingId}/addons/${addonId}`,
       { method: "DELETE" },
     );
-    const data = await res.json();
+    let data = await res.json();
+    // F-01: changing the bill of a guest who has already left
+    if (res.status === 409 && data.code === "AFTER_CHECKOUT") {
+      if (!window.confirm(`${data.error}\n\nRemove it anyway?`)) return;
+      res = await apiFetch(
+        `/api/manager/bookings/${bookingId}/addons/${addonId}`,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ confirm_after_checkout: true }),
+        },
+      );
+      data = await res.json();
+    }
     if (!res.ok) return showToast(data.error || "Could not remove charge", "error");
     showToast("Addon removed", "success");
     fetchBooking();
@@ -690,7 +725,9 @@ const grandTotalPdf = Math.round(
   (paymentTotalPdf + addonTotalPdf + addonGstPdf) *
     100
 ) / 100;
-    const invNo = `INV-${String(b.booking_id).padStart(5, "0")}`;
+    const invNo =
+      b.invoice_no ||
+      `INV-${new Date(b.created_at || Date.now()).getFullYear()}-${String(b.booking_id).padStart(4, "0")}`; // A-01
     const today = new Date().toLocaleDateString("en-IN", {
       day: "numeric",
       month: "long",
@@ -1776,7 +1813,9 @@ function ManagerBookingForm({
   const basePrice = nightly * nights;
   // Quoting a booking that does not exist yet, so the ROOM's configured rate
   // is the right one here. It gets frozen onto the booking on submit.
-  const gst = Math.round(basePrice * roomRateFromRoom(room) * 100) / 100;
+  // R-02: guest count decides the GST slab, as on the server
+  const gst =
+    Math.round(basePrice * roomRateFromRoom(room, form.guest_count) * 100) / 100;
   const total = basePrice + gst;
 
   async function submit(e) {
@@ -1921,7 +1960,7 @@ function ManagerBookingForm({
               val: `Rs.${basePrice.toLocaleString()}`,
             },
             {
-              label: `GST (${formatRate(roomPercentFromRoom(room))})`,
+              label: `GST (${formatRate(roomPercentFromRoom(room, form.guest_count))})`,
               val: `Rs.${gst.toLocaleString()}`,
             },
           ].map(({ label, val }) => (

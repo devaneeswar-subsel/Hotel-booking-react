@@ -408,7 +408,7 @@ export default function CheckoutPage({ user, showToast }) {
         Math.round(roomCharges * roomGstRate(booking) * 100) / 100,
     );
     const total = Number(booking.final_total || roomCharges + gst);
-    const invNo = `INV-${formatBookingId(booking)}`;
+    const invNo = booking.invoice_no || `INV-${formatBookingId(booking)}`; // A-01
     const guestName = booking.guest_name || user.name || "Guest";
     const fileGuest = guestName.replace(/\s+/g, "_");
     const displayDate = (value) =>

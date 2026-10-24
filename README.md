@@ -50,15 +50,27 @@ Until the secret is set the endpoint answers 503 and changes nothing.
 
 ## Database schema
 
-Tables are created and migrated when the server starts. To keep a copy of
-the real schema in git (needed for restores and fresh setups), dump it from
-the production database:
+The core tables (`users`, `rooms`, `bookings`) are not created by the code,
+so `backend/schema.sql` is the only way to rebuild the database. Refresh it
+from production whenever a table or column is added, and commit it:
 
-```bash
-mysqldump --no-data --skip-comments -h <host> -P <port> -u <user> -p <database> > backend/schema.sql
+```powershell
+cd backend
+$env:MYSQL_URL = "<MYSQL_PUBLIC_URL from the Railway MySQL service → Variables>"
+npm run dump-schema
 ```
 
-Re-run after any change that adds a table or column.
+It reads table definitions only — no guest data. Also make sure backups are
+switched on for the MySQL service in Railway.
+
+## Invoice numbers
+
+Bookings confirmed after the invoice-series release get a consecutive number
+per Indian financial year, `INV-2026-27-0001`, assigned only once a booking
+is confirmed (abandoned checkouts never use a number). Bookings that existed
+before keep the `INV-<year>-<booking id>` number already on their invoices.
+The first booking id in the new series is stored in `app_settings`
+(`invoice_series_from_booking_id`).
 
 ## Tests
 

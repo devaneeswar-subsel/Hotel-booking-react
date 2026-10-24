@@ -361,7 +361,7 @@ export async function printInvoicePdf(
   const advanceMode = b.advance_payment_mode || b.payment_method || "—";
   const balanceMode = b.balance_payment_mode || payLabel;
 
-  const invNo = `INV-${formatBookingId(b)}`;
+  const invNo = b.invoice_no || `INV-${formatBookingId(b)}`; // A-01
 
   // e.g. VV_Grand_Park_Invoice_INV-2026-0054 — used as the PDF title, which
   // browsers use as the tab title and as the default "Save as PDF" file name.

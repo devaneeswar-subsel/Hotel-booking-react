@@ -659,10 +659,18 @@ function CancelWarningModal({ booking, onConfirm, onClose }) {
           {!checkedIn && (
             <div className="mb-5 grid grid-cols-2 gap-2">
               <label className="text-xs text-gray-500">
-                Refund given (₹, optional)
+                Refund given (₹, optional) — paid so far ₹
+                {(
+                  Number(booking.advance_paid || 0) +
+                  Number(booking.balance_paid || 0)
+                ).toLocaleString("en-IN")}
                 <input
                   type="number"
                   min="0"
+                  max={
+                    Number(booking.advance_paid || 0) +
+                    Number(booking.balance_paid || 0)
+                  }
                   value={refundAmount}
                   onChange={(e) => setRefundAmount(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-slate-900"
