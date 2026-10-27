@@ -8611,34 +8611,22 @@ app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
     const [booking] = await db.query(
       `SELECT status, actual_checkin, actual_checkout,
               COALESCE(final_total, total_price, 0) AS revenue,
-              COALESCE(advance_paid, 0) AS advance_paid,
-              COALESCE(balance_paid, 0) AS balance_paid,
-              payment_id, payment_status
+              invoice_no
          FROM bookings WHERE booking_id=?`,
       [req.params.id],
     );
     if (!booking.length)
       return res.status(404).json({ error: "Booking not found" });
-
     const bk = booking[0];
-
     /*
-     * PY-02: a booking that took money or was stayed in has an invoice in the
-     * GST series. Deleting it leaves a gap the auditor will ask about and
-     * silently rewrites past revenue. Those are cancelled + credit-noted
-     * instead; only rows that never took money and never had a guest can go.
+     * The admin can delete any booking, as before the QA pass. A paid or
+     * stayed booking used to be refused here (PY-02) because its invoice
+     * number leaves a gap in the GST series and past revenue changes; the
+     * hotel asked for the original behaviour back. The screen still warns
+     * what will be removed, and the deletion is written to booking_events —
+     * which survives the booking row — so there is still a trace of what
+     * was removed, by whom and when.
      */
-    const tookMoney =
-      Number(bk.advance_paid) > 0 ||
-      Number(bk.balance_paid) > 0 ||
-      Boolean(bk.payment_id);
-    // (payment_status alone is not used: the column defaults to 'PAID')
-    if (tookMoney || bk.actual_checkin || bk.status === "completed") {
-      return res.status(409).json({
-        error:
-          "This booking has a payment or stay recorded, so its invoice must stay on record and it cannot be deleted. Cancel it instead — record any refund in the cancel window.",
-      });
-    }
 
     // a guest who is still in the room must be checked out first, otherwise
     // the room silently frees up while it is actually occupied
@@ -8653,8 +8641,18 @@ app.delete("/api/admin/bookings/:id", requireAdmin, async (req, res) => {
     // removes its contribution automatically
     const removedRevenue =
       bk.status === "cancelled" ? 0 : Number(bk.revenue || 0);
+    // a bulk booking holds its nights in room_blocked_dates; without this the
+    // room stays blocked for ever with no booking left to explain it
+    await db.query("DELETE FROM room_blocked_dates WHERE booking_id=?", [
+      req.params.id,
+    ]);
     await db.query("DELETE FROM bookings WHERE booking_id=?", [req.params.id]);
-    await logBookingEvent(req, req.params.id, "delete", `status was ${bk.status}`);
+    await logBookingEvent(
+      req,
+      req.params.id,
+      "delete",
+      `status was ${bk.status}${bk.invoice_no ? `, invoice ${bk.invoice_no}` : ""}, total ${bk.revenue}`,
+    );
     res.json({
       message: "Booking deleted successfully",
       removedRevenue,
