@@ -8408,8 +8408,10 @@ app.patch(
   requireAdmin,
   async (req, res) => {
     try {
+      // the WHOLE row, not just the status — outstandingBalance() below needs
+      // the payment and discount columns to work out what is genuinely owed
       const [[bk]] = await db.query(
-        "SELECT status FROM bookings WHERE booking_id=?",
+        "SELECT * FROM bookings WHERE booking_id=?",
         [req.params.id],
       );
       if (!bk) return res.status(404).json({ error: "Booking not found" });
@@ -8433,10 +8435,26 @@ app.patch(
        * plus their GST, so that is what gets credited.
        */
       const beforePaid = await getAddonTotals(req.params.id);
-      const settledNow = beforePaid.unpaidTotal;
       const unpaidCount = beforePaid.rows.filter(
         (r) => Number(r.paid) !== 1,
       ).length;
+
+      /*
+       * BUGFIX (money): never credit more than the booking still owes.
+       *
+       * "Mark as Paid" on the balance settles the WHOLE outstanding bill, and
+       * remaining_amount already carries any add-on lines posted before it.
+       * Those lines were left at paid=0, so this route then credited
+       * balance_paid with the add-on total a SECOND time. A Rs.5,010 bill
+       * printed "Amount Already Paid Rs.5,521" — the add-ons counted twice.
+       *
+       * Capping at what is genuinely outstanding leaves the normal order
+       * untouched (settle the room, post add-ons, collect them — there the
+       * add-ons ARE the outstanding amount, so the cap is the full figure)
+       * and credits Rs.0 when the money has already been taken.
+       */
+      const { remaining: stillOwed } = outstandingBalance(bk);
+      const settledNow = Math.min(beforePaid.unpaidTotal, round2(stillOwed));
 
       await db.query(
         "UPDATE booking_addons SET paid=1 WHERE booking_id=? AND paid=0",
@@ -8451,19 +8469,29 @@ app.patch(
         await db.query(
           `UPDATE bookings
               SET addon_payment_mode = ?,
-                  addon_paid_at      = NOW(),
-                  balance_paid       = ROUND(COALESCE(balance_paid,0) + ?, 2)
+                  addon_paid_at      = NOW()
             WHERE booking_id = ?`,
-          [mode, settledNow, req.params.id],
+          [mode, req.params.id],
         );
 
-        // the money lands on the folio as its own payment line
-        await postFolioPayment(
-          req.params.id,
-          settledNow,
-          "Add-on settlement",
-          mode,
-        );
+        // money only moves when money was actually owed — a zero-rupee credit
+        // and a zero-rupee folio line are noise, not a record
+        if (settledNow > 0) {
+          await db.query(
+            `UPDATE bookings
+                SET balance_paid = ROUND(COALESCE(balance_paid,0) + ?, 2)
+              WHERE booking_id = ?`,
+            [settledNow, req.params.id],
+          );
+
+          // the money lands on the folio as its own payment line
+          await postFolioPayment(
+            req.params.id,
+            settledNow,
+            "Add-on settlement",
+            mode,
+          );
+        }
 
         // recalc rewrites remaining_amount from the new balance_paid, so the
         // stored figure and the screen finally agree
